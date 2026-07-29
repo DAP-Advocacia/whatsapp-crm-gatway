@@ -1,0 +1,1740 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WhatsApp · Negócio</title>
+<script>
+  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
+  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
+  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
+  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --bubble-mine: var(--gold);
+    --bubble-mine-text: #1a1408;
+    --bubble-theirs: #261f16;
+  }
+
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO) —
+     regra global; os seletores mais específicos abaixo (.messages,
+     .composer textarea) continuam valendo por cima dela. */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+
+  html, body{
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #app{
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ---------- Header ---------- */
+  .chat-header{
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .avatar{
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--gold);
+    flex-shrink: 0;
+  }
+
+  .header-info{ min-width: 0; flex: 1; }
+
+  .header-info .name{
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .header-info .meta{
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .status-dot{
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .status-dot.online{ background: var(--green); }
+  .status-dot.online::after{
+    content: '';
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 1px solid var(--green);
+    opacity: 0.5;
+    animation: pulse 2s ease-out infinite;
+  }
+  .status-dot.offline{ background: var(--red); }
+
+  @keyframes pulse{
+    0%{ transform: scale(0.8); opacity: 0.6; }
+    100%{ transform: scale(1.8); opacity: 0; }
+  }
+
+  .header-actions{ display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+
+  .instance-select{
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 0 8px;
+    cursor: pointer;
+    max-width: 130px;
+  }
+  .instance-select:hover, .instance-select:focus{ border-color: var(--gold-dim); color: var(--gold); outline: none; }
+
+  .icon-btn{
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .icon-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .icon-btn svg{ width: 17px; height: 17px; }
+  .icon-btn.recording{ background: var(--red); border-color: var(--red); color: #fff; animation: recPulse 1.2s ease-in-out infinite; }
+  @keyframes recPulse{ 0%,100%{ opacity: 1; } 50%{ opacity: .6; } }
+
+  /* ---------- Messages ---------- */
+  .messages{
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+
+  .messages::-webkit-scrollbar{ width: 8px; }
+  .messages::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 4px; }
+
+  .day-divider{
+    align-self: center;
+    font-size: 11px;
+    color: var(--text-faint);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 100px;
+    margin: 14px 0 10px;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+
+  .bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
+  .bubble-row.mine{ justify-content: flex-end; }
+  .bubble-row.theirs{ justify-content: flex-start; }
+  .bubble-row.has-reaction{ margin-bottom: 14px; }
+
+  .reaction-badge{
+    position: absolute; bottom: -11px; right: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
+    padding: 1px 6px; font-size: 13px; line-height: 1.4; box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  }
+  .bubble-row.theirs .reaction-badge{ right: auto; left: 10px; }
+  .reaction-badge--mine{ cursor: pointer; }
+  .reaction-badge--mine:hover{ filter: brightness(1.3); }
+
+  /* Reagir/Responder — barra que aparece ao passar o mouse na mensagem. */
+  .bubble-actions-wrap{ display: none; align-items: center; gap: 3px; padding-bottom: 6px; flex-shrink: 0; }
+  .bubble-row:hover .bubble-actions-wrap, .bubble-actions-wrap.picker-open{ display: flex; }
+  .bubble-action-btn{
+    width: 25px; height: 25px; border-radius: 50%; border: none; background: var(--surface-2);
+    color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 12.5px; padding: 0; transition: background .15s, color .15s;
+  }
+  .bubble-action-btn:hover{ background: var(--gold-dim); color: var(--bg); }
+  .emoji-picker{ display: flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 100px; padding: 3px; }
+  .emoji-opt{ width: 25px; height: 25px; border: none; background: none; font-size: 15px; cursor: pointer; border-radius: 50%; }
+  .emoji-opt:hover{ background: var(--surface); transform: scale(1.15); }
+
+  /* Mensagem citada ("responder") */
+  .quoted-block{
+    border-left: 3px solid var(--gold-dim); background: rgba(0,0,0,.14); border-radius: 6px;
+    padding: 5px 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; cursor: pointer;
+  }
+  .bubble-row.theirs .quoted-block{ background: rgba(255,255,255,.06); border-left-color: var(--gold); }
+  .quoted-author{ font-weight: 600; color: var(--gold); margin-bottom: 1px; font-size: 11.5px; }
+  .quoted-text{
+    opacity: .8; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .quoted-block--unknown{ font-style: italic; opacity: .65; cursor: default; }
+  .bubble-row.flash .bubble{ outline: 2px solid var(--gold); outline-offset: 1px; }
+
+  /* Barra "Respondendo a…" acima do composer */
+  .reply-preview-bar{
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    background: var(--surface-2); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .reply-preview-bar[hidden]{ display: none; }
+  .reply-preview-bar .bar-icon{ color: var(--gold); flex-shrink: 0; }
+  .reply-preview-body{ flex: 1; min-width: 0; }
+  .reply-preview-author{ font-size: 11.5px; font-weight: 600; color: var(--gold); }
+  .reply-preview-text{ font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .bubble{
+    max-width: 72%;
+    padding: 9px 12px 8px;
+    font-size: 13.5px;
+    line-height: 1.45;
+    border-radius: var(--radius);
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  }
+
+  .bubble-row.theirs .bubble{
+    background: var(--bubble-theirs);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 3px;
+    color: var(--text);
+  }
+
+  .bubble-row.mine .bubble{
+    background: var(--bubble-mine);
+    color: var(--bubble-mine-text);
+    border-bottom-right-radius: 3px;
+  }
+
+  .bubble .timestamp{
+    display: block;
+    text-align: right;
+    font-size: 10px;
+    margin-top: 4px;
+    opacity: .6;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bubble .ticks{ margin-left: 4px; }
+
+  /* Prévia de link (Open Graph) — mesmo conceito do WhatsApp/Slack ao
+     detectar uma URL no texto da mensagem. */
+  .msg-link{ color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .link-preview{
+    display: block; margin-top: 6px; border-radius: 10px; overflow: hidden;
+    background: rgba(0,0,0,.14); border: 1px solid rgba(0,0,0,.16);
+    text-decoration: none; color: inherit;
+  }
+  .bubble-row.theirs .link-preview{ background: var(--surface-2); border-color: var(--border); }
+  .link-preview-img{ display: block; width: 100%; max-height: 140px; object-fit: cover; background: var(--surface-2); }
+  .link-preview-body{ padding: 7px 10px; }
+  .link-preview-title{ font-size: 12.5px; font-weight: 600; line-height: 1.3; margin-bottom: 2px; }
+  .link-preview-desc{
+    font-size: 11.5px; opacity: .75; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .link-preview-site{ font-size: 10px; opacity: .6; text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
+  .link-preview-loading{ display: block; margin-top: 6px; font-size: 11px; opacity: .55; font-style: italic; }
+
+  /* ---------- Empty / loading / error states ---------- */
+  .state-screen{
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 30px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+
+  .state-screen .state-icon{
+    width: 46px; height: 46px;
+    color: var(--gold-dim);
+  }
+
+  .state-screen h3{
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: 16px;
+    color: var(--text);
+    margin: 4px 0 0;
+  }
+
+  .state-screen p{ font-size: 12.5px; max-width: 280px; margin: 0; color: var(--text-faint); }
+
+  .spinner{
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--gold);
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+
+  .retry-btn{
+    margin-top: 6px;
+    background: transparent;
+    border: 1px solid var(--gold-dim);
+    color: var(--gold);
+    padding: 7px 16px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .retry-btn:hover{ background: rgba(var(--gold-rgb),.08); }
+
+  /* ---------- Composer ---------- */
+  .composer{
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .composer textarea{
+    flex: 1;
+    resize: none;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13.5px;
+    padding: 10px 12px;
+    max-height: 110px;
+    min-height: 40px;
+    line-height: 1.4;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .composer textarea:focus{ border-color: var(--gold-dim); }
+  .composer textarea::placeholder{ color: var(--text-faint); }
+  .composer textarea::-webkit-scrollbar{ width: 6px; }
+  .composer textarea::-webkit-scrollbar-track{ background: transparent; }
+  .composer textarea::-webkit-scrollbar-thumb{ background: var(--gold-dim); border-radius: 100px; }
+  .composer textarea::-webkit-scrollbar-thumb:hover{ background: var(--gold); }
+
+  .send-btn{
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+    border: none;
+    background: var(--gold);
+    color: #1a1408;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: filter .15s, transform .1s;
+  }
+  .send-btn:hover{ filter: brightness(1.08); }
+  .send-btn:active{ transform: scale(.93); }
+  .send-btn:disabled{ background: var(--surface-2); color: var(--text-faint); cursor: not-allowed; }
+  .send-btn svg{ width: 17px; height: 17px; }
+
+  .composer-hint{
+    font-size: 10.5px;
+    color: var(--text-faint);
+    padding: 0 14px 10px;
+    background: var(--surface);
+  }
+
+  .disconnected-banner{
+    background: rgba(var(--red-rgb),.12);
+    border-top: 1px solid rgba(var(--red-rgb),.3);
+    color: #e89c95;
+    font-size: 12px;
+    padding: 8px 14px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .credit-row{
+    display: flex;
+    justify-content: center;
+    padding: 8px 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .credit-badge{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 13px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gold);
+    flex-shrink: 0;
+  }
+
+  /* Avisos (nunca alert()/confirm() nativo — sempre esse toast). */
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+</style>
+</head>
+<body>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <!-- Estado inicial: carregando contexto do negócio -->
+  <div class="state-screen" id="loadingState">
+    <div class="spinner"></div>
+    <h3>Carregando conversa…</h3>
+    <p>Buscando os dados do negócio e o histórico no WhatsApp.</p>
+  </div>
+</div>
+
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+
+  // =========================================================
+  // CONFIGURAÇÃO — ajuste para o endereço real do seu backend
+  // =========================================================
+  const API_BASE = window.location.origin + '/api/whatsapp';
+
+  // O ngrok grátis intercepta requisições do navegador com uma página
+  // de aviso (HTML), o que faz o res.json() quebrar. Este header pula
+  // esse aviso. Em domínio próprio/produção é inofensivo.
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+
+  // Confirma com o backend (que por sua vez confirma com o próprio Bitrix)
+  // que o access_token pertence de verdade a um usuário deste portal, e
+  // devolve um token de app curto — usado em toda chamada de API daqui pra
+  // frente via `Authorization: Bearer`. Ver src/auth.js.
+  async function verifyAuth() {
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    state.appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${state.appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  const app = document.getElementById('app');
+
+  const state = {
+    dealId: null,
+    appToken: null,        // token de app (ver verifyAuth) — mandado em toda chamada de API
+    ownerId: null,        // usuário do Bitrix (member_id + user id) — pode ter várias instâncias
+    instances: [],        // instâncias de WhatsApp desse usuário
+    session: null,        // id da instância selecionada no momento (usada em toda chamada de API)
+    phone: null,
+    contactName: null,
+    messages: [],
+    connectionStatus: 'unknown', // 'online' | 'offline' | 'connecting' | 'unknown'
+    peerPresence: null,    // null | 'composing' | 'recording' — do CONTATO, ao vivo
+    peerPresenceTimer: null,
+    replyingTo: null,      // { id, text, type, direction } — mensagem sendo citada na próxima resposta
+    socket: null,
+    qrTimer: null,
+  };
+
+  // Emoji de reação com o picker aberto no momento (só um por vez).
+  let openReactionPickerId = null;
+  const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Lembra qual instância foi escolhida pra cada negócio (só importa quando
+  // o usuário tem mais de uma) — assim reabrir a mesma conversa não obriga a
+  // escolher de novo toda hora.
+  function instanceStorageKey(dealId) {
+    return `wa-instance-deal-${dealId}`;
+  }
+
+  // ---------------------------------------------------------
+  // Helpers de UI
+  // ---------------------------------------------------------
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  // Nunca alert()/confirm() nativo — sempre esse toast (mesmo padrão de
+  // chat.html/dashboard.html etc.).
+  const toastStack = document.getElementById('toastStack');
+  function showToast(message, type) {
+    if (!toastStack) return;
+    const el = document.createElement('div');
+    el.className = 'toast ' + (type || 'info');
+    el.textContent = message;
+    toastStack.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(6px)';
+      setTimeout(() => el.remove(), 220);
+    }, 4500);
+  }
+
+  // `.bubble` usa white-space:pre-wrap (preserva quebra de linha digitada
+  // pelo usuário) — isso também preserva, como espaço em branco VISÍVEL, a
+  // indentação/quebra de linha "de formatação" entre tags dos templates
+  // multi-linha abaixo. Como todo texto de usuário já passa por escapeHtml
+  // (vira &lt;/&gt;, nunca um "<"/">" cru), qualquer "><" que sobrar no HTML
+  // final é sempre nosso, nunca conteúdo de mensagem — seguro remover.
+  function compactHtml(html) {
+    return html.replace(/>\s+</g, '><');
+  }
+
+  function initials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
+  }
+
+  function formatTime(iso) {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function formatDayLabel(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(Date.now() - 86400000);
+    const sameDay = (a, b) => a.toDateString() === b.toDateString();
+    if (sameDay(d, today)) return 'Hoje';
+    if (sameDay(d, yesterday)) return 'Ontem';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+  }
+
+  function renderState(type, opts = {}) {
+    const icons = {
+      error: `<svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>`,
+      empty: `<svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>`,
+      nophone: `<svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg>`,
+    };
+    app.innerHTML = `
+      <div class="state-screen">
+        ${icons[type] || icons.empty}
+        <h3>${opts.title || ''}</h3>
+        <p>${opts.desc || ''}</p>
+        ${opts.retry ? `<button class="retry-btn" id="retryBtn">Tentar novamente</button>` : ''}
+      </div>
+    `;
+    if (opts.retry) {
+      document.getElementById('retryBtn').addEventListener('click', opts.retry);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Renderização do chat
+  // ---------------------------------------------------------
+  function renderChat() {
+    app.innerHTML = `
+      <div class="chat-header">
+        <div class="avatar">${initials(state.contactName)}</div>
+        <div class="header-info">
+          <div class="name">${escapeHtml(state.contactName || 'Sem nome')}</div>
+          <div class="meta">
+            <span class="status-dot ${state.connectionStatus}"></span>
+            <span id="statusLabel">${statusLabel()}</span>
+            <span>· ${escapeHtml(state.phone || '')}</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          ${state.instances.length > 1 ? `
+            <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp">
+              ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
+            </select>
+          ` : ''}
+          <button class="icon-btn" id="refreshBtn" title="Atualizar conversa">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
+          <button class="icon-btn" id="openCrmBtn" title="Abrir contato no CRM">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="messages" id="messagesEl"></div>
+
+      ${state.connectionStatus === 'offline' ? `
+        <div class="disconnected-banner">
+          WhatsApp desconectado — as mensagens não serão entregues até reconectar.
+        </div>
+      ` : ''}
+
+      <div class="reply-preview-bar" id="replyPreviewBar" hidden>
+        <svg class="bar-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+        <div class="reply-preview-body">
+          <div class="reply-preview-author" id="replyPreviewAuthor"></div>
+          <div class="reply-preview-text" id="replyPreviewText"></div>
+        </div>
+        <button class="icon-btn" id="replyCancelBtn" title="Cancelar resposta" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="composer">
+        <button class="icon-btn" id="attachBtn" title="Enviar imagem, áudio, vídeo ou documento" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95L9.41 17.42a1.5 1.5 0 0 1-2.12-2.12l8.49-8.49"/></svg>
+        </button>
+        <input type="file" id="mediaInput" style="display:none" />
+        <textarea id="msgInput" placeholder="Escreva uma mensagem…" rows="1"></textarea>
+        <button class="icon-btn" id="micBtn" title="Gravar áudio" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/><path d="M8 22h8"/></svg>
+        </button>
+        <button class="send-btn" id="sendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint" id="composerHint">Enter envia · Shift+Enter quebra linha</div>
+      <div class="credit-row">
+        <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+          <span class="dot"></span> Desenvolvido por Daniel Costa
+        </a>
+      </div>
+    `;
+
+    renderMessages();
+    bindComposer();
+    bindMessagesInteractions();
+    renderReplyPreview();
+
+    document.getElementById('refreshBtn').addEventListener('click', () => loadHistory(state.dealId));
+    document.getElementById('openCrmBtn').addEventListener('click', () => {
+      if (window.BX24) {
+        BX24.openPath('/crm/deal/details/' + state.dealId + '/');
+      }
+    });
+    const instanceSelectEl = document.getElementById('instanceSelect');
+    if (instanceSelectEl) {
+      instanceSelectEl.addEventListener('change', (e) => switchInstance(e.target.value));
+    }
+  }
+
+  function statusLabel() {
+    if (state.peerPresence === 'composing') return 'digitando…';
+    if (state.peerPresence === 'recording') return 'gravando áudio…';
+    if (state.connectionStatus === 'online') return 'Conectado';
+    if (state.connectionStatus === 'offline') return 'Desconectado';
+    return 'Verificando…';
+  }
+
+  function renderMessages() {
+    const el = document.getElementById('messagesEl');
+    if (!el) return;
+
+    if (!state.messages.length) {
+      el.innerHTML = `
+        <div class="state-screen" style="padding:20px;">
+          <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+          <h3>Nenhuma mensagem ainda</h3>
+          <p>Escreva abaixo para iniciar a conversa com ${escapeHtml(state.contactName || 'este lead')}.</p>
+        </div>`;
+      return;
+    }
+
+    let html = '';
+    let lastDay = null;
+
+    state.messages.forEach(msg => {
+      const dayLabel = formatDayLabel(msg.createdAt);
+      if (dayLabel !== lastDay) {
+        html += `<div class="day-divider">${dayLabel}</div>`;
+        lastDay = dayLabel;
+      }
+      const mine = msg.direction === 'out';
+      const quotedHtml = msg.replyToId ? renderQuotedBlock(msg.replyToId) : '';
+      const reactionMine = msg.reactionBy === 'out';
+      const bubbleHtml = `
+        <div class="bubble">
+          ${quotedHtml}
+          ${renderBubbleBody(msg)}
+          <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
+          ${msg.reaction ? `<span class="reaction-badge${reactionMine ? ' reaction-badge--mine' : ''}" title="${reactionMine ? 'Clique pra remover sua reação' : 'Reação'}" data-msg-id="${escapeHtml(msg.id)}">${escapeHtml(msg.reaction)}</span>` : ''}
+        </div>
+      `;
+      const actionsHtml = bubbleActionsHtml(msg, mine);
+      html += `
+        <div class="bubble-row ${mine ? 'mine' : 'theirs'}${msg.reaction ? ' has-reaction' : ''}" data-row-msg-id="${escapeHtml(msg.id)}">
+          ${mine ? actionsHtml + bubbleHtml : bubbleHtml + actionsHtml}
+        </div>
+      `;
+    });
+
+    el.innerHTML = compactHtml(html);
+    el.scrollTop = el.scrollHeight;
+    hydrateMedia(el);
+    hydrateLinkPreviews(el);
+  }
+
+  function typeLabel(type) {
+    return type === 'image' ? 'Foto' : type === 'video' ? 'Vídeo' : type === 'audio' ? 'Áudio' : type === 'document' ? 'Documento' : 'Mensagem';
+  }
+
+  const DOC_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+
+  function bubbleActionsHtml(msg, mine) {
+    if (openReactionPickerId === msg.id) {
+      const opts = QUICK_EMOJIS.map((e) => `<button class="emoji-opt" data-emoji-msg-id="${escapeHtml(msg.id)}" data-from-me="${mine ? '1' : ''}" data-emoji="${e}" title="Reagir com ${e}">${e}</button>`).join('');
+      return `<div class="bubble-actions-wrap picker-open"><div class="emoji-picker">${opts}<button class="bubble-action-btn" data-close-picker="1" title="Fechar">✕</button></div></div>`;
+    }
+    return `
+      <div class="bubble-actions-wrap">
+        <button class="bubble-action-btn" data-react-msg-id="${escapeHtml(msg.id)}" title="Reagir">🙂</button>
+        <button class="bubble-action-btn" data-reply-msg-id="${escapeHtml(msg.id)}" title="Responder">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+        </button>
+      </div>`;
+  }
+
+  function renderQuotedBlock(replyToId) {
+    const quoted = state.messages.find((m) => m.id === replyToId);
+    if (!quoted) return `<div class="quoted-block quoted-block--unknown">Mensagem citada</div>`;
+    const snippet = quoted.text
+      ? escapeHtml(quoted.text.length > 90 ? quoted.text.slice(0, 90) + '…' : quoted.text)
+      : typeLabel(quoted.type);
+    const author = quoted.direction === 'out' ? 'Você' : (state.contactName || state.phone || '');
+    return `<div class="quoted-block" data-quoted-jump="${escapeHtml(replyToId)}"><div class="quoted-author">${escapeHtml(author)}</div><div class="quoted-text">${snippet}</div></div>`;
+  }
+
+  function bindMessagesInteractions() {
+    const el = document.getElementById('messagesEl');
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      const reactBtn = e.target.closest('[data-react-msg-id]');
+      if (reactBtn) {
+        openReactionPickerId = reactBtn.getAttribute('data-react-msg-id');
+        renderMessages();
+        return;
+      }
+      const closeBtn = e.target.closest('[data-close-picker]');
+      if (closeBtn) {
+        openReactionPickerId = null;
+        renderMessages();
+        return;
+      }
+      const emojiOpt = e.target.closest('[data-emoji-msg-id]');
+      if (emojiOpt) {
+        const msgId = emojiOpt.getAttribute('data-emoji-msg-id');
+        const fromMe = emojiOpt.getAttribute('data-from-me') === '1';
+        reactToMessage(msgId, fromMe, emojiOpt.getAttribute('data-emoji'));
+        return;
+      }
+      const badge = e.target.closest('.reaction-badge--mine');
+      if (badge) {
+        const msg = state.messages.find((m) => m.id === badge.getAttribute('data-msg-id'));
+        if (msg) reactToMessage(msg.id, msg.direction === 'out', null);
+        return;
+      }
+      const replyBtn = e.target.closest('[data-reply-msg-id]');
+      if (replyBtn) {
+        startReply(replyBtn.getAttribute('data-reply-msg-id'));
+        return;
+      }
+      const quoted = e.target.closest('[data-quoted-jump]');
+      if (quoted) {
+        const targetId = quoted.getAttribute('data-quoted-jump');
+        const row = el.querySelector(`[data-row-msg-id="${CSS.escape(targetId)}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('flash');
+          setTimeout(() => row.classList.remove('flash'), 1200);
+        }
+      }
+    });
+  }
+
+  async function reactToMessage(msgId, fromMe, emoji) {
+    openReactionPickerId = null;
+    const msg = state.messages.find((m) => m.id === msgId);
+    if (msg) { msg.reaction = emoji || null; msg.reactionBy = emoji ? 'out' : null; }
+    renderMessages();
+    try {
+      const res = await apiFetch(`${API_BASE}/react`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: state.session, phone: state.phone, messageId: msgId, emoji: emoji || '' }),
+      });
+      if (!res.ok) throw new Error('Falha ao reagir');
+    } catch (err) {
+      console.error('Erro ao reagir à mensagem:', err);
+    }
+  }
+
+  function startReply(msgId) {
+    const msg = state.messages.find((m) => m.id === msgId);
+    if (!msg) return;
+    state.replyingTo = { id: msg.id, text: msg.text, type: msg.type, direction: msg.direction };
+    renderReplyPreview();
+    document.getElementById('msgInput')?.focus();
+  }
+
+  function cancelReply() {
+    state.replyingTo = null;
+    renderReplyPreview();
+  }
+
+  function renderReplyPreview() {
+    const bar = document.getElementById('replyPreviewBar');
+    if (!bar) return;
+    const r = state.replyingTo;
+    bar.hidden = !r;
+    if (!r) return;
+    const author = r.direction === 'out' ? 'Você' : (state.contactName || state.phone || '');
+    document.getElementById('replyPreviewAuthor').textContent = author;
+    document.getElementById('replyPreviewText').textContent = r.text || typeLabel(r.type);
+  }
+
+  // Cache de blob local por mediaUrl, pra não rebaixar a mesma mídia de novo em
+  // cada re-render (ex: chegada de mensagem nova via WebSocket re-renderiza tudo).
+  const mediaBlobCache = new Map();
+
+  function renderBubbleBody(msg) {
+    if (msg.type === 'image' && msg.mediaUrl) {
+      const caption = msg.text ? `<div style="margin-top:6px">${escapeHtml(msg.text)}</div>` : '';
+      return `<img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" style="max-width:220px;max-height:280px;border-radius:10px;display:block;object-fit:cover;background:var(--surface-2);min-height:80px;" />${caption}`;
+    }
+    if (msg.type === 'video' && msg.mediaUrl) {
+      const caption = msg.text ? `<div style="margin-top:6px">${escapeHtml(msg.text)}</div>` : '';
+      return `<video controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;max-height:280px;border-radius:10px;display:block;background:#000;"></video>${caption}`;
+    }
+    if (msg.type === 'audio' && msg.mediaUrl) {
+      return `<audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio>`;
+    }
+    if (msg.type === 'document' && msg.mediaUrl) {
+      const caption = msg.text ? `<div style="margin-top:6px">${escapeHtml(msg.text)}</div>` : '';
+      return `
+        <a data-media-url="${escapeHtml(msg.mediaUrl)}" href="#" download="${escapeHtml(msg.fileName || 'arquivo')}" target="_blank" rel="noopener"
+           style="display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit;background:rgba(0,0,0,.16);border-radius:9px;padding:9px 10px;min-width:190px;max-width:260px;">
+          <span style="flex-shrink:0;width:30px;height:30px;border-radius:7px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;">
+            <span style="width:16px;height:16px;display:inline-flex;">${DOC_ICON}</span>
+          </span>
+          <span style="min-width:0;display:flex;flex-direction:column;gap:1px;">
+            <span style="font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(msg.fileName || 'Documento')}</span>
+            <span style="font-size:10.5px;opacity:.75;">Toque para abrir</span>
+          </span>
+        </a>${caption}`;
+    }
+    const url = firstUrl(msg.text);
+    return linkify(msg.text) + (url ? `<div class="link-preview" data-preview-url="${escapeHtml(url)}"><span class="link-preview-loading">Carregando prévia…</span></div>` : '');
+  }
+
+  // Primeira URL http(s) do texto (decide se mostra o cartão de prévia) e
+  // versão do texto com toda URL virando link clicável.
+  const URL_REGEX = /https?:\/\/[^\s<]+/i;
+  const URL_REGEX_G = /https?:\/\/[^\s<]+/gi;
+  function firstUrl(text) {
+    const m = text && text.match(URL_REGEX);
+    return m ? m[0] : null;
+  }
+  function linkify(text) {
+    return escapeHtml(text).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+  }
+
+  // Cache por URL (guarda a Promise, não só o resultado, pra a mesma URL
+  // repetida em várias mensagens não disparar uma busca por balão).
+  const linkPreviewCache = new Map();
+  function getLinkPreview(url) {
+    if (linkPreviewCache.has(url)) return linkPreviewCache.get(url);
+    const promise = apiFetch(`${API_BASE}/link-preview?url=${encodeURIComponent(url)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+    linkPreviewCache.set(url, promise);
+    return promise;
+  }
+
+  function renderLinkPreviewCard(url, data) {
+    const site = data.siteName || (() => { try { return new URL(url).hostname; } catch { return url; } })();
+    return `
+      <a class="link-preview" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
+        ${data.image ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" />` : ''}
+        <div class="link-preview-body">
+          ${data.title ? `<div class="link-preview-title">${escapeHtml(data.title)}</div>` : ''}
+          ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description)}</div>` : ''}
+          <div class="link-preview-site">${escapeHtml(site)}</div>
+        </div>
+      </a>`;
+  }
+
+  // Busca a prévia de cada link detectado e troca o placeholder "Carregando…"
+  // pelo cartão pronto — ou remove o placeholder se o site não tiver nada
+  // pra mostrar (best-effort).
+  async function hydrateLinkPreviews(container) {
+    const els = container.querySelectorAll('[data-preview-url]');
+    for (const el of els) {
+      const url = el.getAttribute('data-preview-url');
+      el.removeAttribute('data-preview-url');
+      const data = await getLinkPreview(url);
+      if (!data || (!data.title && !data.description && !data.image)) { el.remove(); continue; }
+      el.outerHTML = compactHtml(renderLinkPreviewCard(url, data));
+    }
+  }
+
+  // Preenche o src de <img>/<audio> depois de renderizados. Mídia hoje vem do
+  // Supabase Storage (URL absoluta, outro domínio) e carrega direto sem
+  // problema. Só uma URL relativa ao nosso servidor (começando com '/', de
+  // mensagens antigas salvas antes da migração pro Supabase) precisaria do
+  // truque de buscar via fetch() com o header 'ngrok-skip-browser-warning' —
+  // sem isso, o aviso do ngrok grátis intercepta o GET com uma página HTML em
+  // vez do arquivo. URLs já locais (blob:, do preview otimístico ao enviar)
+  // são usadas direto, sem precisar buscar de novo.
+  // Documentos são um <a download> (abrir/baixar), o resto (img/video/audio)
+  // usa .src normal — por isso o atributo a ajustar depende da tag.
+  function setMediaSrc(el, value) {
+    if (el.tagName === 'A') el.href = value;
+    else el.src = value;
+  }
+
+  async function hydrateMedia(container) {
+    const els = container.querySelectorAll('[data-media-url]');
+    for (const el of els) {
+      const url = el.getAttribute('data-media-url');
+      el.removeAttribute('data-media-url');
+
+      if (!url.startsWith('/')) {
+        setMediaSrc(el, url); // blob:, data:, ou URL externa (Supabase) — direto
+        continue;
+      }
+
+      if (mediaBlobCache.has(url)) {
+        setMediaSrc(el, mediaBlobCache.get(url));
+        continue;
+      }
+
+      try {
+        const res = await apiFetch(url);
+        if (!res.ok) throw new Error('falha ao buscar mídia');
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        mediaBlobCache.set(url, blobUrl);
+        setMediaSrc(el, blobUrl);
+      } catch (err) {
+        console.error('Erro ao carregar mídia:', url, err);
+      }
+    }
+  }
+
+  function tickIcon(status) {
+    // sent | delivered | read
+    const color = status === 'read' ? '#4caf6e' : 'currentColor';
+    return `<span class="ticks" style="color:${color}">${status === 'sent' ? '✓' : '✓✓'}</span>`;
+  }
+
+  function bindComposer() {
+    const input = document.getElementById('msgInput');
+    const btn = document.getElementById('sendBtn');
+    const attachBtn = document.getElementById('attachBtn');
+    const mediaInput = document.getElementById('mediaInput');
+    const micBtn = document.getElementById('micBtn');
+    const hint = document.getElementById('composerHint');
+    const defaultHint = hint.textContent;
+
+    attachBtn.addEventListener('click', () => mediaInput.click());
+    mediaInput.addEventListener('change', () => {
+      const file = mediaInput.files[0];
+      mediaInput.value = ''; // permite escolher o mesmo arquivo de novo depois
+      if (file) sendMediaFile(file);
+    });
+
+    document.getElementById('replyCancelBtn')?.addEventListener('click', cancelReply);
+
+    // ---------- Gravação de áudio direto pelo microfone ----------
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recordingTimer = null;
+    let recordingSeconds = 0;
+
+    micBtn.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop(); // onstop cuida do resto (ver abaixo)
+      } else {
+        startRecording();
+      }
+    });
+
+    async function startRecording() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        showToast('Este navegador não tem suporte a gravação de áudio.', 'error');
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        // Dentro do iframe do Bitrix, isso falha se a política de permissões da
+        // página não liberar microfone para o app incorporado — nesse caso não
+        // tem contorno pelo nosso lado; use o botão de anexo (📎) para mandar um
+        // áudio já gravado em outro app.
+        console.error('Erro ao acessar microfone:', err);
+        showToast('Não foi possível acessar o microfone. Se estiver dentro do Bitrix, o navegador pode estar bloqueando o microfone para o app incorporado — nesse caso, use o clipe (📎) para enviar um áudio já gravado.', 'error');
+        return;
+      }
+
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+
+      mediaRecorder.addEventListener('dataavailable', (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      });
+
+      mediaRecorder.addEventListener('stop', () => {
+        stream.getTracks().forEach((track) => track.stop());
+        clearInterval(recordingTimer);
+        micBtn.classList.remove('recording');
+        hint.textContent = defaultHint;
+        sendPresence('paused');
+
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        if (blob.size > 0) sendRecordedAudio(blob);
+      });
+
+      mediaRecorder.start();
+      micBtn.classList.add('recording');
+      sendPresence('recording');
+      recordingSeconds = 0;
+      hint.textContent = 'Gravando… 0:00 (clique no microfone de novo para enviar)';
+      recordingTimer = setInterval(() => {
+        recordingSeconds++;
+        const m = String(Math.floor(recordingSeconds / 60)).padStart(1, '0');
+        const s = String(recordingSeconds % 60).padStart(2, '0');
+        hint.textContent = `Gravando… ${m}:${s} (clique no microfone de novo para enviar)`;
+      }, 1000);
+    }
+
+    // O servidor ecoa toda mensagem enviada via WebSocket (pra sincronizar
+    // outras abas/dispositivos abertos) — se esse eco chegar ANTES da
+    // resposta do POST de envio, ele entra no array já com o id real
+    // enquanto a mensagem otimista ainda está com o id temporário
+    // ('tmp-...'), e o dedupe por id do handler de WebSocket não pega essa
+    // combinação (ids diferentes). Resultado: a mensagem aparecia duas
+    // vezes até o próximo recarregamento do histórico. Em vez de só
+    // sobrescrever o id da otimista (criaria duas mensagens com o MESMO id),
+    // checa se o eco já chegou e, se sim, remove a otimista — o eco já está
+    // exibido no lugar dela.
+    function resolveOptimisticId(optimisticMsg, realId) {
+      const alreadyEchoed = state.messages.some((m) => m !== optimisticMsg && m.id === realId);
+      if (alreadyEchoed) {
+        state.messages = state.messages.filter((m) => m !== optimisticMsg);
+      } else {
+        optimisticMsg.id = realId;
+      }
+      renderMessages();
+    }
+
+    async function sendRecordedAudio(blob) {
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+      const dataBase64 = await fileToBase64(blob);
+      const optimisticMsg = {
+        id: 'tmp-' + Date.now(),
+        type: 'audio',
+        text: null,
+        replyToId,
+        mediaUrl: URL.createObjectURL(blob),
+        mimetype: blob.type,
+        direction: 'out',
+        status: 'sent',
+        createdAt: new Date().toISOString(),
+      };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+
+      try {
+        const res = await apiFetch(`${API_BASE}/send-media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: state.session,
+            dealId: state.dealId,
+            phone: state.phone,
+            type: 'audio',
+            mimetype: blob.type,
+            replyToId,
+            dataBase64,
+          }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        resolveOptimisticId(optimisticMsg, data.message.id);
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar áudio gravado:', err);
+      }
+    }
+
+    function refreshBtnState() {
+      btn.disabled = !input.value.trim();
+    }
+
+    // ---------- "Digitando…"/"gravando áudio…" pro CONTATO ver no WhatsApp
+    // dele (sentido empresa -> contato; o inverso é o payload.type ===
+    // 'presence' do WebSocket) ----------
+    let composingState = null; // null | 'composing' | 'recording' — evita repetir a mesma presença a cada tecla
+    let composingTimer = null;
+
+    function sendPresence(next) {
+      if (composingState === next) return;
+      composingState = next;
+      apiFetch(`${API_BASE}/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: state.session, phone: state.phone, state: next }),
+      }).catch(() => {}); // best-effort — não trava a digitação por causa disso
+    }
+
+    function scheduleComposingPause() {
+      clearTimeout(composingTimer);
+      composingTimer = setTimeout(() => sendPresence('paused'), 4000);
+    }
+
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 110) + 'px';
+      refreshBtnState();
+      if (input.value.trim()) {
+        sendPresence('composing');
+        scheduleComposingPause();
+      } else {
+        clearTimeout(composingTimer);
+        sendPresence('paused');
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    btn.addEventListener('click', sendMessage);
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      input.style.height = 'auto';
+      refreshBtnState();
+      clearTimeout(composingTimer);
+      sendPresence('paused');
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+
+      const optimisticMsg = {
+        id: 'tmp-' + Date.now(),
+        text,
+        replyToId,
+        direction: 'out',
+        status: 'sent',
+        createdAt: new Date().toISOString(),
+      };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+
+      try {
+        const res = await apiFetch(`${API_BASE}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: state.session,
+            dealId: state.dealId,
+            phone: state.phone,
+            text,
+            replyToId,
+          }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        // troca o id temporário pelo real: assim, quando o WebSocket ecoar
+        // esta mesma mensagem de volta (broadcast para todas as abas dessa
+        // conversa, incluindo esta), o dedupe por id evita duplicar na tela.
+        resolveOptimisticId(optimisticMsg, data.message.id);
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar mensagem:', err);
+      }
+    }
+
+    async function sendMediaFile(file) {
+      const MAX_BYTES = 20 * 1024 * 1024; // ~20MB de arquivo (~27MB depois de virar base64)
+      if (file.size > MAX_BYTES) {
+        showToast('Arquivo muito grande (máximo 20MB).', 'error');
+        return;
+      }
+      // Imagem/áudio/vídeo o WhatsApp entrega como mídia embutida; qualquer
+      // outro tipo (PDF, PPT, DOCX, planilha, zip...) vira 'document' — um
+      // anexo genérico, mostrado como cartão com nome do arquivo.
+      const mediaType = file.type.startsWith('image/')
+        ? 'image'
+        : file.type.startsWith('video/')
+        ? 'video'
+        : file.type.startsWith('audio/')
+        ? 'audio'
+        : 'document';
+      const fileName = mediaType === 'document' ? file.name : null;
+
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+      const dataBase64 = await fileToBase64(file);
+
+      const optimisticMsg = {
+        id: 'tmp-' + Date.now(),
+        type: mediaType,
+        text: null,
+        replyToId,
+        fileName,
+        mediaUrl: URL.createObjectURL(file), // preview local instantâneo
+        mimetype: file.type,
+        direction: 'out',
+        status: 'sent',
+        createdAt: new Date().toISOString(),
+      };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+
+      try {
+        const res = await apiFetch(`${API_BASE}/send-media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session: state.session,
+            dealId: state.dealId,
+            phone: state.phone,
+            type: mediaType,
+            mimetype: file.type,
+            dataBase64,
+            fileName,
+            replyToId,
+          }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        // mesmo dedupe por id usado no envio de texto (ver sendMessage)
+        resolveOptimisticId(optimisticMsg, data.message.id);
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar mídia:', err);
+      }
+    }
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---------------------------------------------------------
+  // Integração com o Bitrix24 (BX24)
+  // ---------------------------------------------------------
+  function initBx24() {
+    return new Promise((resolve, reject) => {
+      if (!window.BX24) {
+        reject(new Error('BX24 SDK não carregado'));
+        return;
+      }
+      BX24.init(() => {
+        // Sem isso, o Bitrix usa uma altura padrão pro iframe da aba, que pode
+        // deixar um espaço em branco embaixo do widget — fitWindow() pede pro
+        // Bitrix redimensionar o iframe pra ocupar o espaço vertical disponível.
+        if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+
+        const placementInfo = BX24.placement.info();
+        // Quando o app é aberto pelo menu lateral (placement DEFAULT),
+        // não existe um negócio no contexto — só dentro da aba do card.
+        if (!placementInfo || placementInfo.placement === 'DEFAULT') {
+          reject({ code: 'NO_PLACEMENT' });
+          return;
+        }
+        const dealId = placementInfo?.options?.ID;
+        if (!dealId) {
+          reject({ code: 'NO_PLACEMENT' });
+          return;
+        }
+        resolve(dealId);
+      });
+    });
+  }
+
+  // Identifica o "dono" deste usuário do Bitrix — um dono pode ter mais de
+  // uma instância de WhatsApp conectada (ver loadInstances). O ownerId
+  // devolvido aqui vem do backend (verifyAuth), já verificado contra o
+  // Bitrix de verdade — não é mais calculado só no navegador.
+  async function resolveOwner() {
+    return verifyAuth();
+  }
+
+  async function loadInstances(ownerId) {
+    const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}`);
+    if (!res.ok) throw new Error('falha ao carregar instâncias de WhatsApp');
+    const data = await res.json();
+    return data.instances || [];
+  }
+
+  function callMethod(method, params) {
+    return new Promise((resolve, reject) => {
+      BX24.callMethod(method, params, (result) => {
+        if (result.error()) reject(result.error());
+        else resolve(result.data());
+      });
+    });
+  }
+
+  async function loadDealContact(dealId) {
+    const deal = await callMethod('crm.deal.get', { id: dealId });
+    if (!deal.CONTACT_ID) {
+      throw { code: 'NO_CONTACT' };
+    }
+    const contact = await callMethod('crm.contact.get', { id: deal.CONTACT_ID });
+    const phoneEntry = (contact.PHONE || [])[0];
+    if (!phoneEntry) {
+      throw { code: 'NO_PHONE' };
+    }
+    return {
+      phone: normalizePhone(phoneEntry.VALUE),
+      name: [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ') || deal.TITLE,
+    };
+  }
+
+  function normalizePhone(raw) {
+    // remove tudo que não é dígito e garante DDI 55 na frente
+    let digits = (raw || '').replace(/\D/g, '');
+    if (digits.length <= 11) digits = '55' + digits;
+    return digits;
+  }
+
+  // ---------------------------------------------------------
+  // Comunicação com o backend (gateway WhatsApp)
+  // ---------------------------------------------------------
+  async function loadHistory(dealId) {
+    renderState('loading');
+    app.innerHTML = `
+      <div class="state-screen">
+        <div class="spinner"></div>
+        <h3>Carregando conversa…</h3>
+        <p>Buscando o histórico de mensagens.</p>
+      </div>`;
+
+    try {
+      const res = await apiFetch(`${API_BASE}/history?session=${encodeURIComponent(state.session)}&dealId=${encodeURIComponent(dealId)}&phone=${encodeURIComponent(state.phone)}`);
+      if (!res.ok) throw new Error('Falha ao carregar histórico');
+      const data = await res.json();
+      state.messages = data.messages || [];
+      state.connectionStatus = data.connectionStatus || 'unknown';
+      renderChat();
+      connectRealtime();
+    } catch (err) {
+      console.error(err);
+      renderState('error', {
+        title: 'Não foi possível carregar a conversa',
+        desc: 'Verifique a conexão com o servidor de WhatsApp e tente novamente.',
+        retry: () => loadHistory(dealId),
+      });
+    }
+  }
+
+  function connectRealtime() {
+    try {
+      if (state.socket) state.socket.close();
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + `/stream?session=${encodeURIComponent(state.session)}&phone=${encodeURIComponent(state.phone)}&token=${encodeURIComponent(state.appToken)}`;
+      const socket = new WebSocket(wsUrl);
+
+      socket.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'message') {
+          // evita duplicar quando o WebSocket ecoa uma mensagem que esta
+          // própria aba já exibiu de forma otimística ao enviar
+          const alreadyShown = state.messages.some((m) => m.id === payload.message.id);
+          if (!alreadyShown) {
+            state.messages.push(payload.message);
+            renderMessages();
+          }
+        }
+        if (payload.type === 'status') {
+          state.connectionStatus = payload.status;
+          const label = document.getElementById('statusLabel');
+          if (label) label.textContent = statusLabel();
+          const dot = document.querySelector('.status-dot');
+          if (dot) dot.className = `status-dot ${state.connectionStatus}`;
+        }
+        if (payload.type === 'message-status') {
+          const msg = state.messages.find((m) => m.id === payload.messageId);
+          if (msg) { msg.status = payload.status; renderMessages(); }
+        }
+        if (payload.type === 'reaction') {
+          const msg = state.messages.find((m) => m.id === payload.targetId);
+          if (msg) {
+            msg.reaction = payload.emoji;
+            msg.reactionBy = payload.emoji ? payload.direction : null;
+            renderMessages();
+          }
+        }
+        // "Digitando…"/"gravando áudio…" do CONTATO — ao vivo, não persiste.
+        // 'available'/'unavailable' (voltou a ficar só online/offline) limpa.
+        if (payload.type === 'presence') {
+          state.peerPresence = payload.state === 'composing' || payload.state === 'recording' ? payload.state : null;
+          const label = document.getElementById('statusLabel');
+          if (label) label.textContent = statusLabel();
+          clearTimeout(state.peerPresenceTimer);
+          if (state.peerPresence) {
+            // defensivo: se o 'paused'/'available' de fim nunca chegar (evento
+            // perdido), o indicador não fica preso pra sempre na tela.
+            state.peerPresenceTimer = setTimeout(() => {
+              state.peerPresence = null;
+              const l = document.getElementById('statusLabel');
+              if (l) l.textContent = statusLabel();
+            }, 12000);
+          }
+        }
+      };
+
+      socket.onclose = () => {
+        // tenta reconectar em 4s
+        setTimeout(connectRealtime, 4000);
+      };
+
+      state.socket = socket;
+    } catch (err) {
+      console.warn('Realtime indisponível, seguindo sem WebSocket:', err);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Boot
+  // ---------------------------------------------------------
+  // ---------------------------------------------------------
+  // Onboarding: garante que o WhatsApp DESTE usuário está conectado.
+  // Enquanto não estiver, mostra o QR dele dentro da própria aba e
+  // fica pollando; quando conecta, carrega a conversa.
+  // ---------------------------------------------------------
+  function stopQrPolling() {
+    if (state.qrTimer) {
+      clearTimeout(state.qrTimer);
+      state.qrTimer = null;
+    }
+  }
+
+  function renderConnect(qr, status) {
+    const statusText = status === 'connecting'
+      ? 'Gerando QR Code…'
+      : 'Aguardando leitura do QR Code…';
+    app.innerHTML = `
+      <div class="state-screen">
+        ${state.instances.length > 1 ? `
+          <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp" style="max-width:220px">
+            ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
+          </select>
+        ` : ''}
+        <h3>Conecte seu WhatsApp</h3>
+        <p>Escaneie o código abaixo no seu celular em<br>
+           <b>WhatsApp → Aparelhos conectados → Conectar um aparelho</b>.</p>
+        <div style="background:#fff;border-radius:12px;padding:12px;margin-top:8px;min-height:260px;display:flex;align-items:center;justify-content:center;">
+          ${qr
+            ? `<img src="${qr}" width="240" height="240" alt="QR Code" />`
+            : `<div class="spinner"></div>`}
+        </div>
+        <p style="margin-top:6px">${statusText}</p>
+      </div>
+    `;
+    const instanceSelectEl = document.getElementById('instanceSelect');
+    if (instanceSelectEl) {
+      instanceSelectEl.addEventListener('change', (e) => switchInstance(e.target.value));
+    }
+  }
+
+  async function ensureConnected() {
+    try {
+      const res = await apiFetch(`${API_BASE}/qr?session=${encodeURIComponent(state.session)}`);
+      if (!res.ok) throw new Error('falha ao consultar status');
+      const data = await res.json();
+      state.connectionStatus = data.status;
+
+      if (data.status === 'online') {
+        stopQrPolling();
+        await loadHistory(state.dealId);
+        return;
+      }
+
+      renderConnect(data.qr, data.status);
+      state.qrTimer = setTimeout(ensureConnected, 2500);
+    } catch (err) {
+      console.error(err);
+      renderState('error', {
+        title: 'Não foi possível conectar',
+        desc: 'Falha ao falar com o servidor de WhatsApp. Tente novamente.',
+        retry: ensureConnected,
+      });
+    }
+  }
+
+  // Troca qual instância de WhatsApp é usada nesta conversa — cada instância
+  // tem histórico e conexão próprios pro mesmo contato.
+  function switchInstance(newInstanceId) {
+    if (!newInstanceId || newInstanceId === state.session) return;
+    state.session = newInstanceId;
+    localStorage.setItem(instanceStorageKey(state.dealId), newInstanceId);
+
+    stopQrPolling();
+    if (state.socket) {
+      state.socket.onclose = null; // não deixa o reconector automático da instância antiga disparar
+      state.socket.close();
+      state.socket = null;
+    }
+
+    ensureConnected();
+  }
+
+  async function boot() {
+    try {
+      const dealId = await initBx24();
+      state.dealId = dealId;
+
+      state.ownerId = await resolveOwner();
+      state.instances = await loadInstances(state.ownerId);
+
+      const remembered = localStorage.getItem(instanceStorageKey(dealId));
+      const rememberedStillValid = state.instances.find((i) => i.id === remembered);
+      state.session = rememberedStillValid ? remembered : state.instances[0]?.id || null;
+      if (!state.session) throw new Error('nenhuma instância de WhatsApp disponível');
+
+      const { phone, name } = await loadDealContact(dealId);
+      state.phone = phone;
+      state.contactName = name;
+
+      await ensureConnected();
+    } catch (err) {
+      console.error(err);
+      if (err?.code === 'NO_PLACEMENT') {
+        // Aberto pelo próprio ícone do app (fora de um Negócio) — esse é o
+        // único ponto de entrada que não depende de um card específico, então
+        // é onde a Análise de Conversas (dashboard.html) mora.
+        renderState('nophone', {
+          title: 'Abrindo Análise de Conversas…',
+          desc: 'Este app também funciona como a aba "WhatsApp" dentro de um card de Negócio no CRM.',
+        });
+        window.location.replace('/dashboard.html');
+      } else if (err?.code === 'NO_CONTACT' || err?.code === 'NO_PHONE') {
+        renderState('nophone', {
+          title: 'Sem telefone vinculado',
+          desc: 'Este negócio não tem um contato com telefone cadastrado. Adicione um número de WhatsApp no card para liberar o chat.',
+        });
+      } else {
+        renderState('error', {
+          title: 'Não foi possível abrir a conversa',
+          desc: 'Houve um problema ao carregar os dados do negócio.',
+          retry: boot,
+        });
+      }
+    }
+  }
+
+  boot();
+})();
+</script>
+<script>
+(function () {
+  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1904 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sites · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
+  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
+  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
+  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO). */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app{
+    max-width: 980px;
+    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 980px) / 2));
+    padding: 28px 20px 70px;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 980px) / 2)); }
+
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  /* Grupo "Landing Page" com submenu "Métricas LP" (dropdown/acordeão) —
+     clicar no item principal navega normal; a seta abre/fecha o submenu,
+     que fica lembrado por página (localStorage). No modo ícone (sidebar
+     recolhida) o acordeão não faz sentido — mostra os dois itens sempre,
+     como já era antes de virarem um grupo só. */
+  .nav-group{ position:relative; }
+  .nav-group > .nav-item{ padding-right:34px; }
+  .nav-caret-btn{
+    position:absolute; top:10px; right:6px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
+    transition: color .15s, background .15s;
+  }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
+  .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
+  .nav-subitems{ display:none; flex-direction:column; }
+  .nav-group.open .nav-subitems{ display:flex; }
+  .nav-subitem{ padding-left:30px; font-size:12px; }
+  html.sidebar-collapsed .nav-caret-btn{ display:none; }
+  html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
+  html.sidebar-collapsed .nav-subitems{ display:flex !important; }
+
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  .toast.clickable{ cursor:pointer; }
+  .toast.clickable:hover{ filter: brightness(1.15); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  h1{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; margin: 0 0 4px; }
+  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+
+  .panel{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; gap: 10px; flex-wrap: wrap; }
+  .panel h2{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0; }
+  .panel .hint{ font-size: 11.5px; color: var(--text-faint); margin: 4px 0 0; }
+
+  label.field-label{ display:block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+
+  select, input[type="text"], input[type="search"], textarea{
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 11px;
+    outline: none;
+  }
+  select:focus, input:focus, textarea:focus{ border-color: var(--gold-dim); }
+
+  .btn{
+    background: var(--gold);
+    color: #1a1408;
+    border: none;
+    border-radius: 9px;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover{ filter: brightness(1.08); }
+  .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.danger{ background: rgba(var(--red-rgb),.15); color: #e89c95; border: 1px solid rgba(var(--red-rgb),.35); }
+  .btn:disabled{ opacity: .5; cursor: not-allowed; }
+  .btn-row{ display:flex; gap: 8px; flex-wrap: wrap; }
+
+  .empty{ color: var(--text-faint); font-size: 12.5px; padding: 14px 4px; text-align:center; }
+
+  .url-text{ color: var(--gold); font-size: 11.5px; font-family: monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:220px; text-decoration: none; }
+  .url-text:hover{ text-decoration: underline; }
+  .copy-btn{ background:none; border:none; color:var(--text-muted); cursor:pointer; padding:2px; flex-shrink:0; }
+  .copy-btn:hover{ color:var(--gold); }
+
+  .status-pill{ font-size: 10px; padding: 2px 8px; border-radius: 100px; text-transform: uppercase; letter-spacing: .02em; font-weight: 600; }
+  .status-pill.active{ background: rgba(var(--green-rgb),.16); color: var(--green); }
+  .status-pill.inactive{ background: var(--surface-2); color: var(--text-faint); }
+
+  /* ---------------- Cards de formulário (Sites) ---------------- */
+  .forms-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:14px; }
+  .form-card{
+    background: var(--surface-2); border:1px solid var(--border); border-radius:var(--radius);
+    padding:16px; display:flex; flex-direction:column; gap:12px;
+  }
+  .form-card-head{ display:flex; align-items:flex-start; gap:12px; }
+  .form-card-thumb{
+    width:44px; height:44px; border-radius:9px; background:var(--surface); border:1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;
+  }
+  .form-card-thumb img{ width:100%; height:100%; object-fit:contain; }
+  .form-card-thumb svg{ width:20px; height:20px; color:var(--text-faint); }
+  .form-card-heading{ flex:1; min-width:0; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .form-card-name{ font-size:14px; font-weight:600; color:var(--text); }
+  .form-card-url{ display:flex; align-items:center; gap:6px; }
+  .form-card-url .url-text{ max-width:none; flex:1; }
+  .form-card-meta{ display:flex; flex-wrap:wrap; gap:8px 18px; font-size:11.5px; color:var(--text-faint); }
+  .form-card-meta b{ color:var(--text-muted); font-weight:600; }
+  .form-card-meta .metric-good{ color:var(--green); }
+  .form-card-meta .metric-warn{ color:var(--red); }
+  .form-card-actions{
+    display:flex; flex-wrap:wrap; gap:6px 10px; padding-top:10px; border-top:1px solid var(--border);
+  }
+  .form-card-actions button, .form-card-actions a{
+    background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px; padding:2px 0;
+    text-decoration:none; font-family:inherit;
+  }
+  .form-card-actions button:hover, .form-card-actions a:hover{ color:var(--gold); }
+  .form-card-actions button.danger:hover{ color:var(--red); }
+
+  /* ---------------- Testes A/B ---------------- */
+  .ab-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:14px; }
+  .ab-card{
+    background: var(--surface-2); border:1px solid var(--border); border-radius:12px;
+    padding:14px 16px; display:flex; flex-direction:column; gap:10px;
+  }
+  .ab-card-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .ab-card-name{ font-size:13.5px; font-weight:600; color:var(--text); }
+  .status-pill.running{ background: rgba(var(--gold-rgb),.16); color: var(--gold); }
+  .ab-table{ width:100%; border-collapse:collapse; font-size:11.5px; }
+  .ab-table th{ text-align:left; color:var(--text-faint); font-weight:500; padding:3px 8px 3px 0; border-bottom:1px solid var(--border); }
+  .ab-table td{ padding:5px 8px 5px 0; color:var(--text-muted); }
+  .ab-table td b{ color:var(--text); font-weight:600; }
+  .ab-table .winner-row td{ color:var(--green); }
+  .ab-history-toggle{
+    background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px;
+    font-family:inherit; padding:0; margin-top:14px;
+  }
+  .ab-history-toggle:hover{ color:var(--gold); }
+  .ab-history-item{
+    background: var(--surface-2); border:1px solid var(--border); border-radius:9px;
+    padding:12px 14px; margin-top:10px; font-size:12px; color:var(--text-muted);
+  }
+  .ab-history-item .analysis{ margin-top:8px; padding-top:8px; border-top:1px solid var(--border); color:var(--text); font-size:12px; line-height:1.5; }
+  .ab-winner-options{ display:flex; flex-direction:column; gap:8px; font-size:12.5px; color:var(--text); }
+  .ab-winner-options label{ display:flex; align-items:center; gap:8px; cursor:pointer; }
+
+  .overlay{
+    position: fixed; inset: 0; background: rgba(10,8,5,.6);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .overlay.open{ display: flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; width: 100%; max-width: 460px; max-height: 84vh; overflow-y: auto;
+  }
+  .modal.wide{ max-width: 720px; }
+  .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
+  .modal .field{ margin-bottom: 12px; }
+  .modal .field .hint{ font-size: 11px; color: var(--text-faint); margin: 5px 0 0; }
+  .modal-actions{ display:flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  .form-editor-grid{ display:grid; grid-template-columns: 1fr 260px; gap: 22px; align-items:start; }
+  @media (max-width: 640px){ .form-editor-grid{ grid-template-columns: 1fr; } }
+  .color-row{ display:flex; align-items:center; gap: 8px; }
+  .color-row input[type="color"]{ width: 40px; height: 36px; padding: 2px; flex-shrink:0; cursor:pointer; }
+  .color-row input[type="text"]{ flex:1; }
+
+  .editor-tabs{ display:flex; flex-wrap:wrap; gap:2px; border-bottom:1px solid var(--border); margin-bottom:16px; }
+  .editor-tab{
+    background:none; border:none; color:var(--text-faint); font-family:inherit; font-size:12px;
+    padding:8px 10px; cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap;
+  }
+  .editor-tab:hover{ color:var(--text); }
+  .editor-tab.active{ color:var(--gold); border-bottom-color:var(--gold); font-weight:600; }
+
+  .list-row{
+    background: var(--surface-2); border:1px solid var(--border); border-radius: 9px;
+    padding: 10px; margin-bottom: 8px; display:flex; flex-direction:column; gap:6px;
+  }
+  .list-row .row-top{ display:flex; gap:6px; }
+  .list-row .row-top input{ flex:1; }
+  .list-row textarea{ resize:vertical; min-height:44px; }
+  .list-row .remove-btn{
+    background:none; border:none; color:var(--text-faint); cursor:pointer; padding:0 4px; flex-shrink:0;
+  }
+  .list-row .remove-btn:hover{ color:var(--red); }
+
+  .preview-label{ font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); margin: 0 0 8px; }
+  .preview-frame{
+    background:#15120d; border:1px solid var(--border); border-radius: 12px; padding: 22px 16px;
+    display:flex; align-items:center; justify-content:center; min-height: 320px;
+  }
+  .preview-card{
+    width:100%; max-width: 220px; background:#1d1812; border:1px solid #34291a; border-radius:12px;
+    padding:18px 15px; font-family:'Inter', sans-serif;
+  }
+  .preview-logo{ display:block; max-width:100px; max-height:40px; margin:0 auto 10px; object-fit:contain; }
+  .preview-card h4{ font-family:'Fraunces', serif; font-weight:600; font-size:13.5px; color:#f3ede2; margin:0 0 5px; line-height:1.3; }
+  .preview-card p{ font-size:10.5px; color:#a89a83; margin:0 0 12px; line-height:1.5; }
+  .preview-field{ background:#241d15; border:1px solid #34291a; border-radius:6px; height:26px; margin-bottom:7px; }
+  .preview-btn{ border-radius:6px; height:28px; margin-top:4px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#1a1408; }
+
+  .lead-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 0; border-top:1px solid var(--border); font-size:12.5px; }
+  .lead-row:first-child{ border-top:none; }
+  .lead-row .lead-name{ font-weight:500; }
+  .lead-row .lead-phone{ color:var(--text-faint); font-size:11.5px; }
+  .lead-row .lead-date{ color: var(--text-faint); font-size: 10.5px; white-space:nowrap; }
+
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 13px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/dashboard.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <div class="nav-group" id="navGroupCampaign">
+      <a href="/campaign.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+        <span class="nav-label">Campanha</span>
+        <span class="nav-tip">Campanha</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupCampaignToggle" title="Mostrar/ocultar Análise de Campanha e Agenda de Envios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/campaign-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg></span>
+          <span class="nav-label">Análise de Campanha</span>
+          <span class="nav-tip">Análise de Campanha</span>
+        </a>
+        <a href="/campaign-schedule.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
+          <span class="nav-label">Agenda de Envios</span>
+          <span class="nav-tip">Agenda de Envios</span>
+        </a>
+      </div>
+    </div>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <div class="nav-group open" id="navGroupLP">
+      <a href="/sites.html" class="nav-item active">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-label">Landing Page</span>
+        <span class="nav-tip">Landing Page</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupLPToggle" title="Mostrar/ocultar Métricas LP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/lead-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
+          <span class="nav-label">Métricas LP</span>
+          <span class="nav-tip">Métricas LP</span>
+        </a>
+      </div>
+    </div>
+    <a href="/onboarding.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+      <span class="nav-label">Onboarding</span>
+      <span class="nav-tip">Onboarding</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <div class="nav-group" id="navGroupSettings">
+      <a href="/settings.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Configurações</span>
+        <span class="nav-tip">Configurações</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupSettingsToggle" title="Mostrar/ocultar Instâncias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/instances.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">Instâncias</span>
+          <span class="nav-tip">Instâncias</span>
+        </a>
+      </div>
+    </div>
+    <a href="/apresentacao.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
+      <span class="nav-label">Apresentação</span>
+      <span class="nav-tip">Apresentação</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <h1>Sites</h1>
+  <p class="subtitle">Crie páginas públicas de captura de lead — quem preencher vira um contato e recebe uma mensagem automática no WhatsApp.</p>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Formulários</h2>
+      <div style="display:flex;align-items:center;gap:14px;">
+        <a href="#" target="_blank" rel="noopener" id="leadsKanbanLink" hidden style="font-size:12px;color:var(--text-muted);text-decoration:none;">Ver leads no Bitrix →</a>
+        <button class="btn" id="newFormBtn">+ Novo formulário</button>
+      </div>
+    </div>
+    <div id="formsWrap">
+      <p class="empty">Carregando…</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Testes A/B</h2>
+      <button class="btn" id="newAbTestBtn">+ Novo teste A/B</button>
+    </div>
+    <p class="hint" style="font-size:11.5px;color:var(--text-faint);margin:0 0 12px;">
+      Uma URL única (/t/…) divide o tráfego 50/50 entre duas LPs — quem visitar de novo cai sempre
+      na mesma variante. Divulgue só a URL do teste pra métrica ficar limpa.
+    </p>
+    <div id="abTestsWrap">
+      <p class="empty">Carregando…</p>
+    </div>
+    <button type="button" class="ab-history-toggle" id="abHistoryToggle" hidden>▸ Histórico de testes encerrados (<span id="abHistoryCount">0</span>)</button>
+    <div id="abHistoryWrap" hidden></div>
+  </div>
+
+  <div class="credit-row">
+    <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+      <span class="dot"></span> Desenvolvido por Daniel Costa
+    </a>
+  </div>
+</div>
+
+<!-- Modal: novo/editar formulário -->
+<div class="overlay" id="formModal">
+  <div class="modal wide">
+    <h3 id="formModalTitle">Novo formulário</h3>
+    <input type="hidden" id="formId">
+    <div class="form-editor-grid">
+      <div>
+        <div class="editor-tabs">
+          <button type="button" class="editor-tab active" data-tab="principal">Principal</button>
+          <button type="button" class="editor-tab" data-tab="visual">Visual</button>
+          <button type="button" class="editor-tab" data-tab="stats">Estatísticas</button>
+          <button type="button" class="editor-tab" data-tab="differentials">Diferenciais</button>
+          <button type="button" class="editor-tab" data-tab="story">História</button>
+          <button type="button" class="editor-tab" data-tab="faq">FAQ</button>
+          <button type="button" class="editor-tab" data-tab="testimonials">Depoimentos</button>
+        </div>
+
+        <div class="editor-panel" data-panel="principal">
+          <div class="field">
+            <label class="field-label">Nome interno</label>
+            <input type="text" id="formName" placeholder="Ex: Formulário Instagram">
+          </div>
+          <div class="field">
+            <label class="field-label">Título (aparece pra quem visita)</label>
+            <input type="text" id="formTitle" placeholder="Ex: Fale com um advogado agora">
+          </div>
+          <div class="field">
+            <label class="field-label">Subtítulo (opcional)</label>
+            <input type="text" id="formSubtitle" placeholder="Ex: Retornamos em até 1 dia útil">
+          </div>
+          <div class="field">
+            <label class="field-label">Instância que envia a mensagem de boas-vindas</label>
+            <select id="formSessionSelect"><option value="">Carregando instâncias…</option></select>
+          </div>
+          <div class="field">
+            <label class="field-label">Mensagem de boas-vindas (enviada por WhatsApp após o envio)</label>
+            <textarea id="formWelcomeMessage" rows="3" placeholder="Olá {{nome}}! Recebemos seu contato..."></textarea>
+            <p class="hint">Use <code>{{nome}}</code> pra personalizar com o nome preenchido.</p>
+          </div>
+          <div class="field" id="slugField">
+            <label class="field-label">URL personalizada (opcional)</label>
+            <input type="text" id="formSlug" placeholder="Ex: instagram-leads">
+            <p class="hint">Se deixar em branco, é gerada automaticamente a partir do nome.</p>
+          </div>
+        </div>
+
+        <div class="editor-panel" data-panel="visual" hidden>
+          <div class="field">
+            <label class="field-label">Cor de destaque (opcional)</label>
+            <div class="color-row">
+              <input type="color" id="formAccentColorPicker" value="#d8ab4f">
+              <input type="text" id="formAccentColor" placeholder="#d8ab4f">
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Logo (opcional)</label>
+            <div class="color-row">
+              <input type="text" id="formLogoUrl" placeholder="https://...">
+              <button type="button" class="btn secondary" id="uploadLogoBtn">Enviar arquivo</button>
+              <input type="file" id="formLogoFile" accept="image/jpeg,image/png,image/webp,image/gif" hidden>
+            </div>
+            <p class="hint">Cole o link de uma imagem já hospedada, ou envie um arquivo (JPG/PNG/WEBP/GIF, até 6MB).</p>
+          </div>
+          <div class="field">
+            <label class="field-label">Imagem ou vídeo de fundo do hero (opcional)</label>
+            <div class="color-row">
+              <input type="text" id="formHeroImageUrl" placeholder="https://...">
+              <button type="button" class="btn secondary" id="uploadHeroImageBtn">Enviar arquivo</button>
+              <input type="file" id="formHeroImageFile" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,video/quicktime" hidden>
+            </div>
+            <p class="hint">Foto (JPG/PNG/WEBP/GIF, até 6MB) ou vídeo (MP4/WEBM/MOV, até 25MB) de fundo do banner no topo da página pública. Colar um link de vídeo já hospedado também funciona, mas só reconhece a extensão automaticamente (.mp4/.webm/.mov) — enviando o arquivo aqui não tem esse risco.</p>
+          </div>
+        </div>
+
+        <div class="editor-panel" data-panel="stats" hidden>
+          <p class="hint" style="margin:0 0 8px;">Números de destaque (ex: "500+" / "clientes atendidos") — até 4. A seção só aparece se houver ao menos um.</p>
+          <div id="statsRowsWrap"></div>
+          <button type="button" class="btn secondary" id="addStatBtn" style="margin-top:6px;">+ Adicionar estatística</button>
+        </div>
+
+        <div class="editor-panel" data-panel="differentials" hidden>
+          <p class="hint" style="margin:0 0 8px;">Pontos fortes do seu negócio (ex: "Atendimento 24h") — até 6. A seção só aparece se houver ao menos um.</p>
+          <div id="differentialsRowsWrap"></div>
+          <button type="button" class="btn secondary" id="addDifferentialBtn" style="margin-top:6px;">+ Adicionar diferencial</button>
+        </div>
+
+        <div class="editor-panel" data-panel="story" hidden>
+          <p class="hint" style="margin:0 0 8px;">Um texto livre sobre a empresa — some da página pública se deixar em branco.</p>
+          <div class="field">
+            <label class="field-label">Título da seção</label>
+            <input type="text" id="formStoryTitle" placeholder="Ex: Nossa história">
+          </div>
+          <div class="field">
+            <label class="field-label">Texto</label>
+            <textarea id="formStoryText" rows="5" placeholder="Conte a história da empresa..."></textarea>
+          </div>
+        </div>
+
+        <div class="editor-panel" data-panel="faq" hidden>
+          <p class="hint" style="margin:0 0 8px;">Perguntas e respostas — até 8. A seção só aparece se houver ao menos uma.</p>
+          <div id="faqRowsWrap"></div>
+          <button type="button" class="btn secondary" id="addFaqBtn" style="margin-top:6px;">+ Adicionar pergunta</button>
+        </div>
+
+        <div class="editor-panel" data-panel="testimonials" hidden>
+          <p class="hint" style="margin:0 0 8px;">Escreva depoimentos reais de clientes seus (até 5) — a seção só aparece se houver ao menos um.</p>
+          <div id="testimonialsWrap"></div>
+          <button type="button" class="btn secondary" id="addTestimonialBtn" style="margin-top:6px;">+ Adicionar depoimento</button>
+        </div>
+      </div>
+      <div>
+        <p class="preview-label">Pré-visualização</p>
+        <div class="preview-frame">
+          <div class="preview-card" id="previewCard"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="formModalCancel">Cancelar</button>
+      <button class="btn" id="formModalSave">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: leads recebidos por um formulário -->
+<div class="overlay" id="leadsModal">
+  <div class="modal">
+    <h3>Leads recebidos</h3>
+    <div id="leadsWrap">
+      <p class="empty">Carregando…</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="leadsExportCsvBtn">Exportar CSV</button>
+      <button class="btn secondary" id="leadsExportXlsxBtn">Exportar XLSX</button>
+      <button class="btn secondary" id="leadsModalClose">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: novo teste A/B -->
+<div class="overlay" id="abTestModal">
+  <div class="modal">
+    <h3>Novo teste A/B</h3>
+    <div class="field">
+      <label class="field-label">Nome do teste</label>
+      <input type="text" id="abTestName" placeholder="Ex: Headline direta vs institucional">
+    </div>
+    <div class="field">
+      <label class="field-label">Variante A</label>
+      <select id="abFormA"></select>
+    </div>
+    <div class="field">
+      <label class="field-label">Variante B</label>
+      <select id="abFormB"></select>
+    </div>
+    <p class="hint" style="font-size:11px;color:var(--text-faint);">
+      Dica: use LPs dedicadas ao teste (sem tráfego direto no /l/ delas) pra métrica não misturar.
+    </p>
+    <div class="modal-actions">
+      <button class="btn secondary" id="abTestCancel">Cancelar</button>
+      <button class="btn" id="abTestCreate">Criar teste</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: encerrar teste A/B (vencedor + análise obrigatória) -->
+<div class="overlay" id="abFinishModal">
+  <div class="modal">
+    <h3>Encerrar teste</h3>
+    <input type="hidden" id="abFinishId">
+    <div class="field">
+      <label class="field-label">Vencedor</label>
+      <div class="ab-winner-options">
+        <label><input type="radio" name="abWinner" value="a"> Variante A — <span id="abWinnerAName"></span></label>
+        <label><input type="radio" name="abWinner" value="b"> Variante B — <span id="abWinnerBName"></span></label>
+        <label><input type="radio" name="abWinner" value="" checked> Sem vencedor claro</label>
+      </div>
+    </div>
+    <div class="field">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+        <label class="field-label" style="margin-bottom:0;">Análise / aprendizados (obrigatório)</label>
+        <button type="button" class="btn secondary" id="abSuggestAnalysisBtn" style="font-size:11px;padding:5px 10px;white-space:nowrap;">✨ Gerar com IA</button>
+      </div>
+      <textarea id="abFinishAnalysis" rows="4" placeholder="O que funcionou, o que não funcionou e por quê..."></textarea>
+      <p class="hint">Vira o histórico de aprendizados dos seus testes — a base do que replicar nas próximas LPs. A IA sugere um texto a partir das métricas reais; revise antes de salvar.</p>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="abFinishCancel">Cancelar</button>
+      <button class="btn" id="abFinishSave">Encerrar teste</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var lpGroup = document.getElementById('navGroupLP');
+  var lpToggle = document.getElementById('navGroupLPToggle');
+  if (lpGroup && lpToggle) {
+    if (localStorage.getItem('navGroupLPOpen') === '1') lpGroup.classList.add('open');
+    lpToggle.addEventListener('click', function () {
+      var nowOpen = lpGroup.classList.toggle('open');
+      localStorage.setItem('navGroupLPOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var campaignGroup = document.getElementById('navGroupCampaign');
+  var campaignToggle = document.getElementById('navGroupCampaignToggle');
+  if (campaignGroup && campaignToggle) {
+    if (localStorage.getItem('navGroupCampaignOpen') === '1') campaignGroup.classList.add('open');
+    campaignToggle.addEventListener('click', function () {
+      var nowOpen = campaignGroup.classList.toggle('open');
+      localStorage.setItem('navGroupCampaignOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var settingsGroup = document.getElementById('navGroupSettings');
+  var settingsToggle = document.getElementById('navGroupSettingsToggle');
+  if (settingsGroup && settingsToggle) {
+    if (localStorage.getItem('navGroupSettingsOpen') === '1') settingsGroup.classList.add('open');
+    settingsToggle.addEventListener('click', function () {
+      var nowOpen = settingsGroup.classList.toggle('open');
+      localStorage.setItem('navGroupSettingsOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  function escapeHtmlGlobal(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : str;
+    return div.innerHTML;
+  }
+
+  window.showToast = function (message, type, target) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type + (target ? ' clickable' : '');
+      el.textContent = message;
+      if (target && typeof window.__notifNavigate === 'function') {
+        el.addEventListener('click', function () { window.__notifNavigate(target); });
+      }
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+  window.__bumpNotifBadge = function () {
+    var current = Number(notifDot && notifDot.textContent) || 0;
+    window.updateNotifBadge(current + 1);
+  };
+
+  var __confirmResolve = null;
+  window.confirmDialog = function (message) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('__confirmOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = '__confirmOverlay';
+        overlay.innerHTML =
+          '<div class="modal" style="max-width:340px;text-align:center;">' +
+            '<h3 id="__confirmMsg" style="font-weight:500;"></h3>' +
+            '<div class="modal-actions" style="justify-content:center;">' +
+              '<button class="btn secondary" id="__confirmCancel">Cancelar</button>' +
+              '<button class="btn" id="__confirmOk">Confirmar</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        overlay.querySelector('#__confirmOk').addEventListener('click', function () { __finishConfirm(true); });
+        overlay.querySelector('#__confirmCancel').addEventListener('click', function () { __finishConfirm(false); });
+      }
+      overlay.querySelector('#__confirmMsg').textContent = message;
+      overlay.classList.add('open');
+      __confirmResolve = resolve;
+    });
+  };
+  function __finishConfirm(result) {
+    var overlay = document.getElementById('__confirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+  });
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_BASE = window.location.origin + '/api';
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+
+  let resolveBx24Ready;
+  const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
+  if (window.BX24) {
+    BX24.init(() => {
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      resolveBx24Ready();
+    });
+  } else {
+    resolveBx24Ready();
+  }
+
+  let appToken = null;
+
+  async function verifyAuth() {
+    if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
+    await bx24Ready;
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function resolveOwner() {
+    const ownerId = await verifyAuth();
+    fetch(`${API_BASE}/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+      .catch(() => {});
+    return ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  const formsWrap = document.getElementById('formsWrap');
+  const formModal = document.getElementById('formModal');
+  const formModalTitle = document.getElementById('formModalTitle');
+  const formIdInput = document.getElementById('formId');
+  const formNameInput = document.getElementById('formName');
+  const formTitleInput = document.getElementById('formTitle');
+  const formSubtitleInput = document.getElementById('formSubtitle');
+  const formSessionSelect = document.getElementById('formSessionSelect');
+  const formWelcomeMessageInput = document.getElementById('formWelcomeMessage');
+  const formSlugInput = document.getElementById('formSlug');
+  const slugField = document.getElementById('slugField');
+  const formAccentColorPicker = document.getElementById('formAccentColorPicker');
+  const formAccentColorInput = document.getElementById('formAccentColor');
+  const formLogoUrlInput = document.getElementById('formLogoUrl');
+  const formHeroImageUrlInput = document.getElementById('formHeroImageUrl');
+  const previewCard = document.getElementById('previewCard');
+  const testimonialsWrap = document.getElementById('testimonialsWrap');
+  const formStoryTitleInput = document.getElementById('formStoryTitle');
+  const formStoryTextInput = document.getElementById('formStoryText');
+  const statsRowsWrap = document.getElementById('statsRowsWrap');
+  const differentialsRowsWrap = document.getElementById('differentialsRowsWrap');
+  const faqRowsWrap = document.getElementById('faqRowsWrap');
+
+  // Upload de imagem genérico — usado pro logo (só imagem, 6MB) e pra
+  // imagem/vídeo de fundo do hero (25MB, mesmo teto do bucket "public-assets",
+  // ver db/create-public-bucket.js). `button`/`fileInput`/`urlInput` são os 3
+  // elementos de cada campo; `endpoint` é a rota de upload correspondente;
+  // `onUploaded(mediaType)` é opcional, chamado com o `mediaType` devolvido
+  // pelo servidor (só o upload-hero-image devolve isso — upload-logo ignora).
+  function wireImageUploader({ button, fileInput, urlInput, endpoint, successLabel, maxBytes, onUploaded }) {
+    const limit = maxBytes || 6 * 1024 * 1024;
+    button.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      fileInput.value = ''; // permite escolher o mesmo arquivo de novo depois
+      if (!file) return;
+      if (file.size > limit) {
+        if (window.showToast) window.showToast(`Arquivo maior que ${Math.round(limit / (1024 * 1024))}MB.`, 'error');
+        return;
+      }
+      const originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Enviando…';
+      try {
+        const dataBase64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = () => reject(new Error('falha ao ler o arquivo'));
+          reader.readAsDataURL(file);
+        });
+        const res = await apiFetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mimetype: file.type, dataBase64 }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error);
+        const { url, mediaType } = await res.json();
+        urlInput.value = url;
+        if (onUploaded) onUploaded(mediaType);
+        renderPreview();
+        if (window.showToast) window.showToast(successLabel, 'success');
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      } finally {
+        button.disabled = false;
+        button.textContent = originalLabel;
+      }
+    });
+  }
+
+  wireImageUploader({
+    button: document.getElementById('uploadLogoBtn'),
+    fileInput: document.getElementById('formLogoFile'),
+    urlInput: formLogoUrlInput,
+    endpoint: '/lead-forms/upload-logo',
+    successLabel: 'Logo enviado.',
+  });
+  // heroMediaType guarda 'image'/'video' pra mandar junto no salvar do
+  // formulário — setado pelo upload (resposta já diz qual é) OU inferido
+  // pela extensão quando o usuário só cola uma URL já hospedada (ver
+  // listener de formHeroImageUrlInput mais abaixo).
+  let heroMediaType = 'image';
+  wireImageUploader({
+    button: document.getElementById('uploadHeroImageBtn'),
+    fileInput: document.getElementById('formHeroImageFile'),
+    urlInput: formHeroImageUrlInput,
+    endpoint: '/lead-forms/upload-hero-image',
+    successLabel: 'Arquivo de fundo enviado.',
+    maxBytes: 25 * 1024 * 1024,
+    onUploaded: (mediaType) => { heroMediaType = mediaType || 'image'; },
+  });
+  formHeroImageUrlInput.addEventListener('input', () => {
+    heroMediaType = /\.(mp4|webm|mov)(\?|#|$)/i.test(formHeroImageUrlInput.value.trim()) ? 'video' : 'image';
+  });
+
+  const leadsModal = document.getElementById('leadsModal');
+  const leadsWrap = document.getElementById('leadsWrap');
+
+  let myOwnerId = null;
+  let instances = [];
+  let forms = [];
+  // Estado das 4 seções de lista do formulário aberto no modal — mesmo
+  // formato usado pela API (ver src/routes/leadForms.js).
+  let testimonials = [];
+  let stats = [];
+  let differentials = [];
+  let faq = [];
+
+  // ---------------- Abas do editor ----------------
+  document.querySelectorAll('.editor-tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.editor-tab').forEach((t) => t.classList.remove('active'));
+      document.querySelectorAll('.editor-panel').forEach((p) => { p.hidden = true; });
+      tab.classList.add('active');
+      document.querySelector(`.editor-panel[data-panel="${tab.dataset.tab}"]`).hidden = false;
+    });
+  });
+
+  // ---------------- Editor de listas genérico ----------------
+  // Usado por Estatísticas/Diferenciais/FAQ — cada um define seus próprios
+  // campos (2 por linha), mas o esqueleto (adicionar/remover/renderizar) é
+  // o mesmo. Depoimentos tem 3 campos (um deles textarea) e fica separado
+  // (renderTestimonialRows), mas segue o mesmo princípio.
+  function makeListEditor(wrap, getList, setList, fieldsConfig, maxItems) {
+    const inlineFields = fieldsConfig.filter((f) => !f.textarea);
+    const textareaFields = fieldsConfig.filter((f) => f.textarea);
+    function render() {
+      const list = getList();
+      wrap.innerHTML = list.map((item, i) => `
+        <div class="list-row" data-index="${i}">
+          <div class="row-top">
+            ${inlineFields.map((f) => `<input type="text" placeholder="${escapeHtml(f.placeholder)}" data-field="${f.key}" value="${escapeHtml(item[f.key] || '')}">`).join('')}
+            <button type="button" class="remove-btn" data-remove="${i}" title="Remover">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+            </button>
+          </div>
+          ${textareaFields.map((f) => `<textarea placeholder="${escapeHtml(f.placeholder)}" data-field="${f.key}" rows="2">${escapeHtml(item[f.key] || '')}</textarea>`).join('')}
+        </div>
+      `).join('');
+    }
+    wrap.addEventListener('input', (ev) => {
+      const row = ev.target.closest('.list-row');
+      const field = ev.target.dataset.field;
+      if (!row || !field) return;
+      getList()[Number(row.dataset.index)][field] = ev.target.value;
+      renderPreview();
+    });
+    wrap.addEventListener('click', (ev) => {
+      const removeIndex = ev.target.closest('[data-remove]')?.dataset.remove;
+      if (removeIndex == null) return;
+      const list = getList();
+      list.splice(Number(removeIndex), 1);
+      setList(list);
+      render();
+      renderPreview();
+    });
+    return {
+      render,
+      add() {
+        const list = getList();
+        if (list.length >= maxItems) {
+          if (window.showToast) window.showToast(`Máximo de ${maxItems} itens.`, 'error');
+          return;
+        }
+        const blank = {};
+        fieldsConfig.forEach((f) => { blank[f.key] = ''; });
+        list.push(blank);
+        render();
+      },
+    };
+  }
+
+  const statsEditor = makeListEditor(
+    statsRowsWrap, () => stats, (v) => { stats = v; },
+    [{ key: 'value', placeholder: 'Valor (ex: 500+)' }, { key: 'label', placeholder: 'Legenda (ex: clientes atendidos)' }],
+    4
+  );
+  const differentialsEditor = makeListEditor(
+    differentialsRowsWrap, () => differentials, (v) => { differentials = v; },
+    [{ key: 'title', placeholder: 'Título' }, { key: 'description', placeholder: 'Descrição (opcional)', textarea: true }],
+    6
+  );
+  const faqEditor = makeListEditor(
+    faqRowsWrap, () => faq, (v) => { faq = v; },
+    [{ key: 'question', placeholder: 'Pergunta' }, { key: 'answer', placeholder: 'Resposta', textarea: true }],
+    8
+  );
+  document.getElementById('addStatBtn').addEventListener('click', () => statsEditor.add());
+  document.getElementById('addDifferentialBtn').addEventListener('click', () => differentialsEditor.add());
+  document.getElementById('addFaqBtn').addEventListener('click', () => faqEditor.add());
+
+  function fmtDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  async function init() {
+    try {
+      myOwnerId = await resolveOwner();
+      const res = await apiFetch(`${API_BASE}/whatsapp/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      instances = data.instances || [];
+    } catch (err) {
+      console.error('Erro ao carregar instâncias:', err);
+    }
+    loadForms();
+    loadAbTests();
+  }
+
+  async function loadForms() {
+    formsWrap.innerHTML = '<p class="empty">Carregando…</p>';
+    try {
+      const res = await apiFetch(`${API_BASE}/lead-forms`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      forms = data.forms || [];
+      renderForms();
+      // Todas as LPs lançam negócio no mesmo pipeline compartilhado do
+      // Bitrix (ver src/bitrixCrm.js) — um único link pra tela toda, não
+      // mais um por LP.
+      const leadsKanbanLink = document.getElementById('leadsKanbanLink');
+      if (leadsKanbanLink) {
+        if (data.leadsKanbanUrl) {
+          leadsKanbanLink.href = data.leadsKanbanUrl;
+          leadsKanbanLink.hidden = false;
+        } else {
+          leadsKanbanLink.hidden = true;
+        }
+      }
+    } catch (err) {
+      formsWrap.innerHTML = '<p class="empty">Falha ao carregar formulários.</p>';
+      console.error(err);
+    }
+  }
+
+  function instanceLabel(sessionId) {
+    const inst = instances.find((i) => i.id === sessionId);
+    return inst ? inst.label : sessionId;
+  }
+
+  function renderForms() {
+    if (!forms.length) {
+      formsWrap.innerHTML = '<p class="empty">Nenhum formulário ainda. Crie o primeiro pra começar a captar leads.</p>';
+      return;
+    }
+    formsWrap.innerHTML = `
+      <div class="forms-grid">
+        ${forms.map((f) => {
+          // #formulario leva direto pro card de contato (pula o banner de
+          // hero) — o link público (copiar/"Ir para LP") é pensado pra
+          // conversão rápida (ex: anúncio), não pra passeio pela página.
+          const publicUrl = `${window.location.origin}/l/${f.slug}#formulario`;
+          // Miniatura do card: mostra o logo do formulário (mesma imagem da
+          // página pública) pra reconhecer visualmente qual site é qual
+          // numa lista com vários formulários — sem isso, cards só com nome
+          // ficam difíceis de diferenciar de relance. Sem logo configurado,
+          // cai num ícone genérico de página.
+          const thumb = f.logoUrl
+            ? `<img src="${escapeHtml(f.logoUrl)}" alt="">`
+            : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/><path d="M8 4v5"/></svg>`;
+
+          // Taxa de entrega da mensagem de boas-vindas por WhatsApp — só
+          // faz sentido mostrar quando já existe pelo menos 1 lead (senão
+          // seria uma porcentagem de zero por zero, sem significado).
+          const deliveryRate = f.leadCount > 0 ? Math.round((f.whatsappSentCount / f.leadCount) * 100) : null;
+          const deliveryClass = deliveryRate == null ? '' : deliveryRate >= 80 ? 'metric-good' : 'metric-warn';
+
+          // Conversão da LP = leads / visualizações da página pública — só
+          // com pelo menos 1 view (mesma regra do deliveryRate acima).
+          const conversionRate = f.viewCount > 0 ? Math.round((f.leadCount / f.viewCount) * 1000) / 10 : null;
+
+          return `
+          <div class="form-card">
+            <div class="form-card-head">
+              <div class="form-card-thumb">${thumb}</div>
+              <div class="form-card-heading">
+                <span class="form-card-name">${escapeHtml(f.name)}</span>
+                <span class="status-pill ${f.active ? 'active' : 'inactive'}">${f.active ? 'Ativo' : 'Inativo'}</span>
+              </div>
+            </div>
+            <div class="form-card-url">
+              <a class="url-text" href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener" title="${escapeHtml(publicUrl)}">${escapeHtml(publicUrl)}</a>
+              <button type="button" class="copy-btn" data-copy="${escapeHtml(publicUrl)}" title="Copiar link">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <div class="form-card-meta">
+              <span><b>${f.viewCount || 0}</b> visualizaç${f.viewCount === 1 ? 'ão' : 'ões'}</span>
+              <span><b>${f.leadCount}</b> lead${f.leadCount === 1 ? '' : 's'}</span>
+              ${conversionRate == null ? '' : `<span><b>${conversionRate}%</b> conversão</span>`}
+              ${deliveryRate == null ? '' : `<span class="${deliveryClass}"><b class="${deliveryClass}">${deliveryRate}%</b> entregue no WhatsApp</span>`}
+              <span>Instância: <b>${escapeHtml(instanceLabel(f.sessionId))}</b></span>
+            </div>
+            <div class="form-card-actions">
+              <a href="${escapeHtml(publicUrl)}" target="_blank" rel="noopener">Ir para LP</a>
+              <button type="button" data-leads="${f.id}">Leads</button>
+              <button type="button" data-toggle="${f.id}">${f.active ? 'Desativar' : 'Ativar'}</button>
+              <button type="button" data-edit="${f.id}">Editar</button>
+              <button type="button" class="danger" data-delete="${f.id}">Excluir</button>
+            </div>
+          </div>
+        `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  formsWrap.addEventListener('click', (ev) => {
+    const copyUrl = ev.target.closest('[data-copy]')?.dataset.copy;
+    const editId = ev.target.dataset.edit;
+    const deleteId = ev.target.dataset.delete;
+    const toggleId = ev.target.dataset.toggle;
+    const leadsId = ev.target.dataset.leads;
+    if (copyUrl) {
+      navigator.clipboard.writeText(copyUrl).then(() => {
+        if (window.showToast) window.showToast('Link copiado.', 'success');
+      });
+    }
+    if (editId) openFormModal(forms.find((f) => String(f.id) === editId));
+    if (deleteId) deleteForm(deleteId);
+    if (toggleId) toggleForm(toggleId);
+    if (leadsId) openLeadsModal(leadsId);
+  });
+
+  function populateSessionSelect(selectedId) {
+    if (!instances.length) {
+      formSessionSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Instâncias</option>';
+      return;
+    }
+    formSessionSelect.innerHTML = instances.map((i) => `
+      <option value="${escapeHtml(i.id)}" ${i.id === selectedId ? 'selected' : ''}>
+        ${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
+      </option>
+    `).join('');
+  }
+
+  function renderPreview() {
+    const title = formTitleInput.value.trim() || 'Título do formulário';
+    const subtitle = formSubtitleInput.value.trim();
+    const color = formAccentColorInput.value.trim() || '#d8ab4f';
+    const logoUrl = formLogoUrlInput.value.trim();
+
+    const sectionNotes = [
+      { count: stats.filter((s) => s.value.trim() && s.label.trim()).length, label: 'estatística', labelPlural: 'estatísticas' },
+      { count: differentials.filter((d) => d.title.trim()).length, label: 'diferencial', labelPlural: 'diferenciais' },
+      { count: (formStoryTitleInput.value.trim() || formStoryTextInput.value.trim()) ? 1 : 0, label: 'seção de história', labelPlural: 'seção de história', fixed: true },
+      { count: faq.filter((f) => f.question.trim() && f.answer.trim()).length, label: 'pergunta', labelPlural: 'perguntas' },
+      { count: testimonials.filter((t) => t.name.trim() && t.quote.trim()).length, label: 'depoimento', labelPlural: 'depoimentos' },
+    ].filter((s) => s.count > 0).map((s) => s.fixed ? s.label : `${s.count} ${s.count === 1 ? s.label : s.labelPlural}`);
+
+    previewCard.innerHTML = `
+      ${logoUrl ? `<img class="preview-logo" src="${escapeHtml(logoUrl)}" alt="" onerror="this.style.display='none'">` : ''}
+      <h4>${escapeHtml(title)}</h4>
+      ${subtitle ? `<p>${escapeHtml(subtitle)}</p>` : ''}
+      <div class="preview-field"></div>
+      <div class="preview-field"></div>
+      <div class="preview-btn" style="background:${escapeHtml(color)}">Enviar</div>
+      ${sectionNotes.length ? `<p style="font-size:9.5px;color:#6e6353;text-align:center;margin:10px 0 0;">+ ${escapeHtml(sectionNotes.join(', '))} na página real</p>` : ''}
+    `;
+  }
+
+  // ---------------- Depoimentos ----------------
+
+  function renderTestimonialRows() {
+    if (!testimonials.length) {
+      testimonialsWrap.innerHTML = '';
+      return;
+    }
+    testimonialsWrap.innerHTML = testimonials.map((t, i) => `
+      <div class="list-row" data-index="${i}">
+        <div class="row-top">
+          <input type="text" placeholder="Nome" data-field="name" value="${escapeHtml(t.name)}">
+          <input type="text" placeholder="Cidade (opcional)" data-field="location" value="${escapeHtml(t.location)}">
+          <button type="button" class="remove-btn" data-remove-testimonial="${i}" title="Remover">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>
+          </button>
+        </div>
+        <textarea placeholder="O que o cliente disse..." data-field="quote" rows="2">${escapeHtml(t.quote)}</textarea>
+      </div>
+    `).join('');
+  }
+
+  testimonialsWrap.addEventListener('input', (ev) => {
+    const row = ev.target.closest('.list-row');
+    const field = ev.target.dataset.field;
+    if (!row || !field) return;
+    testimonials[Number(row.dataset.index)][field] = ev.target.value;
+    renderPreview();
+  });
+
+  testimonialsWrap.addEventListener('click', (ev) => {
+    const removeIndex = ev.target.closest('[data-remove-testimonial]')?.dataset.removeTestimonial;
+    if (removeIndex == null) return;
+    testimonials.splice(Number(removeIndex), 1);
+    renderTestimonialRows();
+    renderPreview();
+  });
+
+  document.getElementById('addTestimonialBtn').addEventListener('click', () => {
+    if (testimonials.length >= 5) {
+      if (window.showToast) window.showToast('Máximo de 5 depoimentos.', 'error');
+      return;
+    }
+    testimonials.push({ name: '', location: '', quote: '' });
+    renderTestimonialRows();
+  });
+
+  [formTitleInput, formSubtitleInput, formLogoUrlInput].forEach((el) => el.addEventListener('input', renderPreview));
+  formAccentColorInput.addEventListener('input', () => {
+    if (/^#[0-9a-f]{6}$/i.test(formAccentColorInput.value.trim())) {
+      formAccentColorPicker.value = formAccentColorInput.value.trim();
+    }
+    renderPreview();
+  });
+  formAccentColorPicker.addEventListener('input', () => {
+    formAccentColorInput.value = formAccentColorPicker.value;
+    renderPreview();
+  });
+
+  // Recarrega a lista de instâncias sob demanda — se a busca do init()
+  // falhou (ex: gateway reiniciando bem na hora do carregamento da página),
+  // abrir o modal tenta de novo em vez de deixar o select preso em
+  // "Nenhuma instância" até um F5.
+  async function ensureInstances() {
+    if (instances.length) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/whatsapp/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+      if (res.ok) {
+        const data = await res.json();
+        instances = data.instances || [];
+      }
+    } catch (err) {
+      console.error('Erro ao recarregar instâncias:', err);
+    }
+  }
+
+  async function openFormModal(form) {
+    await ensureInstances();
+    formModalTitle.textContent = form ? 'Editar formulário' : 'Novo formulário';
+    formIdInput.value = form ? form.id : '';
+    formNameInput.value = form ? form.name : '';
+    formTitleInput.value = form ? form.title : '';
+    formSubtitleInput.value = form ? (form.subtitle || '') : '';
+    formWelcomeMessageInput.value = form ? form.welcomeMessage : 'Olá {{nome}}! Recebemos seu contato, em breve falamos com você.';
+    formSlugInput.value = form ? form.slug : '';
+    formAccentColorInput.value = form ? (form.accentColor || '') : '';
+    formAccentColorPicker.value = (form && form.accentColor) || '#d8ab4f';
+    formLogoUrlInput.value = form ? (form.logoUrl || '') : '';
+    formHeroImageUrlInput.value = form ? (form.heroImageUrl || '') : '';
+    heroMediaType = (form && form.heroMediaType) || 'image';
+    formStoryTitleInput.value = form ? (form.storyTitle || '') : '';
+    formStoryTextInput.value = form ? (form.storyText || '') : '';
+    testimonials = form && Array.isArray(form.testimonials)
+      ? form.testimonials.map((t) => ({ name: t.name || '', location: t.location || '', quote: t.quote || '' }))
+      : [];
+    stats = form && Array.isArray(form.stats)
+      ? form.stats.map((s) => ({ value: s.value || '', label: s.label || '' }))
+      : [];
+    differentials = form && Array.isArray(form.differentials)
+      ? form.differentials.map((d) => ({ title: d.title || '', description: d.description || '' }))
+      : [];
+    faq = form && Array.isArray(form.faq)
+      ? form.faq.map((f) => ({ question: f.question || '', answer: f.answer || '' }))
+      : [];
+    renderTestimonialRows();
+    statsEditor.render();
+    differentialsEditor.render();
+    faqEditor.render();
+    // sempre reabre na primeira aba — evita abrir já numa aba secundária
+    // deixada ativa da última vez que o modal foi usado.
+    document.querySelectorAll('.editor-tab').forEach((t) => t.classList.remove('active'));
+    document.querySelectorAll('.editor-panel').forEach((p) => { p.hidden = true; });
+    document.querySelector('.editor-tab[data-tab="principal"]').classList.add('active');
+    document.querySelector('.editor-panel[data-panel="principal"]').hidden = false;
+    slugField.style.display = form ? 'none' : ''; // não dá pra trocar a URL de um formulário já existente (evita link publicado quebrar)
+    populateSessionSelect(form ? form.sessionId : (instances[0] && instances[0].id));
+    renderPreview();
+    formModal.classList.add('open');
+  }
+  function closeFormModal() { formModal.classList.remove('open'); }
+
+  document.getElementById('newFormBtn').addEventListener('click', () => openFormModal(null));
+  document.getElementById('formModalCancel').addEventListener('click', closeFormModal);
+
+  document.getElementById('formModalSave').addEventListener('click', async () => {
+    const id = formIdInput.value;
+    const name = formNameInput.value.trim();
+    const title = formTitleInput.value.trim();
+    const subtitle = formSubtitleInput.value.trim();
+    const sessionId = formSessionSelect.value;
+    const welcomeMessage = formWelcomeMessageInput.value.trim();
+    const slug = formSlugInput.value.trim();
+    const accentColor = formAccentColorInput.value.trim();
+    const logoUrl = formLogoUrlInput.value.trim();
+    const heroImageUrl = formHeroImageUrlInput.value.trim();
+    const storyTitle = formStoryTitleInput.value.trim();
+    const storyText = formStoryTextInput.value.trim();
+
+    if (!name) { if (window.showToast) window.showToast('Dê um nome interno pro formulário.', 'error'); return; }
+    if (!title) { if (window.showToast) window.showToast('Preencha o título público.', 'error'); return; }
+    if (!sessionId) { if (window.showToast) window.showToast('Escolha uma instância.', 'error'); return; }
+    if (accentColor && !/^#[0-9a-f]{6}$/i.test(accentColor)) {
+      if (window.showToast) window.showToast('A cor precisa ser um hex válido, ex: #d8ab4f.', 'error');
+      return;
+    }
+    if (logoUrl && !/^https?:\/\//i.test(logoUrl)) {
+      if (window.showToast) window.showToast('A URL do logo precisa começar com http:// ou https://.', 'error');
+      return;
+    }
+    if (heroImageUrl && !/^https?:\/\//i.test(heroImageUrl)) {
+      if (window.showToast) window.showToast('A URL da imagem de fundo precisa começar com http:// ou https://.', 'error');
+      return;
+    }
+
+    // Cada lista: ignora linhas em branco deixadas sem preencher, mas
+    // recusa salvar se alguma linha ficou parcialmente preenchida (ex: só
+    // a pergunta, sem resposta) — mais claro pedir pra completar ou apagar
+    // do que salvar um item quebrado silenciosamente.
+    const cleanTestimonials = testimonials
+      .map((t) => ({ name: t.name.trim(), location: t.location.trim(), quote: t.quote.trim() }))
+      .filter((t) => t.name || t.quote);
+    if (cleanTestimonials.some((t) => !t.name || !t.quote)) {
+      if (window.showToast) window.showToast('Cada depoimento precisa de nome e texto (ou remova a linha em branco).', 'error');
+      return;
+    }
+    const cleanStats = stats
+      .map((s) => ({ value: s.value.trim(), label: s.label.trim() }))
+      .filter((s) => s.value || s.label);
+    if (cleanStats.some((s) => !s.value || !s.label)) {
+      if (window.showToast) window.showToast('Cada estatística precisa de valor e legenda (ou remova a linha em branco).', 'error');
+      return;
+    }
+    const cleanDifferentials = differentials
+      .map((d) => ({ title: d.title.trim(), description: d.description.trim() }))
+      .filter((d) => d.title || d.description);
+    if (cleanDifferentials.some((d) => !d.title)) {
+      if (window.showToast) window.showToast('Cada diferencial precisa de um título (ou remova a linha em branco).', 'error');
+      return;
+    }
+    const cleanFaq = faq
+      .map((f) => ({ question: f.question.trim(), answer: f.answer.trim() }))
+      .filter((f) => f.question || f.answer);
+    if (cleanFaq.some((f) => !f.question || !f.answer)) {
+      if (window.showToast) window.showToast('Cada pergunta precisa de resposta (ou remova a linha em branco).', 'error');
+      return;
+    }
+
+    const payload = {
+      name, title, subtitle, sessionId, welcomeMessage, accentColor, logoUrl, heroImageUrl,
+      heroMediaType: heroImageUrl ? heroMediaType : 'image', storyTitle, storyText,
+      testimonials: cleanTestimonials, stats: cleanStats, differentials: cleanDifferentials, faq: cleanFaq,
+    };
+
+    try {
+      if (id) {
+        const res = await apiFetch(`${API_BASE}/lead-forms/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error((await res.json()).error);
+      } else {
+        const res = await apiFetch(`${API_BASE}/lead-forms`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload, slug: slug || undefined }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error);
+      }
+      closeFormModal();
+      loadForms();
+      if (window.showToast) window.showToast('Formulário salvo.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  async function toggleForm(id) {
+    const form = forms.find((f) => String(f.id) === id);
+    if (!form) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/lead-forms/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active: !form.active }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadForms();
+      if (window.showToast) window.showToast(form.active ? 'Formulário desativado.' : 'Formulário ativado.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  async function deleteForm(id) {
+    const confirmed = await window.confirmDialog('Excluir este formulário? O link público deixa de funcionar. Os leads já recebidos continuam como contatos.');
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/lead-forms/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadForms();
+      if (window.showToast) window.showToast('Formulário excluído.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  let currentLeadsFormId = null; // guardado pra saber qual formulário exportar (botões no rodapé do modal)
+
+  async function openLeadsModal(id) {
+    currentLeadsFormId = id;
+    leadsWrap.innerHTML = '<p class="empty">Carregando…</p>';
+    leadsModal.classList.add('open');
+    try {
+      const res = await apiFetch(`${API_BASE}/lead-forms/${id}/submissions`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      const submissions = data.submissions || [];
+      if (!submissions.length) {
+        leadsWrap.innerHTML = '<p class="empty">Nenhum lead recebido ainda.</p>';
+        return;
+      }
+      leadsWrap.innerHTML = submissions.map((s) => `
+        <div class="lead-row">
+          <div>
+            <div class="lead-name">${s.name ? escapeHtml(s.name) : '<span class="empty-name">sem nome</span>'}</div>
+            <div class="lead-phone">${escapeHtml(s.phone)}${s.whatsappSent ? '' : ' · mensagem não enviada (instância offline)'}</div>
+          </div>
+          <div class="lead-date">${fmtDateTime(s.createdAt)}</div>
+        </div>
+      `).join('');
+    } catch (err) {
+      leadsWrap.innerHTML = '<p class="empty">Falha ao carregar leads.</p>';
+      console.error(err);
+    }
+  }
+  document.getElementById('leadsModalClose').addEventListener('click', () => leadsModal.classList.remove('open'));
+
+  // Baixa o arquivo autenticado (a rota exige o Bearer do app, então não dá
+  // pra só linkar <a href> direto) — busca como blob e dispara o download
+  // via um <a> temporário com um object URL.
+  async function downloadLeadsExport(format) {
+    if (!currentLeadsFormId) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/lead-forms/${currentLeadsFormId}/submissions/export?format=${format}`, { headers: FETCH_HEADERS });
+      if (!res.ok) throw new Error('falha ao gerar o arquivo');
+      const blob = await res.blob();
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match ? match[1] : `leads.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+  document.getElementById('leadsExportCsvBtn').addEventListener('click', () => downloadLeadsExport('csv'));
+  document.getElementById('leadsExportXlsxBtn').addEventListener('click', () => downloadLeadsExport('xlsx'));
+
+  // =========================================================
+  // Testes A/B
+  // =========================================================
+  const abTestsWrap = document.getElementById('abTestsWrap');
+  const abHistoryToggle = document.getElementById('abHistoryToggle');
+  const abHistoryCount = document.getElementById('abHistoryCount');
+  const abHistoryWrap = document.getElementById('abHistoryWrap');
+  const abTestModal = document.getElementById('abTestModal');
+  const abFinishModal = document.getElementById('abFinishModal');
+
+  let abTests = [];
+  let abHistory = [];
+
+  async function loadAbTests() {
+    try {
+      const [testsRes, histRes] = await Promise.all([
+        apiFetch(`${API_BASE}/ab-tests`, { headers: FETCH_HEADERS }),
+        apiFetch(`${API_BASE}/ab-tests/history`, { headers: FETCH_HEADERS }),
+      ]);
+      abTests = (await testsRes.json()).tests || [];
+      abHistory = (await histRes.json()).history || [];
+      renderAbTests();
+      renderAbHistory();
+    } catch (err) {
+      abTestsWrap.innerHTML = '<p class="empty">Falha ao carregar testes.</p>';
+      console.error(err);
+    }
+  }
+
+  const convPct = (views, leads) => (views > 0 ? Math.round((leads / views) * 1000) / 10 + '%' : '—');
+
+  function renderAbTests() {
+    const running = abTests.filter((t) => t.status === 'running');
+    if (!running.length) {
+      abTestsWrap.innerHTML = '<p class="empty">Nenhum teste em andamento. Crie um pra comparar duas LPs.</p>';
+      return;
+    }
+    abTestsWrap.innerHTML = `
+      <div class="ab-grid">
+        ${running.map((t) => {
+          const testUrl = `${window.location.origin}/t/${t.slug}`;
+          return `
+          <div class="ab-card">
+            <div class="ab-card-head">
+              <span class="ab-card-name">${escapeHtml(t.name)}</span>
+              <span class="status-pill running">Em andamento</span>
+            </div>
+            <div class="form-card-url">
+              <a class="url-text" href="${escapeHtml(testUrl)}" target="_blank" rel="noopener" title="${escapeHtml(testUrl)}">${escapeHtml(testUrl)}</a>
+              <button type="button" class="copy-btn" data-copy="${escapeHtml(testUrl)}" title="Copiar link do teste">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+            <table class="ab-table">
+              <tr><th></th><th>LP</th><th>Views</th><th>Leads</th><th>Conv.</th></tr>
+              <tr><td><b>A</b></td><td>${escapeHtml(t.formAName || '(excluída)')}</td><td>${t.viewsA}</td><td>${t.leadsA}</td><td>${convPct(t.viewsA, t.leadsA)}</td></tr>
+              <tr><td><b>B</b></td><td>${escapeHtml(t.formBName || '(excluída)')}</td><td>${t.viewsB}</td><td>${t.leadsB}</td><td>${convPct(t.viewsB, t.leadsB)}</td></tr>
+            </table>
+            <div class="form-card-actions">
+              <button type="button" data-ab-finish="${t.id}">Encerrar</button>
+              <button type="button" class="danger" data-ab-cancel="${t.id}">Cancelar teste</button>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  function renderAbHistory() {
+    if (!abHistory.length) {
+      abHistoryToggle.hidden = true;
+      abHistoryWrap.hidden = true;
+      return;
+    }
+    abHistoryToggle.hidden = false;
+    abHistoryCount.textContent = abHistory.length;
+    abHistoryWrap.innerHTML = abHistory.map((h) => {
+      const winnerLabel = h.winner == null
+        ? 'Sem vencedor claro'
+        : `Vencedor: variante ${h.winner.toUpperCase()} (${escapeHtml(h.variants[h.winner]?.snapshot?.name || '')})`;
+      const varLine = (key) => {
+        const v = h.variants[key];
+        if (!v || !v.snapshot) return '';
+        const m = v.metrics || {};
+        return `${key.toUpperCase()}: ${escapeHtml(v.snapshot.name)} — ${m.views ?? 0} views, ${m.leads ?? 0} leads, ${m.conversionPct != null ? m.conversionPct + '%' : '—'} conv.`;
+      };
+      return `
+        <div class="ab-history-item">
+          <b style="color:var(--text);">${escapeHtml(h.name)}</b>
+          · ${fmtDateTime(h.startedAt)} → ${fmtDateTime(h.finishedAt)}<br>
+          ${winnerLabel}<br>
+          ${varLine('a')}<br>
+          ${varLine('b')}
+          <div class="analysis">${escapeHtml(h.analysis || '')}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  abHistoryToggle.addEventListener('click', () => {
+    abHistoryWrap.hidden = !abHistoryWrap.hidden;
+    abHistoryToggle.textContent = `${abHistoryWrap.hidden ? '▸' : '▾'} Histórico de testes encerrados (${abHistory.length})`;
+  });
+
+  // --- criar teste ---
+  document.getElementById('newAbTestBtn').addEventListener('click', () => {
+    if (forms.length < 2) {
+      if (window.showToast) window.showToast('Crie pelo menos duas LPs antes de montar um teste A/B.', 'error');
+      return;
+    }
+    document.getElementById('abTestName').value = '';
+    const options = forms.map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('');
+    document.getElementById('abFormA').innerHTML = options;
+    document.getElementById('abFormB').innerHTML = options;
+    // pré-seleciona LPs diferentes pra não começar com A === B
+    document.getElementById('abFormB').selectedIndex = 1;
+    abTestModal.classList.add('open');
+    document.getElementById('abTestName').focus();
+  });
+  document.getElementById('abTestCancel').addEventListener('click', () => abTestModal.classList.remove('open'));
+  document.getElementById('abTestCreate').addEventListener('click', async () => {
+    const name = document.getElementById('abTestName').value.trim();
+    const formAId = document.getElementById('abFormA').value;
+    const formBId = document.getElementById('abFormB').value;
+    if (!name) { if (window.showToast) window.showToast('Dê um nome ao teste.', 'error'); return; }
+    if (formAId === formBId) { if (window.showToast) window.showToast('Escolha duas LPs diferentes.', 'error'); return; }
+    try {
+      const res = await apiFetch(`${API_BASE}/ab-tests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, formAId, formBId }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      abTestModal.classList.remove('open');
+      loadAbTests();
+      if (window.showToast) window.showToast('Teste criado — divulgue a URL /t/ pra começar a medir.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  // --- encerrar / cancelar (delegação no wrap, mesmo padrão do formsWrap) ---
+  abTestsWrap.addEventListener('click', (ev) => {
+    const copyUrl = ev.target.closest('[data-copy]')?.dataset.copy;
+    const finishId = ev.target.dataset.abFinish;
+    const cancelId = ev.target.dataset.abCancel;
+    if (copyUrl) {
+      navigator.clipboard.writeText(copyUrl).then(() => {
+        if (window.showToast) window.showToast('Link do teste copiado.', 'success');
+      });
+    }
+    if (finishId) openAbFinishModal(finishId);
+    if (cancelId) cancelAbTest(cancelId);
+  });
+
+  function openAbFinishModal(id) {
+    const test = abTests.find((t) => String(t.id) === String(id));
+    if (!test) return;
+    document.getElementById('abFinishId').value = id;
+    document.getElementById('abWinnerAName').textContent = test.formAName || '(excluída)';
+    document.getElementById('abWinnerBName').textContent = test.formBName || '(excluída)';
+    document.querySelector('input[name="abWinner"][value=""]').checked = true;
+    document.getElementById('abFinishAnalysis').value = '';
+    abFinishModal.classList.add('open');
+  }
+  document.getElementById('abFinishCancel').addEventListener('click', () => abFinishModal.classList.remove('open'));
+
+  document.getElementById('abSuggestAnalysisBtn').addEventListener('click', async () => {
+    const id = document.getElementById('abFinishId').value;
+    const btn = document.getElementById('abSuggestAnalysisBtn');
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Gerando…';
+    try {
+      const res = await apiFetch(`${API_BASE}/ab-tests/${id}/suggest-analysis`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar análise');
+      document.getElementById('abFinishAnalysis').value = data.analysis;
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+
+  document.getElementById('abFinishSave').addEventListener('click', async () => {
+    const id = document.getElementById('abFinishId').value;
+    const winner = document.querySelector('input[name="abWinner"]:checked')?.value || '';
+    const analysis = document.getElementById('abFinishAnalysis').value.trim();
+    if (!analysis) {
+      if (window.showToast) window.showToast('Escreva a análise/aprendizados — é o que dá valor ao histórico.', 'error');
+      return;
+    }
+    try {
+      const res = await apiFetch(`${API_BASE}/ab-tests/${id}/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ winner: winner || null, analysis }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      abFinishModal.classList.remove('open');
+      loadAbTests();
+      if (window.showToast) window.showToast('Teste encerrado — análise salva no histórico.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  async function cancelAbTest(id) {
+    const confirmed = await window.confirmDialog('Cancelar este teste? Ele será removido SEM entrar no histórico (só testes encerrados com análise ficam registrados).');
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/ab-tests/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadAbTests();
+      if (window.showToast) window.showToast('Teste cancelado.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  init();
+})();
+</script>
+<script>
+(function () {
+  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
+    if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
+    if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

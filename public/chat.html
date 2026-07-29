@@ -1,0 +1,3078 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chat · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
+  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
+  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
+  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --bubble-mine: var(--gold);
+    --bubble-mine-text: #1a1408;
+    --bubble-theirs: #261f16;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO) —
+     regra global; os seletores mais específicos abaixo (.conv-list,
+     .messages, .composer textarea) continuam valendo por cima dela. */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app{
+    margin-left: var(--sidebar-w);
+    height: calc(100vh - var(--footer-h));
+    display: flex;
+    overflow: hidden;
+    transition: margin-left .2s ease;
+  }
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 13px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  html.sidebar-collapsed #app{ margin-left: var(--sidebar-w-collapsed); }
+
+  /* ======================================================
+     Sidebar de navegação (retrátil) + notificações/toast
+     — mesmo componente usado nas outras páginas do app.
+     ====================================================== */
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  /* Grupo "Landing Page" com submenu "Métricas LP" (dropdown/acordeão) —
+     clicar no item principal navega normal; a seta abre/fecha o submenu,
+     que fica lembrado por página (localStorage). No modo ícone (sidebar
+     recolhida) o acordeão não faz sentido — mostra os dois itens sempre,
+     como já era antes de virarem um grupo só. */
+  .nav-group{ position:relative; }
+  .nav-group > .nav-item{ padding-right:34px; }
+  .nav-caret-btn{
+    position:absolute; top:10px; right:6px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
+    transition: color .15s, background .15s;
+  }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
+  .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
+  .nav-subitems{ display:none; flex-direction:column; }
+  .nav-group.open .nav-subitems{ display:flex; }
+  .nav-subitem{ padding-left:30px; font-size:12px; }
+  html.sidebar-collapsed .nav-caret-btn{ display:none; }
+  html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
+  html.sidebar-collapsed .nav-subitems{ display:flex !important; }
+
+  .sidebar-bottom{
+    height: var(--footer-h); box-sizing:border-box;
+    display:flex; align-items:center;
+    border-top:1px solid var(--border); padding:0 10px; flex-shrink:0;
+  }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  .toast.clickable{ cursor:pointer; }
+  .toast.clickable:hover{ filter: brightness(1.15); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  select, input[type="text"], input[type="search"], textarea{
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 11px;
+    outline: none;
+  }
+  select:focus, input:focus, textarea:focus{ border-color: var(--gold-dim); }
+
+  .btn{
+    background: var(--gold);
+    color: #1a1408;
+    border: none;
+    border-radius: 9px;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover{ filter: brightness(1.08); }
+  .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter: none; }
+  .btn.secondary:hover svg{ color: var(--gold); }
+
+  .empty{ color: var(--text-faint); font-size: 12.5px; padding: 14px; text-align:center; }
+
+  /* ======================================================
+     Chat — lista de conversas (inbox) + conversa aberta
+     ====================================================== */
+  .conv-pane{
+    width: 340px; flex-shrink:0;
+    display:flex; flex-direction:column; min-height:0;
+    border-right:1px solid var(--border);
+    background: var(--surface);
+  }
+  .conv-pane-head{
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; justify-content:center;
+    padding: 8px 16px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .conv-pane-head-top{ display:flex; align-items:center; justify-content:space-between; margin:0 0 10px; }
+  .conv-pane-head-actions{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
+  .conv-filters-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .conv-pane-head h1{ font-family:'Fraunces',serif; font-weight:600; font-size:19px; margin:0; }
+  .conv-pane-head select{ width:100%; }
+
+  .conv-filters{ padding: 12px 14px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .conv-filters input, .conv-filters select{ width:100%; }
+
+  .archive-filter{
+    display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 3px; gap: 2px; align-self:flex-start;
+  }
+  .archive-filter button{
+    background: none; border: none; color: var(--text-muted); font-size: 11.5px;
+    padding: 5px 11px; border-radius: 7px; cursor: pointer;
+  }
+  .archive-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
+  .archive-filter button:not(.active):hover{ color: var(--gold); }
+
+  /* ---------- Modais (novo grupo) ---------- */
+  .overlay{
+    position: fixed; inset: 0; background: rgba(10,8,5,.6);
+    display: none; align-items: center; justify-content: center; z-index: 55; padding: 20px;
+  }
+  .overlay.open{ display: flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 20px; width: 100%; max-width: 420px; max-height: 84vh; overflow-y: auto;
+  }
+  .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
+  .modal .field{ margin-bottom: 12px; }
+  label.field-label{ display:block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+  .modal-actions{ display:flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .checkbox-list{
+    max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface-2); margin-top: 4px;
+  }
+  .checkbox-row{ display:flex; align-items:center; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .checkbox-row:last-child{ border-bottom: none; }
+
+  .conv-list{ flex:1; overflow-y:auto; min-height:0; }
+  .conv-list::-webkit-scrollbar{ width: 8px; }
+  .conv-list::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 4px; }
+
+  .conv-item{
+    display:flex; gap:10px; align-items:flex-start;
+    padding: 12px 14px; border-bottom:1px solid var(--border);
+    cursor:pointer; transition: background .12s;
+  }
+  .conv-item:hover{ background: var(--surface-2); }
+  .conv-item.active{ background: rgba(var(--gold-rgb),.12); }
+  .conv-item-body{ min-width:0; flex:1; }
+  .conv-item-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .conv-item-name{ font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conv-item-top-right{ display:flex; align-items:center; gap:4px; flex-shrink:0; }
+  .conv-item-time{ font-size:10.5px; color:var(--text-faint); flex-shrink:0; }
+  .conv-item-snippet{ font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .conv-item-tags{ display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+  .conv-item-action-btn{
+    background:none; border:none; color:var(--text-faint); cursor:pointer;
+    padding:3px; border-radius:6px; flex-shrink:0; opacity:0; transition: opacity .12s, color .12s, background .12s;
+  }
+  .conv-item:hover .conv-item-action-btn{ opacity:1; }
+  .conv-item-action-btn:hover{ background:var(--surface); color:var(--gold); }
+  .conv-item-action-btn.muted{ opacity:1; color:var(--text-muted); }
+  .conv-item-action-btn svg{ width:14px; height:14px; display:block; }
+
+  .tag-chip{
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:10.5px; padding:2px 8px; border-radius:100px; border:1px solid;
+    white-space:nowrap;
+  }
+  .tag-chip .tag-remove{ background:none; border:none; color:inherit; cursor:pointer; font-size:12px; line-height:1; padding:0; margin-left:1px; }
+  .tag-chip .tag-remove:hover{ opacity:.7; }
+
+  .conv-view{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+  .back-btn{ display:none; }
+
+  /* Em telas estreitas, lista e conversa não cabem lado a lado — empilha e
+     alterna entre as duas (a lista some quando uma conversa está aberta). */
+  @media (max-width: 760px){
+    #app{ margin-left: 0 !important; }
+    .conv-pane{ width: 100%; }
+    #app.chat-open .conv-pane{ display:none; }
+    #app:not(.chat-open) .conv-view{ display:none; }
+    .back-btn{ display:flex; }
+  }
+
+  .tags-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .tag-chips{ display:flex; gap:6px; flex-wrap:wrap; }
+  .tag-add-btn{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); font-size:11px; padding:4px 10px; border-radius:100px; cursor:pointer; }
+  .tag-add-btn:hover{ border-color:var(--gold-dim); color:var(--gold); }
+  .tag-add-form{ display:flex; gap:6px; align-items:center; }
+  .tag-add-form input{ width:160px; padding:5px 9px; font-size:12px; }
+  .tag-add-form .btn{ padding:5px 12px; font-size:11.5px; }
+
+  /* ---------- Header da conversa ---------- */
+  .chat-header{
+    height: var(--header-h); box-sizing:border-box;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 18px; background: var(--surface);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .avatar{
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px;
+    color: var(--gold); flex-shrink: 0; position: relative;
+  }
+  .avatar.sm{ width:34px; height:34px; font-size:13px; }
+  .avatar.lg{ width:64px; height:64px; font-size:22px; }
+  .avatar img{ width:100%; height:100%; border-radius:50%; object-fit:cover; }
+  .avatar-status{
+    position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px;
+    border-radius: 50%; border: 2px solid var(--surface); box-sizing: content-box;
+    background: var(--text-faint);
+  }
+  .avatar-status.online{ background: var(--green); }
+  .avatar-status.offline{ background: var(--red); }
+
+  /* ======================================================
+     Painel de detalhes do contato (dados do Bitrix), à direita da conversa
+     ====================================================== */
+  .contact-panel{
+    width: 280px; flex-shrink: 0;
+    display: none;
+    flex-direction: column;
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .contact-panel-body{ flex:1; overflow-y:auto; display:flex; flex-direction:column; min-height:0; }
+  /* min-height igual ao total do .composer+.composer-hint (coluna do meio),
+     pra a linha do topo deste rodapé (border-top) alinhar com a do composer
+     — sem isso o botão ficava mais alto que a barra de mensagem ao lado. */
+  .contact-panel-footer{
+    flex-shrink:0; border-top:1px solid var(--border); padding:12px 16px;
+    min-height:90px; box-sizing:border-box; display:flex; flex-direction:column; justify-content:center;
+  }
+  .contact-panel.open{ display: flex; }
+  @media (max-width: 1100px){
+    .contact-panel{ display: none !important; }
+  }
+  .contact-panel-head{
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; align-items:center;
+    padding: 0 16px; border-bottom: 1px solid var(--border); flex-shrink:0;
+  }
+  .contact-panel-head h3{ font-family:'Fraunces',serif; font-weight:600; font-size:14px; margin:0; color:var(--text); }
+  .contact-card{ display:flex; flex-direction:column; align-items:center; text-align:center; padding: 20px 16px; gap:6px; border-bottom:1px solid var(--border); }
+  .contact-name{ font-size:14.5px; font-weight:600; color:var(--text); }
+  .contact-role{ font-size:12px; color:var(--text-muted); }
+  .contact-stats{ display:flex; border-bottom:1px solid var(--border); }
+  .contact-stat{ flex:1; text-align:center; padding:12px 4px; border-left:1px solid var(--border); }
+  .contact-stat:first-child{ border-left:none; }
+  .contact-stat-value{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; color:var(--gold); }
+  .contact-stat-label{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+  .contact-groups{ padding:10px 16px 4px; }
+  .contact-groups-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
+  .contact-groups-list{ display:flex; flex-direction:column; gap:4px; }
+  .contact-group-item{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted); }
+  .contact-group-item svg{ width:13px; height:13px; flex-shrink:0; color:var(--text-faint); }
+  .contact-docs{ padding:10px 16px 4px; }
+  .contact-docs-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
+  .contact-docs-list{ display:flex; flex-direction:column; gap:4px; }
+  .contact-doc-item{
+    display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);
+    text-decoration:none; padding:5px 6px; margin:0 -6px; border-radius:6px; transition: background .12s ease;
+  }
+  a.contact-doc-item:hover{ background:var(--surface-2); color:var(--text); }
+  .contact-doc-item svg{ width:13px; height:13px; flex-shrink:0; color:var(--text-faint); }
+  .contact-doc-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .contact-fields{ display:flex; flex-direction:column; padding:10px; gap:2px; }
+  .contact-field{
+    display:flex; align-items:flex-start; gap:10px;
+    padding:9px 10px; border-radius:8px;
+    color:var(--text-muted); font-size:12.5px; line-height:1.4;
+    text-decoration:none; word-break:break-word;
+  }
+  a.contact-field:hover{ background:var(--surface-2); color:var(--text); }
+  .contact-field svg{ width:15px; height:15px; flex-shrink:0; color:var(--text-faint); margin-top:1px; }
+  .contact-field-text{ display:flex; flex-direction:column; min-width:0; gap:1px; }
+  .contact-field-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); }
+  .contact-field-empty{ color:var(--text-faint); cursor:default; }
+  .contact-open-crm{ width:100%; margin:0; line-height:1.4; }
+  /* Mesmo slot do botão "Abrir no CRM" (.contact-panel-footer) — achado ou
+     não, o status do CRM sempre aparece no mesmo lugar, nunca no meio do
+     corpo do painel. */
+  .contact-not-found{ margin:0; padding:10px 12px; border-radius:8px; background:var(--surface-2); color:var(--text-faint); font-size:11.5px; line-height:1.4; text-align:center; }
+  .contact-panel .empty{ padding: 24px 16px; }
+
+  /* margin-top:auto empurra o resumo pro fim do painel (acima do rodapé)
+     quando o resto do conteúdo não preenche a altura toda — só some abaixo
+     de Grupos em comum quando o painel realmente estiver cheio o bastante
+     pra rolar. */
+  .contact-summary{
+    margin:auto 10px 10px; padding:11px 12px; border-radius:9px; background:var(--surface-2); border:1px solid var(--border);
+    transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .contact-summary:hover{ transform: translateY(-2px); border-color: var(--gold-dim); box-shadow: 0 6px 16px rgba(0,0,0,.28); }
+  .contact-summary-head{ display:flex; align-items:center; margin-bottom:6px; }
+  /* Rótulo fixo da seção ("Resumo da conversa") — não confundir com
+     .contact-summary-headline, que é o título GERADO pela IA pra essa
+     conversa específica. */
+  .contact-summary-label{ font-size:11px; font-weight:600; color:var(--text-muted); display:flex; align-items:center; gap:5px; }
+  .contact-summary-headline{ font-size:13.5px; font-weight:700; color:var(--text); margin:0 0 3px; line-height:1.35; }
+  .contact-summary-subtitle{ font-size:11px; font-weight:600; color:var(--gold); margin:0 0 8px; line-height:1.35; }
+  .contact-summary-text{ font-size:12px; line-height:1.5; color:var(--text-muted); margin:0; }
+  .contact-summary-text.empty-summary{ color:var(--text-faint); font-style:italic; }
+  .contact-summary-meta{ font-size:9.5px; color:var(--text-faint); margin:6px 0 0; }
+  .header-info{ min-width: 0; flex: 1; }
+  .header-info .name{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .header-info .meta{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+  .status-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; position: relative; }
+  .status-dot.online{ background: var(--green); }
+  .status-dot.online::after{ content: ''; position: absolute; inset: -3px; border-radius: 50%; border: 1px solid var(--green); opacity: 0.5; animation: pulse 2s ease-out infinite; }
+  .status-dot.offline{ background: var(--red); }
+  @keyframes pulse{ 0%{ transform: scale(0.8); opacity: 0.6; } 100%{ transform: scale(1.8); opacity: 0; } }
+
+  .header-actions{ display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+  .icon-btn{
+    width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .icon-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .icon-btn svg{ width: 17px; height: 17px; }
+  .icon-btn.recording{ background: var(--red); border-color: var(--red); color: #fff; animation: recPulse 1.2s ease-in-out infinite; }
+  .icon-btn.active{ background: rgba(var(--gold-rgb),.14); border-color: var(--gold-dim); color: var(--gold); }
+  @keyframes recPulse{ 0%,100%{ opacity: 1; } 50%{ opacity: .6; } }
+
+  /* ---------- Mensagens ---------- */
+  .messages{
+    flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 4px;
+    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  .messages::-webkit-scrollbar{ width: 8px; }
+  .messages::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 4px; }
+
+  .day-divider{
+    align-self: center; font-size: 11px; color: var(--text-faint); background: var(--surface);
+    border: 1px solid var(--border); padding: 4px 12px; border-radius: 100px; margin: 14px 0 10px;
+    letter-spacing: .03em; text-transform: uppercase;
+  }
+  .bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
+  .bubble-row.mine{ justify-content: flex-end; }
+  .bubble-row.theirs{ justify-content: flex-start; }
+  .bubble-row.has-reaction{ margin-bottom: 14px; }
+
+  /* Reagir/Responder — barra que aparece ao passar o mouse na mensagem
+     (mesmo padrão do WhatsApp Web). Fica de fora do balão, do lado de fora
+     (esquerda pra mensagem nossa, direita pra do contato). */
+  .bubble-actions-wrap{ display: none; align-items: center; gap: 3px; padding-bottom: 6px; flex-shrink: 0; }
+  .bubble-row:hover .bubble-actions-wrap, .bubble-actions-wrap.picker-open{ display: flex; }
+  .bubble-action-btn{
+    width: 25px; height: 25px; border-radius: 50%; border: none; background: var(--surface-2);
+    color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 12.5px; padding: 0; transition: background .15s, color .15s;
+  }
+  .bubble-action-btn:hover{ background: var(--gold-dim); color: var(--bg); }
+  .emoji-picker{ display: flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 100px; padding: 3px; }
+  .emoji-opt{ width: 25px; height: 25px; border: none; background: none; font-size: 15px; cursor: pointer; border-radius: 50%; }
+  .emoji-opt:hover{ background: var(--surface); transform: scale(1.15); }
+
+  /* Mensagem citada ("responder") — pequeno bloco acima do conteúdo, dentro
+     do próprio balão. */
+  .quoted-block{
+    border-left: 3px solid var(--gold-dim); background: rgba(0,0,0,.14); border-radius: 6px;
+    padding: 5px 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; cursor: pointer;
+  }
+  .bubble-row.theirs .quoted-block{ background: rgba(255,255,255,.06); border-left-color: var(--gold); }
+  .quoted-author{ font-weight: 600; color: var(--gold); margin-bottom: 1px; font-size: 11.5px; }
+  .quoted-text{
+    opacity: .8; overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  /* Citação de mídia sem legenda (ex: responder um áudio) — ícone + rótulo
+     em vez de só texto, pra ficar claro de longe que tipo de mensagem era. */
+  .quoted-media-row{ display:flex; align-items:center; gap:5px; opacity:.8; }
+  .quoted-media-row svg{ width:13px; height:13px; flex-shrink:0; }
+  .quoted-block--unknown{ font-style: italic; opacity: .65; cursor: default; }
+  .bubble-row.flash .bubble{ outline: 2px solid var(--gold); outline-offset: 1px; }
+
+  /* Barra "Respondendo a…" acima do composer */
+  .reply-preview-bar{
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    background: var(--surface-2); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .reply-preview-bar[hidden]{ display: none; }
+  .reply-preview-bar .bar-icon{ color: var(--gold); flex-shrink: 0; }
+  .reply-preview-body{ flex: 1; min-width: 0; }
+  .reply-preview-author{ font-size: 11.5px; font-weight: 600; color: var(--gold); }
+  .reply-preview-text{ font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bubble{
+    max-width: 68%; width: fit-content; padding: 9px 12px 8px; font-size: 13.5px; line-height: 1.45;
+    border-radius: var(--radius); word-wrap: break-word; white-space: pre-wrap;
+    position: relative; box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14);
+  }
+  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border: 1px solid var(--border); border-bottom-left-radius: 3px; color: var(--text); }
+  .bubble-row.mine .bubble{
+    background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.25);
+  }
+  .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
+  .bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; }
+  .reaction-badge{
+    position: absolute; bottom: -11px; right: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
+    padding: 1px 6px; font-size: 13px; line-height: 1.4; box-shadow: 0 1px 3px rgba(0,0,0,.35);
+  }
+  .bubble-row.theirs .reaction-badge{ right: auto; left: 10px; }
+  .reaction-badge--mine{ cursor: pointer; }
+  .reaction-badge--mine:hover{ filter: brightness(1.3); }
+
+  /* Mídia (imagem/vídeo) dentro do balão: moldura fina em vez do preenchimento
+     total do balão de texto, deixando a mídia praticamente de ponta a ponta —
+     evita a "caixa preta com barra de controle nativa perdida" de antes.
+     Horário/check sempre no rodapé do balão (fora da moldura da mídia, nunca
+     sobreposto em cima dela). */
+  .bubble.bubble--media{ padding: 3px 3px 8px; }
+  .media-frame{ position: relative; line-height: 0; border-radius: 11px; overflow: hidden; background: #000; }
+  .media-frame img, .media-frame video{ display: block; width: 100%; max-width: 260px; max-height: 320px; object-fit: cover; background: #000; }
+  .caption-text{ padding: 7px 4px 0; }
+  .bubble audio{ accent-color: var(--gold); height: 34px; }
+
+  /* Cartão de documento (PDF, PPT, DOCX, planilha, zip...) — o WhatsApp não
+     tem como renderizar um anexo genérico como mídia embutida, então mostra
+     nome + ícone, igual ao próprio app. */
+  .doc-attachment{
+    display: flex; align-items: center; gap: 10px; text-decoration: none; color: inherit;
+    background: rgba(0,0,0,.16); border-radius: 9px; padding: 9px 10px; min-width: 190px; max-width: 260px;
+  }
+  .doc-attachment:hover{ background: rgba(0,0,0,.24); }
+  .doc-icon{ flex-shrink: 0; width: 30px; height: 30px; border-radius: 7px; background: rgba(255,255,255,.12); color: currentColor; display: flex; align-items: center; justify-content: center; }
+  .doc-icon svg{ width: 16px; height: 16px; }
+  .doc-info{ min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .doc-name{ font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-hint{ font-size: 10.5px; opacity: .75; }
+
+  /* Prévia de link (Open Graph) — mesmo conceito do WhatsApp/Slack ao
+     detectar uma URL no texto da mensagem. */
+  .msg-link{ color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .link-preview{
+    display: block; margin-top: 6px; border-radius: 10px; overflow: hidden;
+    background: rgba(0,0,0,.14); border: 1px solid rgba(0,0,0,.16);
+    text-decoration: none; color: inherit;
+  }
+  .bubble-row.theirs .link-preview{ background: var(--surface-2); border-color: var(--border); }
+  .link-preview-img{ display: block; width: 100%; max-height: 140px; object-fit: cover; background: var(--surface-2); }
+  .link-preview-body{ padding: 7px 10px; }
+  .link-preview-title{ font-size: 12.5px; font-weight: 600; line-height: 1.3; margin-bottom: 2px; }
+  .link-preview-desc{
+    font-size: 11.5px; opacity: .75; line-height: 1.35;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .link-preview-site{ font-size: 10px; opacity: .6; text-transform: uppercase; letter-spacing: .03em; margin-top: 4px; }
+  .link-preview-loading{ display: block; margin-top: 6px; font-size: 11px; opacity: .55; font-style: italic; }
+
+  /* ---------- Estados vazio/carregando/erro ---------- */
+  .state-screen{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 30px; text-align: center; color: var(--text-muted); }
+  .state-screen .state-icon{ width: 46px; height: 46px; color: var(--gold-dim); }
+  .state-screen h3{ font-family: 'Fraunces', serif; font-weight: 500; font-size: 16px; color: var(--text); margin: 4px 0 0; }
+  .state-screen p{ font-size: 12.5px; max-width: 280px; margin: 0; color: var(--text-faint); }
+  .spinner{ width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--gold); animation: spin .8s linear infinite; }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+
+  /* ---------- Composer ---------- */
+  .composer{ display: flex; align-items: flex-end; gap: 10px; padding: 12px 14px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .composer textarea{
+    flex: 1; resize: none; border-radius: 12px; font-size: 13.5px; padding: 10px 12px;
+    max-height: 110px; min-height: 40px; line-height: 1.4; transition: border-color .15s;
+  }
+  .composer textarea::placeholder{ color: var(--text-faint); }
+  .composer textarea::-webkit-scrollbar{ width: 6px; }
+  .composer textarea::-webkit-scrollbar-track{ background: transparent; }
+  .composer textarea::-webkit-scrollbar-thumb{ background: var(--gold-dim); border-radius: 100px; }
+  .composer textarea::-webkit-scrollbar-thumb:hover{ background: var(--gold); }
+  .send-btn{
+    width: 40px; height: 40px; border-radius: 11px; border: none; background: var(--gold); color: #1a1408;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+    transition: filter .15s, transform .1s;
+  }
+  .send-btn:hover{ filter: brightness(1.08); }
+  .send-btn:active{ transform: scale(.93); }
+  .send-btn:disabled{ background: var(--surface-2); color: var(--text-faint); cursor: not-allowed; }
+  .send-btn svg{ width: 17px; height: 17px; }
+  .composer-hint{ font-size: 10.5px; line-height:1.4; color: var(--text-faint); padding: 0 14px 10px; background: var(--surface); flex-shrink:0; }
+  .disconnected-banner{ background: rgba(var(--red-rgb),.12); border-top: 1px solid rgba(var(--red-rgb),.3); color: #e89c95; font-size: 12px; padding: 8px 14px; text-align: center; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/dashboard.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item active">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <div class="nav-group" id="navGroupCampaign">
+      <a href="/campaign.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+        <span class="nav-label">Campanha</span>
+        <span class="nav-tip">Campanha</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupCampaignToggle" title="Mostrar/ocultar Análise de Campanha e Agenda de Envios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/campaign-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg></span>
+          <span class="nav-label">Análise de Campanha</span>
+          <span class="nav-tip">Análise de Campanha</span>
+        </a>
+        <a href="/campaign-schedule.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
+          <span class="nav-label">Agenda de Envios</span>
+          <span class="nav-tip">Agenda de Envios</span>
+        </a>
+      </div>
+    </div>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <div class="nav-group" id="navGroupLP">
+      <a href="/sites.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-label">Landing Page</span>
+        <span class="nav-tip">Landing Page</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupLPToggle" title="Mostrar/ocultar Métricas LP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/lead-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
+          <span class="nav-label">Métricas LP</span>
+          <span class="nav-tip">Métricas LP</span>
+        </a>
+      </div>
+    </div>
+    <a href="/onboarding.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+      <span class="nav-label">Onboarding</span>
+      <span class="nav-tip">Onboarding</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <div class="nav-group" id="navGroupSettings">
+      <a href="/settings.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Configurações</span>
+        <span class="nav-tip">Configurações</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupSettingsToggle" title="Mostrar/ocultar Instâncias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/instances.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">Instâncias</span>
+          <span class="nav-tip">Instâncias</span>
+        </a>
+      </div>
+    </div>
+    <a href="/apresentacao.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
+      <span class="nav-label">Apresentação</span>
+      <span class="nav-tip">Apresentação</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <div class="conv-pane">
+    <div class="conv-pane-head">
+      <div class="conv-pane-head-top">
+        <h1>Chat</h1>
+      </div>
+      <select id="instanceSelect"><option value="">Carregando instâncias…</option></select>
+    </div>
+    <div class="conv-filters">
+      <input type="search" id="convSearch" placeholder="Buscar contato…" />
+      <select id="tagFilterSelect"><option value="">Todas as tags</option></select>
+      <div class="conv-filters-row">
+        <div class="archive-filter" id="archiveFilter">
+          <button type="button" data-archived="false" class="active">Ativas</button>
+          <button type="button" data-archived="true">Arquivadas</button>
+        </div>
+        <span class="conv-pane-head-actions">
+          <button class="icon-btn" id="viewGroupsBtn" title="Grupos do WhatsApp" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+          </button>
+          <button class="icon-btn" id="newGroupBtn" title="Novo grupo do WhatsApp" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </button>
+        </span>
+      </div>
+    </div>
+    <div class="conv-list" id="convList">
+      <p class="empty">Carregando conversas…</p>
+    </div>
+  </div>
+  <div class="conv-view" id="convView"></div>
+  <div class="contact-panel" id="contactPanel"></div>
+</div>
+
+<div class="overlay" id="newGroupModal">
+  <div class="modal">
+    <h3>Novo grupo do WhatsApp</h3>
+    <div class="field" id="groupInstanceField" hidden>
+      <label class="field-label">Instância</label>
+      <select id="groupInstanceSelect"></select>
+    </div>
+    <div class="field">
+      <label class="field-label">Nome do grupo</label>
+      <input type="text" id="groupNameInput" placeholder="Ex: Clientes VIP">
+    </div>
+    <div class="field">
+      <label class="field-label">Selecionar por tag (opcional)</label>
+      <select id="groupTagSelect"><option value="">— nenhuma —</option></select>
+    </div>
+    <div class="field">
+      <label class="field-label">Participantes (das conversas atuais)</label>
+      <div class="checkbox-list" id="groupCheckboxes"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="groupModalCancel">Cancelar</button>
+      <button class="btn" id="groupModalCreate">Criar grupo</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="moveInstanceModal">
+  <div class="modal">
+    <h3>Mover conversa pra outra instância</h3>
+    <p style="margin:0 0 14px; font-size:12px; color:var(--text-muted); line-height:1.5;">Útil se essa instância caiu/desconectou — as próximas mensagens passam a sair pelo número escolhido, mantendo o histórico já trocado com o contato.</p>
+    <div class="field">
+      <label class="field-label">Nova instância</label>
+      <select id="moveInstanceSelect"></select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="moveInstanceCancel">Cancelar</button>
+      <button class="btn" id="moveInstanceConfirm">Mover conversa</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="viewGroupsModal">
+  <div class="modal">
+    <h3>Grupos do WhatsApp</h3>
+    <div class="field" id="viewGroupsInstanceField" hidden>
+      <label class="field-label">Instância</label>
+      <select id="viewGroupsInstanceSelect"></select>
+    </div>
+    <div class="checkbox-list" id="viewGroupsList" style="max-height:320px"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="viewGroupsCancel">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<div class="credit-row">
+  <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+    <span class="dot"></span> Desenvolvido por Daniel Costa
+  </a>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var lpGroup = document.getElementById('navGroupLP');
+  var lpToggle = document.getElementById('navGroupLPToggle');
+  if (lpGroup && lpToggle) {
+    if (localStorage.getItem('navGroupLPOpen') === '1') lpGroup.classList.add('open');
+    lpToggle.addEventListener('click', function () {
+      var nowOpen = lpGroup.classList.toggle('open');
+      localStorage.setItem('navGroupLPOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var campaignGroup = document.getElementById('navGroupCampaign');
+  var campaignToggle = document.getElementById('navGroupCampaignToggle');
+  if (campaignGroup && campaignToggle) {
+    if (localStorage.getItem('navGroupCampaignOpen') === '1') campaignGroup.classList.add('open');
+    campaignToggle.addEventListener('click', function () {
+      var nowOpen = campaignGroup.classList.toggle('open');
+      localStorage.setItem('navGroupCampaignOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var settingsGroup = document.getElementById('navGroupSettings');
+  var settingsToggle = document.getElementById('navGroupSettingsToggle');
+  if (settingsGroup && settingsToggle) {
+    if (localStorage.getItem('navGroupSettingsOpen') === '1') settingsGroup.classList.add('open');
+    settingsToggle.addEventListener('click', function () {
+      var nowOpen = settingsGroup.classList.toggle('open');
+      localStorage.setItem('navGroupSettingsOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  function escapeHtmlGlobal(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : str;
+    return div.innerHTML;
+  }
+
+  // O histórico de notificações agora é persistido no banco e mostrado em
+  // /notifications.html (sino da sidebar virou link pra lá) — isto aqui é só
+  // o aviso imediato em tela (toast). `target` (opcional): dado livre que a
+  // própria página interpreta ao clicar no toast — ver window.__notifNavigate,
+  // definido só nas páginas que têm "pra onde ir" (hoje, só o Chat).
+  window.showToast = function (message, type, target) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type + (target ? ' clickable' : '');
+      el.textContent = message;
+      if (target && typeof window.__notifNavigate === 'function') {
+        el.addEventListener('click', function () { window.__notifNavigate(target); });
+      }
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  // Badge de não lidas no sino da sidebar (agora um link pra /notifications.html,
+  // não mais um dropdown) — window.updateNotifBadge é chamado com a contagem
+  // vinda de GET /notifications/unread-count assim que o login terminar (ver
+  // resolveOwner() logo abaixo). window.__bumpNotifBadge soma +1 localmente —
+  // só o Chat tem o socket aberto pra saber ao vivo que chegou notificação nova.
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+  window.__bumpNotifBadge = function () {
+    var current = Number(notifDot && notifDot.textContent) || 0;
+    window.updateNotifBadge(current + 1);
+  };
+
+  // Substitui confirm() nativo do navegador — mesmo visual dos outros modais
+  // (.overlay/.modal/.btn já usados no resto do app). Cria o próprio DOM na
+  // primeira chamada, não precisa de HTML duplicado em cada página.
+  var __confirmResolve = null;
+  window.confirmDialog = function (message) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('__confirmOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = '__confirmOverlay';
+        overlay.innerHTML =
+          '<div class="modal" style="max-width:340px;text-align:center;">' +
+            '<h3 id="__confirmMsg" style="font-weight:500;"></h3>' +
+            '<div class="modal-actions" style="justify-content:center;">' +
+              '<button class="btn secondary" id="__confirmCancel">Cancelar</button>' +
+              '<button class="btn" id="__confirmOk">Confirmar</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        overlay.querySelector('#__confirmOk').addEventListener('click', function () { __finishConfirm(true); });
+        overlay.querySelector('#__confirmCancel').addEventListener('click', function () { __finishConfirm(false); });
+      }
+      overlay.querySelector('#__confirmMsg').textContent = message;
+      overlay.classList.add('open');
+      __confirmResolve = resolve;
+    });
+  };
+  function __finishConfirm(result) {
+    var overlay = document.getElementById('__confirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
+  }
+
+  // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o confirmDialog,
+  // que conta como "Cancelar".
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+  });
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_BASE = window.location.origin + '/api/whatsapp';
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+
+  let appToken = null;
+
+  // Confirma com o backend (que por sua vez confirma com o próprio Bitrix)
+  // que o access_token pertence de verdade a um usuário deste portal, e
+  // devolve um token de app curto — usado em toda chamada de API daqui pra
+  // frente via `Authorization: Bearer`. Ver src/auth.js.
+  async function verifyAuth() {
+    if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
+    await bx24Ready;
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  // BX24.getAuth() só tem dado de verdade DEPOIS que esse callback dispara —
+  // chamá-lo antes devolve vazio. verifyAuth() espera essa promise pra nunca
+  // rodar cedo demais, não importa de onde for chamado.
+  let resolveBx24Ready;
+  const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
+  if (window.BX24) {
+    BX24.init(() => {
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      resolveBx24Ready();
+    });
+  } else {
+    resolveBx24Ready(); // deixa verifyAuth() falhar com uma mensagem clara, em vez de travar pra sempre
+  }
+
+  // O ownerId agora vem do backend (verifyAuth), já verificado contra o
+  // Bitrix de verdade — não é mais calculado só no navegador.
+  async function resolveOwner() {
+    const ownerId = await verifyAuth();
+    fetch(`${API_BASE}/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+      .catch(() => {});
+    return ownerId;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  // `.bubble` usa white-space:pre-wrap (preserva quebra de linha digitada
+  // pelo usuário) — isso também preserva, como espaço em branco VISÍVEL, a
+  // indentação/quebra de linha "de formatação" entre tags dos templates
+  // multi-linha abaixo. Como todo texto de usuário já passa por escapeHtml
+  // (vira &lt;/&gt;, nunca um "<"/">" cru), qualquer "><" que sobrar no HTML
+  // final é sempre nosso, nunca conteúdo de mensagem — seguro remover.
+  function compactHtml(html) {
+    return html.replace(/>\s+</g, '><');
+  }
+
+  function initials(name) {
+    if (!name) return '?';
+    const parts = name.trim().split(/\s+/);
+    return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
+  }
+
+  // Foto de perfil se já tiver sido carregada (ver fetchMissingAvatars), senão
+  // as iniciais do nome como hoje.
+  function avatarInner(name, avatarUrl) {
+    return avatarUrl
+      ? `<img src="${escapeHtml(avatarUrl)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
+      : escapeHtml(initials(name));
+  }
+
+  // =========================================================
+  // Painel de detalhes do contato — busca no Bitrix (CRM) os dados de quem
+  // está do outro lado da conversa, pra mostrar no painel à direita.
+  // =========================================================
+  function callMethod(method, params) {
+    return new Promise((resolve, reject) => {
+      if (!window.BX24) { reject(new Error('BX24 indisponível')); return; }
+      BX24.callMethod(method, params, (result) => {
+        if (result.error()) reject(result.error());
+        else resolve(result.data());
+      });
+    });
+  }
+
+  function firstValue(field) {
+    return Array.isArray(field) && field[0] ? field[0].VALUE : null;
+  }
+
+  async function contactInfoFromContact(contactId, companyIdHint) {
+    const contact = await callMethod('crm.contact.get', { id: contactId });
+    if (!contact) return null;
+    const companyId = companyIdHint || contact.COMPANY_ID;
+    let company = null;
+    if (companyId && Number(companyId) > 0) {
+      try { company = await callMethod('crm.company.get', { id: companyId }); } catch { /* segue sem empresa */ }
+    }
+    return {
+      kind: 'contact',
+      id: contact.ID,
+      name: [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ') || null,
+      post: contact.POST || null,
+      email: firstValue(contact.EMAIL),
+      phone: firstValue(contact.PHONE),
+      companyName: company?.TITLE || null,
+      address: [company?.ADDRESS_CITY, company?.ADDRESS_COUNTRY].filter(Boolean).join(', ') || null,
+      web: firstValue(company?.WEB) || firstValue(contact.WEB),
+    };
+  }
+
+  async function contactInfoFromLead(leadId) {
+    const lead = await callMethod('crm.lead.get', { id: leadId });
+    if (!lead) return null;
+    return {
+      kind: 'lead',
+      id: lead.ID,
+      name: [lead.NAME, lead.LAST_NAME].filter(Boolean).join(' ') || null,
+      post: lead.POST || null,
+      email: firstValue(lead.EMAIL),
+      phone: firstValue(lead.PHONE),
+      companyName: lead.COMPANY_TITLE || null,
+      address: null,
+      web: firstValue(lead.WEB),
+    };
+  }
+
+  // Prioriza o negócio já vinculado à conversa (o mesmo dealId usado em
+  // "Abrir negócio no CRM"); sem negócio, tenta achar contato/lead pelo
+  // telefone — cobre conversas ainda não vinculadas a um negócio.
+  async function findContactInfo(a) {
+    try {
+      if (a.dealId) {
+        const deal = await callMethod('crm.deal.get', { id: a.dealId });
+        if (deal?.CONTACT_ID) return await contactInfoFromContact(deal.CONTACT_ID, deal.COMPANY_ID);
+      }
+      const found = await callMethod('crm.duplicate.findbycomm', { type: 'PHONE', values: [a.phone] });
+      if (found?.CONTACT?.length) return await contactInfoFromContact(found.CONTACT[0]);
+      if (found?.LEAD?.length) return await contactInfoFromLead(found.LEAD[0]);
+      return null;
+    } catch (err) {
+      console.error('[crm] falha ao buscar contato:', err);
+      return null;
+    }
+  }
+
+  const CONTACT_ICONS = {
+    mail: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z" opacity="0"/><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+    building: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="1"/><path d="M9 22v-4h6v4"/><path d="M9 6h.01M9 10h.01M9 14h.01M15 6h.01M15 10h.01M15 14h.01"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>',
+  };
+
+  // Sempre desenha a linha (ícone + rótulo + valor), mesmo sem dado — mostra
+  // "—" em vez de simplesmente sumir com o campo, pra ficar claro o que o
+  // Bitrix tem e o que não tem cadastrado.
+  function contactField(icon, label, text, href) {
+    const has = !!text;
+    const tag = has && href ? 'a' : 'div';
+    const attrs = has && href ? `href="${escapeHtml(href)}"${href.startsWith('http') ? ' target="_blank" rel="noopener"' : ''}` : '';
+    return `<${tag} class="contact-field${has ? '' : ' contact-field-empty'}" ${attrs}>${CONTACT_ICONS[icon]}<span class="contact-field-text"><span class="contact-field-label">${label}</span>${escapeHtml(has ? text : '—')}</span></${tag}>`;
+  }
+
+  function renderContactPanel() {
+    if (!state.active) {
+      contactPanel.classList.remove('open');
+      contactPanel.innerHTML = '';
+      return;
+    }
+    if (!contactPanelOpen) {
+      contactPanel.classList.remove('open');
+      return;
+    }
+    contactPanel.classList.add('open');
+
+    const a = state.active;
+    if (contactInfo === undefined) {
+      contactPanel.innerHTML = `<div class="contact-panel-head"><h3>Detalhes do contato</h3></div><p class="empty">Carregando…</p>`;
+      return;
+    }
+
+    // contactInfo pode ser null (nada achado no CRM) — os campos aparecem
+    // vazios do mesmo jeito, só sem o botão de abrir no CRM no final.
+    const info = contactInfo || {};
+    const phone = info.phone || a.phone;
+    const webHref = info.web ? (/^https?:\/\//i.test(info.web) ? info.web : `https://${info.web}`) : null;
+    const totalOut = state.messages.filter((m) => m.direction === 'out').length;
+    const totalIn = state.messages.filter((m) => m.direction === 'in').length;
+
+    contactPanel.innerHTML = `
+      <div class="contact-panel-head"><h3>Detalhes do contato</h3></div>
+      <div class="contact-panel-body">
+        <div class="contact-card">
+          <div class="avatar lg">${avatarInner(info.name || a.contactName, a.avatarUrl)}</div>
+          <div class="contact-name">${escapeHtml(info.name || a.contactName || a.phone)}</div>
+          <div class="contact-role">${escapeHtml([info.post, info.companyName].filter(Boolean).join(' · ') || '—')}</div>
+        </div>
+        <div class="contact-stats">
+          <div class="contact-stat"><div class="contact-stat-value">${state.messages.length}</div><div class="contact-stat-label">Total</div></div>
+          <div class="contact-stat"><div class="contact-stat-value">${totalIn}</div><div class="contact-stat-label">Recebidas</div></div>
+          <div class="contact-stat"><div class="contact-stat-value">${totalOut}</div><div class="contact-stat-label">Enviadas</div></div>
+        </div>
+        <div class="contact-fields">
+          ${contactField('mail', 'E-mail', info.email, info.email ? `mailto:${info.email}` : null)}
+          ${contactField('phone', 'Telefone', phone, phone ? `tel:${phone}` : null)}
+          ${contactField('building', 'Empresa', info.companyName)}
+          ${contactField('pin', 'Endereço', info.address)}
+          ${contactField('globe', 'Site', info.web, webHref)}
+        </div>
+        ${renderCommonGroupsSection()}
+        ${renderDocumentsSection()}
+        ${renderSummarySection()}
+      </div>
+      <div class="contact-panel-footer">
+        ${contactInfo
+          ? `<button class="btn secondary contact-open-crm" id="openContactCrmBtn">Abrir ${info.kind === 'lead' ? 'lead' : 'contato'} no CRM</button>`
+          : `<p class="contact-not-found">Nenhum contato encontrado no CRM para ${escapeHtml(a.phone)}.</p>`}
+      </div>
+    `;
+    const btn = document.getElementById('openContactCrmBtn');
+    if (btn) btn.addEventListener('click', () => {
+      if (!window.BX24) return;
+      BX24.openPath(info.kind === 'lead' ? `/crm/lead/details/${info.id}/` : `/crm/contact/details/${info.id}/`);
+    });
+    hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
+  }
+
+  // Resumo da conversa via IA — painel de detalhes. `aiSummary` vem
+  // persistido junto do histórico (loadHistory) já como {title, subtitle,
+  // summary}; gerado automaticamente ao abrir a conversa quando ainda não
+  // existe (ver loadHistory) — sem botão de regenerar manual (removido a
+  // pedido do usuário), então uma vez gerado o resumo não se atualiza
+  // sozinho com mensagens novas.
+  function renderSummarySection() {
+    const isLoading = aiSummary === 'loading';
+    const hasSummary = aiSummary && aiSummary !== 'loading';
+    return `
+      <div class="contact-summary">
+        <div class="contact-summary-head">
+          <span class="contact-summary-label">Resumo da conversa</span>
+        </div>
+        ${
+          isLoading
+            ? `<p class="contact-summary-text empty-summary">Gerando resumo…</p>`
+            : hasSummary
+              ? `
+                ${aiSummary.title ? `<p class="contact-summary-headline">${escapeHtml(aiSummary.title)}</p>` : ''}
+                ${aiSummary.subtitle ? `<p class="contact-summary-subtitle">${escapeHtml(aiSummary.subtitle)}</p>` : ''}
+                <p class="contact-summary-text">${escapeHtml(aiSummary.summary)}</p>
+              `
+              : `<p class="contact-summary-text empty-summary">Sem resumo ainda.</p>`
+        }
+        ${hasSummary && aiSummaryUpdatedAt ? `<p class="contact-summary-meta">Atualizado ${formatListTime(aiSummaryUpdatedAt)}</p>` : ''}
+      </div>
+    `;
+  }
+
+  async function generateConversationSummary(silent) {
+    const a = state.active;
+    if (!a || aiSummary === 'loading') return;
+    // Se já tinha um resumo bom (não é a primeira geração, é uma atualização
+    // automática por causa de mensagem nova — ver scheduleSummaryRefresh),
+    // guarda pra restaurar em caso de falha: uma tentativa de ATUALIZAR que
+    // deu errado não pode apagar um resumo que já estava certinho na tela.
+    const previousSummary = aiSummary && aiSummary !== 'loading' ? aiSummary : null;
+    aiSummary = 'loading';
+    renderContactPanel();
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, contactName: a.contactName || (contactInfo && contactInfo.name) || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar resumo');
+      aiSummary = { title: data.title || null, subtitle: data.subtitle || null, summary: data.summary };
+      aiSummaryUpdatedAt = data.updatedAt;
+    } catch (err) {
+      aiSummary = previousSummary;
+      // Silencioso quando disparado automaticamente (ao abrir a conversa ou
+      // depois de mensagem nova) — não faz sentido um toast de erro toda vez
+      // que isso roda em segundo plano; o clique manual no botão continua avisando.
+      if (!silent && window.showToast) window.showToast(err.message, 'error');
+    }
+    renderContactPanel();
+  }
+
+  // A conversa pode continuar por muito tempo depois do resumo já gerado —
+  // sem isso, ele ficava parado no que aconteceu até a primeira geração (ver
+  // pedido do usuário). Reagenda a cada mensagem nova (qualquer direção) na
+  // conversa aberta; o debounce de 15s evita gerar de novo a cada mensagem
+  // individual numa rajada — só depois que a conversa "respira" um pouco.
+  function scheduleSummaryRefresh() {
+    clearTimeout(summaryRefreshTimer);
+    summaryRefreshTimer = setTimeout(() => generateConversationSummary(true), 15000);
+  }
+
+  async function loadContactPanel() {
+    const activeRef = state.active;
+    contactInfo = undefined; // "carregando"
+    commonGroups = undefined;
+    renderContactPanel();
+
+    findContactInfo(activeRef).then((info) => {
+      if (state.active !== activeRef) return; // trocou de conversa enquanto buscava
+      contactInfo = info;
+      renderContactPanel();
+    });
+
+    // Em paralelo, não trava o resto do painel — pode demorar mais que o
+    // normal (uma chamada ao WhatsApp por grupo da instância).
+    loadCommonGroups(activeRef).then((groups) => {
+      if (state.active !== activeRef) return;
+      commonGroups = groups;
+      renderContactPanel();
+    });
+  }
+
+  async function loadCommonGroups(a) {
+    if (!a.phone || a.phone.includes('@')) return []; // é um grupo, não um contato — não se aplica
+    try {
+      const res = await apiFetch(`${API_BASE}/contacts/groups?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.groups || [];
+    } catch {
+      return [];
+    }
+  }
+
+  const GROUP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+
+  function renderCommonGroupsSection() {
+    const a = state.active;
+    if (!a.phone || a.phone.includes('@')) return '';
+    if (commonGroups === undefined) {
+      return `<div class="contact-groups"><div class="contact-groups-label">Grupos em comum</div><div class="contact-group-item">Carregando…</div></div>`;
+    }
+    if (!commonGroups.length) {
+      return `<div class="contact-groups"><div class="contact-groups-label">Grupos em comum</div><div class="contact-group-item">Nenhum encontrado.</div></div>`;
+    }
+    return `
+      <div class="contact-groups">
+        <div class="contact-groups-label">Grupos em comum</div>
+        <div class="contact-groups-list">
+          ${commonGroups.map((g) => `<div class="contact-group-item">${GROUP_ICON}<span>${escapeHtml(g.name)}</span></div>`).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // Documentos (PDF, PPT, DOCX...) trocados nesta conversa — busca direto em
+  // `state.messages` (já carregado pro histórico), sem chamada extra à API.
+  function renderDocumentsSection() {
+    const docs = state.messages.filter((m) => m.type === 'document' && m.mediaUrl);
+    if (!docs.length) {
+      return `<div class="contact-docs"><div class="contact-docs-label">Documentos anexados</div><div class="contact-doc-item">Nenhum encontrado.</div></div>`;
+    }
+    return `
+      <div class="contact-docs">
+        <div class="contact-docs-label">Documentos anexados</div>
+        <div class="contact-docs-list">
+          ${docs.map((d) => `
+            <a class="contact-doc-item" data-media-url="${escapeHtml(d.mediaUrl)}" href="#" download="${escapeHtml(d.fileName || 'arquivo')}" target="_blank" rel="noopener">
+              ${MEDIA_TYPE_ICONS.document}<span class="contact-doc-name">${escapeHtml(d.fileName || 'Documento')}</span>
+            </a>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function formatTime(iso) {
+    return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function formatDayLabel(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date(Date.now() - 86400000);
+    const sameDay = (a, b) => a.toDateString() === b.toDateString();
+    if (sameDay(d, today)) return 'Hoje';
+    if (sameDay(d, yesterday)) return 'Ontem';
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' });
+  }
+
+  function formatListTime(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    if (d.toDateString() === today.toDateString()) {
+      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    }
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+  }
+
+  function mediaLabel(type) {
+    return type === 'image' ? 'imagem' : type === 'audio' ? 'áudio' : type === 'video' ? 'vídeo' : type === 'document' ? 'documento' : type;
+  }
+
+  // =========================================================
+  // Notificação de mensagem nova (conversa fechada, não silenciada) — sempre
+  // usa o toast/sino que já existe (garantido, sem depender de permissão) e,
+  // se o navegador já tiver concedido, também tenta a notificação nativa do
+  // SO. Dentro do iframe do Bitrix essa permissão pode simplesmente não
+  // funcionar (mesma limitação já conhecida com o microfone) — por isso o
+  // toast/sino nunca é opcional, é a garantia.
+  // =========================================================
+  function notifyNewMessage(name, message, target) {
+    const snippet = message.type && message.type !== 'text'
+      ? `[${mediaLabel(message.type)}]${message.text ? ' ' + message.text : ''}`
+      : (message.text || 'Nova mensagem');
+    if (window.showToast) window.showToast(`Nova mensagem de ${name}: ${snippet}`, 'info', target);
+    if (window.__bumpNotifBadge) window.__bumpNotifBadge(); // servidor já persistiu (ver onMessage em src/server.js)
+
+    if ('Notification' in window && Notification.permission === 'granted') {
+      try { new Notification(name, { body: snippet }); } catch { /* iframe pode bloquear silenciosamente */ }
+    }
+  }
+
+  // Clicar numa notificação (toast, ou card em /notifications.html via deep
+  // link ?session=&phone=) abre a conversa. `target`: { sessionId, phone, contactName }.
+  window.__notifNavigate = function (target) {
+    const conv = state.conversations.find((c) => c.sessionId === target.sessionId && c.phone === target.phone);
+    openConversation(conv || { sessionId: target.sessionId, phone: target.phone, contactName: target.contactName || target.phone, dealId: null, tags: [] });
+  };
+
+  // `system` (Interno/Externo, sintéticas) e `fixed` (aplicadas pelo
+  // sistema, ex: nome da LP de origem do lead — ver src/routes/leads.js)
+  // nunca mostram o botão de remover — só tags criadas à mão pelo atendente.
+  function tagChip(tag, removable) {
+    const color = tag.color || '#d8ab4f';
+    return `<span class="tag-chip" style="border-color:${color};color:${color};background:${color}22">${escapeHtml(tag.name)}${
+      removable && !tag.system && !tag.fixed ? `<button class="tag-remove" data-tag-id="${tag.id}" title="Remover tag" type="button">×</button>` : ''
+    }</span>`;
+  }
+
+  const appEl = document.getElementById('app');
+  const instanceSelect = document.getElementById('instanceSelect');
+  const convSearch = document.getElementById('convSearch');
+  const tagFilterSelect = document.getElementById('tagFilterSelect');
+  const convList = document.getElementById('convList');
+  const convView = document.getElementById('convView');
+  const contactPanel = document.getElementById('contactPanel');
+
+  const state = {
+    ownerId: null,
+    sessionIds: [],
+    instanceStatus: {}, // { [sessionId]: 'online' | 'offline' | 'connecting' } — pra bolinha de status na lista
+    conversations: [],
+    tags: [],
+    tagFilter: '',
+    search: '',
+    archivedView: false, // false = "Ativas", true = "Arquivadas"
+    active: null,       // { sessionId, phone, contactName, dealId, tags }
+    messages: [],
+    connectionStatus: 'unknown',
+    peerPresence: null,  // null | 'composing' | 'recording' — do CONTATO, ao vivo
+    peerPresenceTimer: null,
+    replyingTo: null,    // { id, text, type, direction } — mensagem sendo citada na próxima resposta
+    inboxSockets: [],   // [{ id, socket }]
+  };
+
+  // Emoji de reação com o picker aberto no momento (só um por vez) — não
+  // precisa estar em `state` (não é persistido nem afeta outra coisa além
+  // do próprio re-render da lista de mensagens).
+  let openReactionPickerId = null;
+  const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Painel de detalhes do contato (dados do Bitrix) — aberto por padrão;
+  // `contactInfo` fica `undefined` enquanto carrega, `null` se não achar nada
+  // no CRM pra esse telefone, ou os dados encontrados.
+  let contactPanelOpen = true;
+  let contactInfo = null;
+  // Grupos em comum com o contato aberto — `undefined` = carregando, array =
+  // resultado (pode vir vazio). Best-effort (ver getGroupParticipantPhones).
+  let commonGroups = null;
+  // Resumo da conversa gerado por IA (painel de detalhes) — `null` = nunca
+  // gerado; `'loading'` = gerando agora; string = resumo pronto. Vem
+  // persistido junto do histórico (GET /history) e é regenerado sob demanda
+  // (POST /conversations/summary).
+  let aiSummary = null;
+  let aiSummaryUpdatedAt = null;
+  let summaryRefreshTimer = null; // debounce do reresumo automático — ver scheduleSummaryRefresh
+
+  // =========================================================
+  // Instâncias / filtro
+  // =========================================================
+  async function initInstances() {
+    state.ownerId = await resolveOwner();
+    const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(state.ownerId)}`);
+    const data = await res.json();
+    const list = data.instances || [];
+    if (!list.length) {
+      instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Instâncias</option>';
+      convList.innerHTML = '<p class="empty">Conecte uma instância em Admin → Instâncias.</p>';
+      renderEmptyView();
+      return;
+    }
+    const options = [];
+    if (list.length > 1) options.push(`<option value="${list.map((i) => i.id).join(',')}">Todas as minhas instâncias</option>`);
+    options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`));
+    instanceSelect.innerHTML = options.join('');
+    list.forEach((i) => { state.instanceStatus[i.id] = i.status; });
+    await onFilterChange();
+  }
+
+  instanceSelect.addEventListener('change', onFilterChange);
+
+  async function onFilterChange() {
+    state.sessionIds = (instanceSelect.value || '').split(',').filter(Boolean);
+    state.active = null;
+    appEl.classList.remove('chat-open');
+    renderEmptyView();
+    closeInboxSockets();
+    openInboxSockets();
+    loadTags();
+    await loadConversations();
+  }
+
+  let searchTimer = null;
+  convSearch.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      state.search = convSearch.value.trim();
+      loadConversations();
+    }, 300);
+  });
+
+  tagFilterSelect.addEventListener('change', () => {
+    state.tagFilter = tagFilterSelect.value;
+    renderConvList();
+  });
+
+  const archiveFilter = document.getElementById('archiveFilter');
+  archiveFilter.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-archived]');
+    if (!btn) return;
+    state.archivedView = btn.dataset.archived === 'true';
+    archiveFilter.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+    state.active = null;
+    appEl.classList.remove('chat-open');
+    renderEmptyView();
+    loadConversations();
+  });
+
+  async function setConversationArchived(sessionId, phone, archived) {
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: sessionId, phone, archived }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao arquivar');
+      // otimista: some da lista atual na hora, sem esperar recarregar
+      state.conversations = state.conversations.filter((c) => !(c.sessionId === sessionId && c.phone === phone));
+      if (state.active && state.active.sessionId === sessionId && state.active.phone === phone) {
+        closeConversation();
+      }
+      renderConvList();
+      if (window.showToast) window.showToast(archived ? 'Conversa arquivada.' : 'Conversa restaurada.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast('Erro ao arquivar: ' + err.message, 'error');
+    }
+  }
+
+  async function setConversationNotifications(sessionId, phone, enabled) {
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: sessionId, phone, enabled }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao atualizar notificações');
+      // otimista: só troca o ícone na hora, a conversa continua na lista do mesmo jeito
+      const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+      if (conv) conv.notificationsEnabled = enabled;
+      renderConvList();
+      if (window.showToast) window.showToast(enabled ? 'Notificações ativadas.' : 'Conversa silenciada.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast('Erro ao atualizar notificações: ' + err.message, 'error');
+    }
+  }
+
+  // =========================================================
+  // Novo grupo do WhatsApp — a partir das conversas já abertas no Chat,
+  // com atalho pra pré-selecionar todo mundo que tem uma certa tag.
+  // Reaproveita a mesma rota de criação de grupo já usada em contacts.html
+  // (POST /groups) — nada novo no backend pra isso.
+  // =========================================================
+  const newGroupModal = document.getElementById('newGroupModal');
+  const groupInstanceField = document.getElementById('groupInstanceField');
+  const groupInstanceSelect = document.getElementById('groupInstanceSelect');
+  const groupNameInput = document.getElementById('groupNameInput');
+  const groupTagSelect = document.getElementById('groupTagSelect');
+  const groupCheckboxes = document.getElementById('groupCheckboxes');
+
+  // Só as instâncias individuais (nunca a opção agregada "Todas as minhas
+  // instâncias") — um grupo do WhatsApp pertence a uma instância só.
+  function groupInstanceOptions() {
+    return [...instanceSelect.options].filter((opt) => opt.value && !opt.value.includes(','));
+  }
+
+  // =========================================================
+  // Mover conversa pra outra instância — resgate quando a instância atual
+  // caiu/desconectou (Baileys não é a API oficial, isso acontece). Reusa
+  // groupInstanceOptions() (só instâncias individuais, nunca a agregada) e
+  // exclui a instância atual da conversa aberta.
+  // =========================================================
+  const moveInstanceModal = document.getElementById('moveInstanceModal');
+  const moveInstanceSelect = document.getElementById('moveInstanceSelect');
+
+  function openMoveInstanceModal() {
+    const a = state.active;
+    const others = groupInstanceOptions().filter((opt) => opt.value !== a.sessionId);
+    if (!others.length) {
+      if (window.showToast) window.showToast('Você não tem outra instância pra mover essa conversa.', 'error');
+      return;
+    }
+    moveInstanceSelect.innerHTML = others.map((opt) => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.textContent)}</option>`).join('');
+    moveInstanceModal.classList.add('open');
+  }
+
+  document.getElementById('moveInstanceCancel').addEventListener('click', () => moveInstanceModal.classList.remove('open'));
+  document.getElementById('moveInstanceConfirm').addEventListener('click', async () => {
+    const a = state.active;
+    const newSessionId = moveInstanceSelect.value;
+    if (!newSessionId) return;
+    const label = moveInstanceSelect.options[moveInstanceSelect.selectedIndex].textContent;
+    const confirmed = await window.confirmDialog(`Mover essa conversa pra "${label}"? As próximas mensagens vão sair por esse número.`);
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/move-instance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, newSessionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao mover conversa');
+      moveInstanceModal.classList.remove('open');
+      a.sessionId = newSessionId;
+      if (window.showToast) window.showToast('Conversa movida — as próximas mensagens saem pela nova instância.', 'success');
+      renderConversationView();
+      loadHistory();
+      fetchStatus();
+      loadContactPanel();
+      loadConversations();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  function renderGroupCheckboxes() {
+    const sessionId = groupInstanceSelect.value || state.sessionIds[0];
+    const convs = state.conversations.filter((c) => c.sessionId === sessionId);
+    if (!convs.length) {
+      groupCheckboxes.innerHTML = '<p class="empty">Nenhuma conversa nesta instância.</p>';
+      return;
+    }
+    groupCheckboxes.innerHTML = convs.map((c) => `
+      <label class="checkbox-row">
+        <input type="checkbox" value="${escapeHtml(c.phone)}" data-tags="${escapeHtml((c.tags || []).map((t) => t.name).join('|'))}">
+        <span>${escapeHtml(c.contactName || c.phone)}${c.contactName ? ' · ' + escapeHtml(c.phone) : ''}</span>
+      </label>
+    `).join('');
+  }
+
+  function openNewGroupModal() {
+    if (!state.sessionIds.length) return;
+    groupNameInput.value = '';
+    groupTagSelect.value = '';
+
+    const options = groupInstanceOptions();
+    groupInstanceField.hidden = options.length <= 1;
+    groupInstanceSelect.innerHTML = options.map((opt) => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.textContent)}</option>`).join('');
+    groupInstanceSelect.value = state.sessionIds[0] || (options[0] && options[0].value) || '';
+
+    // Tags de verdade só (exclui as sintéticas Interno/Externo, que não fazem
+    // sentido como filtro de "quem entra no grupo").
+    const tagNames = [...new Set(state.tags.filter((t) => !String(t.id).startsWith('origin:')).map((t) => t.name))];
+    groupTagSelect.innerHTML = '<option value="">— nenhuma —</option>' +
+      tagNames.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+
+    renderGroupCheckboxes();
+    newGroupModal.classList.add('open');
+  }
+  function closeNewGroupModal() { newGroupModal.classList.remove('open'); }
+
+  document.getElementById('newGroupBtn').addEventListener('click', openNewGroupModal);
+  document.getElementById('groupModalCancel').addEventListener('click', closeNewGroupModal);
+  groupInstanceSelect.addEventListener('change', renderGroupCheckboxes);
+
+  // Marca (sem desmarcar o resto) todas as conversas que têm a tag escolhida
+  // — o usuário ainda pode ajustar manualmente os checkboxes depois.
+  groupTagSelect.addEventListener('change', () => {
+    const tag = groupTagSelect.value;
+    if (!tag) return;
+    groupCheckboxes.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      if ((cb.dataset.tags || '').split('|').includes(tag)) cb.checked = true;
+    });
+  });
+
+  document.getElementById('groupModalCreate').addEventListener('click', async () => {
+    const name = groupNameInput.value.trim();
+    if (!name) { if (window.showToast) window.showToast('Dê um nome pro grupo.', 'error'); return; }
+    const phones = [...groupCheckboxes.querySelectorAll('input[type="checkbox"]:checked')].map((el) => el.value);
+    if (!phones.length) { if (window.showToast) window.showToast('Selecione ao menos um participante.', 'error'); return; }
+    const session = groupInstanceSelect.value || state.sessionIds[0];
+
+    try {
+      const res = await apiFetch(`${API_BASE}/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session, name, phones }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao criar grupo');
+      closeNewGroupModal();
+      if (window.showToast) window.showToast('Grupo criado no WhatsApp.', 'success');
+      // abre a conversa do grupo recém-criado na hora, pra já poder mandar mensagem
+      openConversation({ sessionId: session, phone: data.group.id, contactName: data.group.name, dealId: null, tags: [] });
+    } catch (err) {
+      if (window.showToast) window.showToast('Erro ao criar grupo: ' + err.message, 'error');
+    }
+  });
+
+  // =========================================================
+  // "Grupos" — lista os grupos já criados (GET /groups, mesma rota usada em
+  // contacts.html) pra reabrir a conversa a qualquer momento. Resolve o
+  // grupo "sumir" da lista: hoje um grupo só vira uma conversa de verdade
+  // (linha na tabela `conversations`) depois da primeira mensagem enviada —
+  // se ninguém mandou nada ainda, esse modal é o único jeito de achá-lo de
+  // volta no Chat.
+  // =========================================================
+  const viewGroupsModal = document.getElementById('viewGroupsModal');
+  const viewGroupsInstanceField = document.getElementById('viewGroupsInstanceField');
+  const viewGroupsInstanceSelect = document.getElementById('viewGroupsInstanceSelect');
+  const viewGroupsList = document.getElementById('viewGroupsList');
+
+  async function loadGroupsList() {
+    const sessionId = viewGroupsInstanceSelect.value || state.sessionIds[0];
+    viewGroupsList.innerHTML = '<p class="empty">Carregando…</p>';
+    try {
+      const res = await apiFetch(`${API_BASE}/groups?session=${encodeURIComponent(sessionId)}`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar grupos');
+      const data = await res.json();
+      const groups = data.groups || [];
+      if (!groups.length) {
+        viewGroupsList.innerHTML = '<p class="empty">Nenhum grupo criado ainda nesta instância.</p>';
+        return;
+      }
+      viewGroupsList.innerHTML = groups.map((g) => `
+        <label class="checkbox-row" data-group-id="${escapeHtml(g.id)}" style="cursor:pointer">
+          <span>${escapeHtml(g.name)} <span style="color:var(--text-faint)">· ${g.participantCount} participante${g.participantCount === 1 ? '' : 's'}</span></span>
+        </label>
+      `).join('');
+      viewGroupsList.querySelectorAll('[data-group-id]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const group = groups.find((g) => g.id === el.dataset.groupId);
+          if (!group) return;
+          viewGroupsModal.classList.remove('open');
+          openConversation({ sessionId, phone: group.id, contactName: group.name, dealId: null, tags: [] });
+        });
+      });
+    } catch (err) {
+      viewGroupsList.innerHTML = `<p class="empty">Erro ao carregar grupos: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  document.getElementById('viewGroupsBtn').addEventListener('click', () => {
+    if (!state.sessionIds.length) return;
+    const options = groupInstanceOptions();
+    viewGroupsInstanceField.hidden = options.length <= 1;
+    viewGroupsInstanceSelect.innerHTML = options.map((opt) => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.textContent)}</option>`).join('');
+    viewGroupsInstanceSelect.value = state.sessionIds[0] || (options[0] && options[0].value) || '';
+    viewGroupsModal.classList.add('open');
+    loadGroupsList();
+  });
+  document.getElementById('viewGroupsCancel').addEventListener('click', () => viewGroupsModal.classList.remove('open'));
+  viewGroupsInstanceSelect.addEventListener('change', loadGroupsList);
+
+  // =========================================================
+  // Lista de conversas (inbox)
+  // =========================================================
+  async function loadConversations() {
+    if (!state.sessionIds.length) return;
+    try {
+      const params = new URLSearchParams({ session: state.sessionIds.join(','), archived: String(state.archivedView) });
+      if (state.search) params.set('search', state.search);
+      const res = await apiFetch(`${API_BASE}/conversations?${params.toString()}`);
+      if (!res.ok) throw new Error('falha ao carregar conversas');
+      const data = await res.json();
+      state.conversations = data.conversations || [];
+      renderConvList();
+      fetchMissingAvatars();
+    } catch (err) {
+      console.error('Erro ao carregar conversas:', err);
+      convList.innerHTML = '<p class="empty">Falha ao carregar conversas.</p>';
+    }
+  }
+
+  function passesTagFilter(conv) {
+    if (!state.tagFilter) return true;
+    return (conv.tags || []).some((t) => t.name === state.tagFilter);
+  }
+
+  function renderConvList() {
+    const list = state.conversations.filter(passesTagFilter);
+    if (!list.length) {
+      convList.innerHTML = `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
+      return;
+    }
+    convList.innerHTML = list.map((c) => {
+      const name = c.contactName || c.phone;
+      const isActive = state.active && state.active.sessionId === c.sessionId && state.active.phone === c.phone;
+      const mine = c.lastDirection === 'out';
+      const snippet = c.lastType && c.lastType !== 'text'
+        ? `[${mediaLabel(c.lastType)}]${c.lastText ? ' ' + c.lastText : ''}`
+        : (c.lastText || 'Sem mensagens ainda');
+      const muted = c.notificationsEnabled === false;
+      const instStatus = state.instanceStatus[c.sessionId] || 'unknown';
+      const instStatusLabel = instStatus === 'online' ? 'Instância conectada' : instStatus === 'offline' ? 'Instância desconectada' : 'Status da instância desconhecido';
+      return `
+        <div class="conv-item ${isActive ? 'active' : ''}" data-session="${escapeHtml(c.sessionId)}" data-phone="${escapeHtml(c.phone)}">
+          <div class="avatar sm">${avatarInner(name, c.avatarUrl)}<span class="avatar-status ${instStatus}" title="${instStatusLabel}"></span></div>
+          <div class="conv-item-body">
+            <div class="conv-item-top">
+              <span class="conv-item-name">${escapeHtml(name)}</span>
+              <span class="conv-item-top-right">
+                <span class="conv-item-time">${formatListTime(c.lastAt)}</span>
+                <button class="conv-item-action-btn ${muted ? 'muted' : ''}" data-mute-toggle title="${muted ? 'Ativar notificações' : 'Silenciar notificações'}" type="button">
+                  ${muted
+                    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.7 3A6 6 0 0 1 18 8c0 2 .3 3.4.8 4.4"/><path d="M17 17H3s3-2 3-9c0-.3 0-.6.1-.9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M2 2l20 20"/></svg>'
+                    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'}
+                </button>
+                <button class="conv-item-action-btn" data-archive-toggle title="${state.archivedView ? 'Restaurar conversa' : 'Arquivar conversa'}" type="button">
+                  ${state.archivedView
+                    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h18"/><path d="M5 8V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>'
+                    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9"/><path d="M10 13h4"/></svg>'}
+                </button>
+              </span>
+            </div>
+            <div class="conv-item-snippet">${mine ? 'Você: ' : ''}${escapeHtml(snippet)}</div>
+            ${(c.tags && c.tags.length) ? `<div class="conv-item-tags">${c.tags.map((t) => tagChip(t, false)).join('')}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    convList.querySelectorAll('.conv-item').forEach((el) => {
+      el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-archive-toggle], [data-mute-toggle]')) return; // tratado abaixo, não abre a conversa
+        const conv = state.conversations.find((c) => c.sessionId === el.dataset.session && c.phone === el.dataset.phone);
+        if (conv) openConversation(conv);
+      });
+      const archiveBtn = el.querySelector('[data-archive-toggle]');
+      if (archiveBtn) {
+        archiveBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setConversationArchived(el.dataset.session, el.dataset.phone, !state.archivedView);
+        });
+      }
+      const muteBtn = el.querySelector('[data-mute-toggle]');
+      if (muteBtn) {
+        muteBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const conv = state.conversations.find((c) => c.sessionId === el.dataset.session && c.phone === el.dataset.phone);
+          setConversationNotifications(el.dataset.session, el.dataset.phone, conv?.notificationsEnabled === false);
+        });
+      }
+    });
+  }
+
+  function bumpConversation(sessionId, phone, patch) {
+    const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+    if (!conv) {
+      loadConversations(); // conversa nova — recarrega pra pegar nome/tags certos
+      return;
+    }
+    Object.assign(conv, patch);
+    state.conversations.sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
+    renderConvList();
+  }
+
+  function updateConvTagsInList(sessionId, phone, tags) {
+    const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+    if (conv) conv.tags = tags;
+  }
+
+  // =========================================================
+  // Foto de perfil — buscada sob demanda (a consulta na API do WhatsApp é
+  // lenta), com cache no backend (conversations.avatar_url). Nunca busca tudo
+  // de uma vez: entra numa fila com um pequeno intervalo entre pedidos.
+  // =========================================================
+  async function requestAvatar(sessionId, phone) {
+    try {
+      const res = await apiFetch(`${API_BASE}/avatar?session=${encodeURIComponent(sessionId)}&phone=${encodeURIComponent(phone)}`);
+      if (!res.ok) return null;
+      return (await res.json()).url || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function applyAvatarToDom(sessionId, phone, url, name) {
+    if (!url) return;
+    const item = convList.querySelector(`.conv-item[data-session="${CSS.escape(sessionId)}"][data-phone="${CSS.escape(phone)}"] .avatar`);
+    if (item) item.innerHTML = avatarInner(name, url);
+    if (state.active && state.active.sessionId === sessionId && state.active.phone === phone) {
+      state.active.avatarUrl = url;
+      const headerAvatar = document.getElementById('headerAvatar');
+      if (headerAvatar) headerAvatar.innerHTML = avatarInner(state.active.contactName, url);
+    }
+  }
+
+  async function fetchAvatarFor(sessionId, phone) {
+    const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+    const url = await requestAvatar(sessionId, phone);
+    if (url) {
+      if (conv) conv.avatarUrl = url;
+      applyAvatarToDom(sessionId, phone, url, conv ? (conv.contactName || conv.phone) : phone);
+    }
+  }
+
+  let avatarQueueRunning = false;
+  async function fetchMissingAvatars() {
+    if (avatarQueueRunning) return;
+    avatarQueueRunning = true;
+    try {
+      for (const conv of state.conversations.filter((c) => !c.avatarUrl)) {
+        if (!state.conversations.includes(conv)) continue; // lista mudou (nova busca/instância) enquanto isso rodava
+        await fetchAvatarFor(conv.sessionId, conv.phone);
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    } finally {
+      avatarQueueRunning = false;
+    }
+  }
+
+  // =========================================================
+  // Tags
+  // =========================================================
+  async function loadTags() {
+    try {
+      const res = await apiFetch(`${API_BASE}/tags?session=${encodeURIComponent(state.sessionIds.join(','))}`);
+      if (!res.ok) throw new Error('falha ao carregar tags');
+      state.tags = (await res.json()).tags || [];
+      renderTagFilterOptions();
+    } catch (err) {
+      console.error('Erro ao carregar tags:', err);
+    }
+  }
+
+  function renderTagFilterOptions() {
+    // "Interno"/"Externo" são automáticas (toda conversa tem uma das duas —
+    // ver a tag "system" calculada em store.js/listConversations), por isso
+    // sempre aparecem no filtro, mesmo antes de qualquer tag manual existir.
+    const custom = [...new Set(state.tags.map((t) => t.name))].filter((n) => n !== 'Interno' && n !== 'Externo').sort();
+    const names = ['Interno', 'Externo', ...custom];
+    const current = tagFilterSelect.value;
+    tagFilterSelect.innerHTML = '<option value="">Todas as tags</option>' +
+      names.map((n) => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+    tagFilterSelect.value = names.includes(current) ? current : '';
+    state.tagFilter = tagFilterSelect.value;
+  }
+
+  function renderTagsRow() {
+    const el = document.getElementById('tagsRow');
+    if (!el) return;
+    const a = state.active;
+    const suggestions = state.tags.filter((t) => t.sessionId === a.sessionId && !(a.tags || []).some((x) => x.id === t.id));
+    el.innerHTML = `
+      <div class="tag-chips" id="tagChips">${(a.tags || []).map((t) => tagChip(t, true)).join('')}</div>
+      <button class="tag-add-btn" id="tagAddBtn" type="button">+ tag</button>
+      <div class="tag-add-form" id="tagAddForm" hidden>
+        <input type="text" id="tagAddInput" list="tagSuggestions" placeholder="Nome da tag…" />
+        <datalist id="tagSuggestions">${suggestions.map((t) => `<option value="${escapeHtml(t.name)}">`).join('')}</datalist>
+        <button class="btn" id="tagAddConfirm" type="button">Adicionar</button>
+      </div>
+    `;
+    el.querySelectorAll('.tag-remove').forEach((btn) => {
+      btn.addEventListener('click', () => removeTag(Number(btn.dataset.tagId)));
+    });
+    const addBtn = document.getElementById('tagAddBtn');
+    const form = document.getElementById('tagAddForm');
+    const input = document.getElementById('tagAddInput');
+    addBtn.addEventListener('click', () => { form.hidden = false; input.focus(); });
+    const submit = () => {
+      const name = input.value.trim();
+      input.value = '';
+      form.hidden = true;
+      if (name) addTag(name);
+    };
+    document.getElementById('tagAddConfirm').addEventListener('click', submit);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
+  }
+
+  async function addTag(name) {
+    const a = state.active;
+    try {
+      let tag = state.tags.find((t) => t.sessionId === a.sessionId && t.name.toLowerCase() === name.toLowerCase());
+      if (!tag) {
+        const res = await apiFetch(`${API_BASE}/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, name }),
+        });
+        if (!res.ok) throw new Error('falha ao criar tag');
+        tag = (await res.json()).tag;
+        state.tags.push(tag);
+        renderTagFilterOptions();
+      }
+      if (!(a.tags || []).some((t) => t.id === tag.id)) {
+        const res2 = await apiFetch(`${API_BASE}/conversations/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, phone: a.phone, tagId: tag.id }),
+        });
+        if (!res2.ok) throw new Error('falha ao aplicar tag');
+        a.tags = [...(a.tags || []), tag];
+        updateConvTagsInList(a.sessionId, a.phone, a.tags);
+        renderTagsRow();
+        renderConvList();
+      }
+    } catch (err) {
+      console.error('Erro ao adicionar tag:', err);
+      if (window.showToast) showToast('Falha ao adicionar tag.', 'error');
+    }
+  }
+
+  async function removeTag(tagId) {
+    const a = state.active;
+    try {
+      await apiFetch(`${API_BASE}/conversations/tags?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}&tagId=${tagId}`, { method: 'DELETE' });
+      a.tags = (a.tags || []).filter((t) => t.id !== tagId);
+      updateConvTagsInList(a.sessionId, a.phone, a.tags);
+      renderTagsRow();
+      renderConvList();
+    } catch (err) {
+      console.error('Erro ao remover tag:', err);
+      if (window.showToast) showToast('Falha ao remover tag.', 'error');
+    }
+  }
+
+  // =========================================================
+  // Conversa aberta (mensagens)
+  // =========================================================
+  function statusLabel() {
+    if (state.peerPresence === 'composing') return 'digitando…';
+    if (state.peerPresence === 'recording') return 'gravando áudio…';
+    if (state.connectionStatus === 'online') return 'Conectado';
+    if (state.connectionStatus === 'offline') return 'Desconectado';
+    return 'Verificando…';
+  }
+
+  function updateStatusUI() {
+    const label = document.getElementById('statusLabel');
+    if (label) label.textContent = statusLabel();
+    const dot = convView.querySelector('.status-dot');
+    if (dot) dot.className = `status-dot ${state.connectionStatus}`;
+    const banner = document.getElementById('disconnectedBanner');
+    if (banner) banner.hidden = state.connectionStatus !== 'offline';
+  }
+
+  function renderEmptyView() {
+    convView.innerHTML = `
+      <div class="state-screen">
+        <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v9a2.5 2.5 0 0 1-2.5 2.5H8l-5 4z"/></svg>
+        <h3>Selecione uma conversa</h3>
+        <p>Suas mensagens aparecerão aqui.</p>
+      </div>
+    `;
+  }
+
+  function openConversation(conv) {
+    state.active = {
+      sessionId: conv.sessionId,
+      phone: conv.phone,
+      contactName: conv.contactName,
+      avatarUrl: conv.avatarUrl || null,
+      dealId: conv.dealId,
+      tags: conv.tags || [],
+    };
+    state.messages = [];
+    state.connectionStatus = 'unknown';
+    state.peerPresence = null;
+    state.replyingTo = null;
+    openReactionPickerId = null;
+    aiSummary = null;
+    aiSummaryUpdatedAt = null;
+    clearTimeout(summaryRefreshTimer);
+    clearTimeout(state.peerPresenceTimer);
+    contactInfo = undefined; // "carregando" — evita mostrar o contato da conversa anterior por um instante
+    appEl.classList.add('chat-open'); // em telas estreitas, esconde a lista e mostra só a conversa
+    renderConvList();
+    renderConversationView();
+    loadHistory();
+    if (!state.active.avatarUrl) fetchAvatarFor(conv.sessionId, conv.phone);
+    fetchStatus();
+    loadContactPanel();
+  }
+
+  function closeConversation() {
+    state.active = null;
+    contactInfo = null;
+    commonGroups = null;
+    clearTimeout(summaryRefreshTimer);
+    appEl.classList.remove('chat-open');
+    renderEmptyView();
+    renderConvList();
+    renderContactPanel();
+  }
+
+  // ESC sai da conversa aberta e volta pra lista — igual ao botão de voltar
+  // (backBtn). Só age se não tiver nenhum modal aberto: nesse caso o outro
+  // listener de ESC (mais acima, genérico pra qualquer .overlay) já cuida de
+  // fechar o modal, e sair da conversa ao mesmo tempo seria demais de uma
+  // vez só.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (document.querySelector('.overlay.open')) return;
+    if (state.active) closeConversation();
+  });
+
+  function renderConversationView() {
+    const a = state.active;
+    convView.innerHTML = `
+      <div class="chat-header">
+        <button class="icon-btn back-btn" id="backBtn" title="Voltar para a lista" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="avatar" id="headerAvatar">${avatarInner(a.contactName, a.avatarUrl)}</div>
+        <div class="header-info">
+          <div class="name">${escapeHtml(a.contactName || a.phone)}</div>
+          <div class="meta">
+            <span class="status-dot ${state.connectionStatus}"></span>
+            <span id="statusLabel">${statusLabel()}</span>
+            <span>· ${escapeHtml(a.phone)}</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          ${a.dealId ? `
+            <button class="icon-btn" id="openCrmBtn" title="Abrir negócio no CRM">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
+            </button>
+          ` : ''}
+          <button class="icon-btn" id="refreshConvBtn" title="Atualizar conversa">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>
+          </button>
+          <button class="icon-btn" id="moveInstanceBtn" title="Mover conversa pra outra instância">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
+          </button>
+          <button class="icon-btn ${contactPanelOpen ? 'active' : ''}" id="toggleDetailsBtn" title="Detalhes do contato">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="tags-row" id="tagsRow"></div>
+
+      <div class="messages" id="messagesEl"></div>
+
+      <div class="disconnected-banner" id="disconnectedBanner" ${state.connectionStatus !== 'offline' ? 'hidden' : ''}>
+        WhatsApp desconectado — as mensagens não serão entregues até reconectar.
+      </div>
+
+      <div class="reply-preview-bar" id="replyPreviewBar" hidden>
+        <svg class="bar-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+        <div class="reply-preview-body">
+          <div class="reply-preview-author" id="replyPreviewAuthor"></div>
+          <div class="reply-preview-text" id="replyPreviewText"></div>
+        </div>
+        <button class="icon-btn" id="replyCancelBtn" title="Cancelar resposta" type="button">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="composer">
+        <button class="icon-btn" id="attachBtn" title="Enviar imagem, áudio, vídeo ou documento" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95L9.41 17.42a1.5 1.5 0 0 1-2.12-2.12l8.49-8.49"/></svg>
+        </button>
+        <input type="file" id="mediaInput" style="display:none" />
+        <textarea id="msgInput" placeholder="Escreva uma mensagem…" rows="1"></textarea>
+        <button class="icon-btn" id="micBtn" title="Gravar áudio" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/><path d="M8 22h8"/></svg>
+        </button>
+        <button class="send-btn" id="sendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint" id="composerHint">Enter envia · Shift+Enter quebra linha</div>
+    `;
+
+    renderTagsRow();
+    renderMessages();
+    bindComposer();
+    bindMessagesInteractions();
+    renderReplyPreview();
+
+    document.getElementById('refreshConvBtn').addEventListener('click', loadHistory);
+    document.getElementById('moveInstanceBtn').addEventListener('click', openMoveInstanceModal);
+    document.getElementById('backBtn').addEventListener('click', closeConversation);
+    document.getElementById('toggleDetailsBtn').addEventListener('click', () => {
+      contactPanelOpen = !contactPanelOpen;
+      document.getElementById('toggleDetailsBtn').classList.toggle('active', contactPanelOpen);
+      renderContactPanel();
+    });
+    renderContactPanel();
+    const crmBtn = document.getElementById('openCrmBtn');
+    if (crmBtn) crmBtn.addEventListener('click', () => { if (window.BX24) BX24.openPath('/crm/deal/details/' + a.dealId + '/'); });
+  }
+
+  async function fetchStatus() {
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${API_BASE}/status?session=${encodeURIComponent(a.sessionId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      state.connectionStatus = data.status || 'unknown';
+      updateStatusUI();
+    } catch (err) {
+      console.warn('Falha ao consultar status da instância:', err);
+    }
+  }
+
+  async function loadHistory() {
+    const a = state.active;
+    const messagesEl = document.getElementById('messagesEl');
+    if (messagesEl) messagesEl.innerHTML = `<div class="state-screen" style="padding:20px"><div class="spinner"></div></div>`;
+    try {
+      const url = `${API_BASE}/history?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}` +
+        (a.dealId ? `&dealId=${encodeURIComponent(a.dealId)}` : '');
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('falha ao carregar histórico');
+      const data = await res.json();
+      state.messages = data.messages || [];
+      state.connectionStatus = data.connectionStatus || 'unknown';
+      aiSummary = data.aiSummary || null;
+      aiSummaryUpdatedAt = data.aiSummaryUpdatedAt || null;
+      renderMessages();
+      renderContactPanel();
+      updateStatusUI();
+      // Gera sozinho quando ainda não existe resumo salvo — usuário não
+      // precisa clicar em nada pra ele aparecer. Só quando há mensagem de
+      // verdade (senão a API responde erro "não há mensagens ainda" toda
+      // vez que se abre uma conversa nova/vazia); silencioso (sem toast).
+      if (!aiSummary && state.messages.length > 0) generateConversationSummary(true);
+    } catch (err) {
+      console.error('Erro ao carregar histórico:', err);
+      if (messagesEl) messagesEl.innerHTML = `<div class="state-screen"><h3>Falha ao carregar</h3><p>Não foi possível carregar o histórico dessa conversa.</p></div>`;
+    }
+  }
+
+  function renderMessages() {
+    const el = document.getElementById('messagesEl');
+    if (!el) return;
+    const a = state.active;
+
+    if (!state.messages.length) {
+      el.innerHTML = `
+        <div class="state-screen" style="padding:20px;">
+          <h3>Nenhuma mensagem ainda</h3>
+          <p>Escreva abaixo para iniciar a conversa com ${escapeHtml(a.contactName || 'este contato')}.</p>
+        </div>`;
+      return;
+    }
+
+    let html = '';
+    let lastDay = null;
+    state.messages.forEach((msg) => {
+      const dayLabel = formatDayLabel(msg.createdAt);
+      if (dayLabel !== lastDay) {
+        html += `<div class="day-divider">${dayLabel}</div>`;
+        lastDay = dayLabel;
+      }
+      const mine = msg.direction === 'out';
+      const isMedia = (msg.type === 'image' || msg.type === 'video') && msg.mediaUrl;
+      const bubbleClass = isMedia ? 'bubble--media' : '';
+      const quotedHtml = msg.replyToId ? renderQuotedBlock(msg.replyToId) : '';
+      const reactionMine = msg.reactionBy === 'out';
+      const bubbleHtml = `
+        <div class="bubble ${bubbleClass}">
+          ${quotedHtml}
+          ${renderBubbleBody(msg, mine)}
+          <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
+          ${msg.reaction ? `<span class="reaction-badge${reactionMine ? ' reaction-badge--mine' : ''}" title="${reactionMine ? 'Clique pra remover sua reação' : 'Reação'}" data-msg-id="${escapeHtml(msg.id)}" data-reaction-mine="${reactionMine ? '1' : ''}">${escapeHtml(msg.reaction)}</span>` : ''}
+        </div>
+      `;
+      const actionsHtml = bubbleActionsHtml(msg, mine);
+      html += `
+        <div class="bubble-row ${mine ? 'mine' : 'theirs'}${msg.reaction ? ' has-reaction' : ''}" data-row-msg-id="${escapeHtml(msg.id)}">
+          ${mine ? actionsHtml + bubbleHtml : bubbleHtml + actionsHtml}
+        </div>
+      `;
+    });
+
+    el.innerHTML = compactHtml(html);
+    el.scrollTop = el.scrollHeight;
+    hydrateMedia(el);
+    hydrateLinkPreviews(el);
+  }
+
+  function typeLabel(type) {
+    return type === 'image' ? 'Foto' : type === 'video' ? 'Vídeo' : type === 'audio' ? 'Áudio' : type === 'document' ? 'Documento' : 'Mensagem';
+  }
+
+  // Ícones por tipo de mídia, usados na citação (ver renderQuotedBlock)
+  // quando a mensagem original não tem legenda — só o rótulo em texto
+  // ("Áudio") não deixa claro de longe que tipo de conteúdo era.
+  const MEDIA_TYPE_ICONS = {
+    image: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>',
+    video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>',
+    audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>',
+    document: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>',
+  };
+
+  // Botões de "reagir"/"responder" que aparecem ao passar o mouse na
+  // mensagem — ou, se o picker de emoji dessa mensagem estiver aberto, os
+  // próprios emojis no lugar dos botões.
+  function bubbleActionsHtml(msg, mine) {
+    if (openReactionPickerId === msg.id) {
+      const opts = QUICK_EMOJIS.map((e) => `<button class="emoji-opt" data-emoji-msg-id="${escapeHtml(msg.id)}" data-from-me="${mine ? '1' : ''}" data-emoji="${e}" title="Reagir com ${e}">${e}</button>`).join('');
+      return `<div class="bubble-actions-wrap picker-open"><div class="emoji-picker">${opts}<button class="bubble-action-btn" data-close-picker="1" title="Fechar">✕</button></div></div>`;
+    }
+    return `
+      <div class="bubble-actions-wrap">
+        <button class="bubble-action-btn" data-react-msg-id="${escapeHtml(msg.id)}" title="Reagir">🙂</button>
+        <button class="bubble-action-btn" data-reply-msg-id="${escapeHtml(msg.id)}" title="Responder">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+        </button>
+      </div>`;
+  }
+
+  // Pequeno bloco "citado" mostrado dentro do balão de quem respondeu —
+  // busca a mensagem original já carregada em `state.messages` (histórico
+  // recente); se não achar (citou algo fora da janela de 500 mensagens
+  // carregadas), mostra um aviso genérico em vez de quebrar.
+  function renderQuotedBlock(replyToId) {
+    const quoted = state.messages.find((m) => m.id === replyToId);
+    if (!quoted) return `<div class="quoted-block quoted-block--unknown">Mensagem citada</div>`;
+    const author = quoted.direction === 'out' ? 'Você' : (state.active?.contactName || state.active?.phone || '');
+    const body = quoted.text
+      ? `<div class="quoted-text">${escapeHtml(quoted.text.length > 90 ? quoted.text.slice(0, 90) + '…' : quoted.text)}</div>`
+      : `<div class="quoted-media-row">${MEDIA_TYPE_ICONS[quoted.type] || ''}<span>${typeLabel(quoted.type)}</span></div>`;
+    return `<div class="quoted-block" data-quoted-jump="${escapeHtml(replyToId)}"><div class="quoted-author">${escapeHtml(author)}</div>${body}</div>`;
+  }
+
+  // Delegação de evento única por conversa aberta (o container #messagesEl
+  // persiste entre re-renders — só o innerHTML muda — então não precisa
+  // religar isso a cada renderMessages(), só uma vez por renderConversationView()).
+  function bindMessagesInteractions() {
+    const el = document.getElementById('messagesEl');
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      const reactBtn = e.target.closest('[data-react-msg-id]');
+      if (reactBtn) {
+        openReactionPickerId = reactBtn.getAttribute('data-react-msg-id');
+        renderMessages();
+        return;
+      }
+      const closeBtn = e.target.closest('[data-close-picker]');
+      if (closeBtn) {
+        openReactionPickerId = null;
+        renderMessages();
+        return;
+      }
+      const emojiOpt = e.target.closest('[data-emoji-msg-id]');
+      if (emojiOpt) {
+        const msgId = emojiOpt.getAttribute('data-emoji-msg-id');
+        const fromMe = emojiOpt.getAttribute('data-from-me') === '1';
+        reactToMessage(msgId, fromMe, emojiOpt.getAttribute('data-emoji'));
+        return;
+      }
+      const badge = e.target.closest('.reaction-badge--mine');
+      if (badge) {
+        // clicar na própria reação de novo = remover (mesmo emoji já mostrado)
+        const msg = state.messages.find((m) => m.id === badge.getAttribute('data-msg-id'));
+        if (msg) reactToMessage(msg.id, msg.direction === 'out', null);
+        return;
+      }
+      const replyBtn = e.target.closest('[data-reply-msg-id]');
+      if (replyBtn) {
+        startReply(replyBtn.getAttribute('data-reply-msg-id'));
+        return;
+      }
+      const quoted = e.target.closest('[data-quoted-jump]');
+      if (quoted) {
+        const targetId = quoted.getAttribute('data-quoted-jump');
+        const row = el.querySelector(`[data-row-msg-id="${CSS.escape(targetId)}"]`);
+        if (row) {
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          row.classList.add('flash');
+          setTimeout(() => row.classList.remove('flash'), 1200);
+        }
+      }
+    });
+  }
+
+  async function reactToMessage(msgId, fromMe, emoji) {
+    const a = state.active;
+    openReactionPickerId = null;
+    const msg = state.messages.find((m) => m.id === msgId);
+    // otimista: já mostra/some a reação antes da confirmação do servidor
+    if (msg) { msg.reaction = emoji || null; msg.reactionBy = emoji ? 'out' : null; }
+    renderMessages();
+    try {
+      const res = await apiFetch(`${API_BASE}/react`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, messageId: msgId, emoji: emoji || '' }),
+      });
+      if (!res.ok) throw new Error('Falha ao reagir');
+    } catch (err) {
+      console.error('Erro ao reagir à mensagem:', err);
+      if (window.showToast) showToast('Não foi possível enviar a reação.', 'error');
+    }
+  }
+
+  function startReply(msgId) {
+    const msg = state.messages.find((m) => m.id === msgId);
+    if (!msg) return;
+    state.replyingTo = { id: msg.id, text: msg.text, type: msg.type, direction: msg.direction };
+    renderReplyPreview();
+    document.getElementById('msgInput')?.focus();
+  }
+
+  function cancelReply() {
+    state.replyingTo = null;
+    renderReplyPreview();
+  }
+
+  function renderReplyPreview() {
+    const bar = document.getElementById('replyPreviewBar');
+    if (!bar) return;
+    const r = state.replyingTo;
+    bar.hidden = !r;
+    if (!r) return;
+    const author = r.direction === 'out' ? 'Você' : (state.active?.contactName || state.active?.phone || '');
+    document.getElementById('replyPreviewAuthor').textContent = author;
+    document.getElementById('replyPreviewText').textContent = r.text || typeLabel(r.type);
+  }
+
+  const mediaBlobCache = new Map();
+
+  // Primeira URL http(s) do texto (usada pra decidir se mostra o cartão de
+  // prévia) e versão do texto com toda URL virando link clicável.
+  const URL_REGEX = /https?:\/\/[^\s<]+/i;
+  const URL_REGEX_G = /https?:\/\/[^\s<]+/gi;
+  function firstUrl(text) {
+    const m = text && text.match(URL_REGEX);
+    return m ? m[0] : null;
+  }
+  function linkify(text) {
+    return escapeHtml(text).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+  }
+
+  function renderBubbleBody(msg, mine) {
+    // Horário/check SEMPRE no rodapé do balão, nunca sobreposto na mídia —
+    // uma versão anterior sobrepunha o horário em cima da foto (sem legenda),
+    // e ficou ambíguo/confuso visualmente; agora imagem, vídeo e texto usam
+    // o mesmo `<span class="timestamp">` de sempre, gerado por renderMessages.
+    if (msg.type === 'image' && msg.mediaUrl) {
+      const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
+      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" /></div>${caption}`;
+    }
+    if (msg.type === 'video' && msg.mediaUrl) {
+      const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
+      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video></div>${caption}`;
+    }
+    if (msg.type === 'audio' && msg.mediaUrl) {
+      return `<audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio>`;
+    }
+    if (msg.type === 'document' && msg.mediaUrl) {
+      const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
+      return `
+        <a class="doc-attachment" data-media-url="${escapeHtml(msg.mediaUrl)}" href="#" download="${escapeHtml(msg.fileName || 'arquivo')}" target="_blank" rel="noopener">
+          <span class="doc-icon">${MEDIA_TYPE_ICONS.document}</span>
+          <span class="doc-info">
+            <span class="doc-name">${escapeHtml(msg.fileName || 'Documento')}</span>
+            <span class="doc-hint">Toque para abrir</span>
+          </span>
+        </a>${caption}`;
+    }
+    const url = firstUrl(msg.text);
+    return linkify(msg.text) + (url ? `<div class="link-preview" data-preview-url="${escapeHtml(url)}"><span class="link-preview-loading">Carregando prévia…</span></div>` : '');
+  }
+
+  // Documentos são um <a download> (abrir/baixar), o resto (img/video/audio)
+  // usa .src normal — por isso o atributo a ajustar depende da tag.
+  function setMediaSrc(el, value) {
+    if (el.tagName === 'A') el.href = value;
+    else el.src = value;
+  }
+
+  async function hydrateMedia(container) {
+    const els = container.querySelectorAll('[data-media-url]');
+    for (const el of els) {
+      const url = el.getAttribute('data-media-url');
+      el.removeAttribute('data-media-url');
+      if (!url.startsWith('/')) { setMediaSrc(el, url); continue; }
+      if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); continue; }
+      try {
+        const res = await apiFetch(url);
+        if (!res.ok) throw new Error('falha ao buscar mídia');
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        mediaBlobCache.set(url, blobUrl);
+        setMediaSrc(el, blobUrl);
+      } catch (err) {
+        console.error('Erro ao carregar mídia:', url, err);
+      }
+    }
+  }
+
+  // Cache por URL (guarda a Promise, não só o resultado, pra a mesma URL
+  // repetida em várias mensagens não disparar uma busca por balão).
+  const linkPreviewCache = new Map();
+  function getLinkPreview(url) {
+    if (linkPreviewCache.has(url)) return linkPreviewCache.get(url);
+    const promise = apiFetch(`${API_BASE}/link-preview?url=${encodeURIComponent(url)}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null);
+    linkPreviewCache.set(url, promise);
+    return promise;
+  }
+
+  function renderLinkPreviewCard(url, data) {
+    const site = data.siteName || (() => { try { return new URL(url).hostname; } catch { return url; } })();
+    return `
+      <a class="link-preview" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">
+        ${data.image ? `<img class="link-preview-img" src="${escapeHtml(data.image)}" alt="" />` : ''}
+        <div class="link-preview-body">
+          ${data.title ? `<div class="link-preview-title">${escapeHtml(data.title)}</div>` : ''}
+          ${data.description ? `<div class="link-preview-desc">${escapeHtml(data.description)}</div>` : ''}
+          <div class="link-preview-site">${escapeHtml(site)}</div>
+        </div>
+      </a>`;
+  }
+
+  // Busca a prévia (título/descrição/imagem) de cada link detectado no texto
+  // e troca o placeholder "Carregando…" pelo cartão pronto — ou remove o
+  // placeholder de vez se o site não tiver nada pra mostrar (best-effort).
+  async function hydrateLinkPreviews(container) {
+    const els = container.querySelectorAll('[data-preview-url]');
+    for (const el of els) {
+      const url = el.getAttribute('data-preview-url');
+      el.removeAttribute('data-preview-url');
+      const data = await getLinkPreview(url);
+      if (!data || (!data.title && !data.description && !data.image)) { el.remove(); continue; }
+      el.outerHTML = compactHtml(renderLinkPreviewCard(url, data));
+    }
+  }
+
+  function tickIcon(status) {
+    // Falha no envio: antes caía no "else" e mostrava check duplo, como se
+    // tivesse sido entregue — corrigido com um ícone próprio, em vermelho.
+    if (status === 'failed') {
+      // Cor em hex literal (não var()) de propósito: suporte de custom
+      // property em atributo de presentation SVG (fora de style=) é
+      // inconsistente entre navegadores — hex direto sempre funciona.
+      return `<svg class="ticks" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="#d9685f" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="7.5" x2="12" y2="13"/><line x1="12" y1="16.5" x2="12.01" y2="16.5"/></svg>`;
+    }
+    // sent = check simples; delivered = check duplo (cor do texto ao redor);
+    // read = check duplo azul (mesma convenção do WhatsApp), pra ficar óbvio
+    // de longe quando o cliente já visualizou a mensagem.
+    const strokeColor = status === 'read' ? '#53bdeb' : 'currentColor';
+    const paths = status === 'sent'
+      ? '<path d="M20 6 9 17l-5-5"/>'
+      : '<path d="M18 6 7 17l-5-5"/><path d="m22 10-7.5 7.5L13 16"/>';
+    return `<svg class="ticks" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="${strokeColor}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  }
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function bindComposer() {
+    const a = state.active;
+    const input = document.getElementById('msgInput');
+    const btn = document.getElementById('sendBtn');
+    const attachBtn = document.getElementById('attachBtn');
+    const mediaInput = document.getElementById('mediaInput');
+    const micBtn = document.getElementById('micBtn');
+    const hint = document.getElementById('composerHint');
+    const defaultHint = hint.textContent;
+
+    attachBtn.addEventListener('click', () => mediaInput.click());
+    mediaInput.addEventListener('change', () => {
+      const file = mediaInput.files[0];
+      mediaInput.value = '';
+      if (file) sendMediaFile(file);
+    });
+
+    document.getElementById('replyCancelBtn')?.addEventListener('click', cancelReply);
+
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let recordingTimer = null;
+    let recordingSeconds = 0;
+
+    micBtn.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      } else {
+        startRecording();
+      }
+    });
+
+    async function startRecording() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        if (window.showToast) window.showToast('Este navegador não tem suporte a gravação de áudio.', 'error');
+        return;
+      }
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (err) {
+        console.error('Erro ao acessar microfone:', err);
+        if (window.showToast) window.showToast('Não foi possível acessar o microfone. Se estiver dentro do Bitrix, o navegador pode estar bloqueando o microfone para o app incorporado — nesse caso, use o clipe (📎) para enviar um áudio já gravado.', 'error');
+        return;
+      }
+
+      recordedChunks = [];
+      mediaRecorder = new MediaRecorder(stream);
+      mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) recordedChunks.push(e.data); });
+      mediaRecorder.addEventListener('stop', () => {
+        stream.getTracks().forEach((track) => track.stop());
+        clearInterval(recordingTimer);
+        micBtn.classList.remove('recording');
+        hint.textContent = defaultHint;
+        sendPresence('paused');
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        if (blob.size > 0) sendRecordedAudio(blob);
+      });
+
+      mediaRecorder.start();
+      micBtn.classList.add('recording');
+      sendPresence('recording');
+      recordingSeconds = 0;
+      hint.textContent = 'Gravando… 0:00 (clique no microfone de novo para enviar)';
+      recordingTimer = setInterval(() => {
+        recordingSeconds++;
+        const m = String(Math.floor(recordingSeconds / 60)).padStart(1, '0');
+        const s = String(recordingSeconds % 60).padStart(2, '0');
+        hint.textContent = `Gravando… ${m}:${s} (clique no microfone de novo para enviar)`;
+      }, 1000);
+    }
+
+    // O servidor ecoa toda mensagem enviada via WebSocket (pra sincronizar
+    // outras abas/dispositivos abertos) — se esse eco chegar ANTES da
+    // resposta do POST de envio, ele entra no array já com o id real
+    // enquanto a mensagem otimista ainda está com o id temporário
+    // ('tmp-...'), e o dedupe por id do handler de WebSocket não pega essa
+    // combinação (ids diferentes). Resultado: a mensagem aparecia duas
+    // vezes até o próximo recarregamento do histórico. Em vez de só
+    // sobrescrever o id da otimista (criaria duas mensagens com o MESMO id),
+    // checa se o eco já chegou e, se sim, remove a otimista — o eco já está
+    // exibido no lugar dela.
+    function resolveOptimisticId(optimisticMsg, realId) {
+      const alreadyEchoed = state.messages.some((m) => m !== optimisticMsg && m.id === realId);
+      if (alreadyEchoed) {
+        state.messages = state.messages.filter((m) => m !== optimisticMsg);
+      } else {
+        optimisticMsg.id = realId;
+      }
+      renderMessages();
+    }
+
+    async function sendRecordedAudio(blob) {
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+      const dataBase64 = await fileToBase64(blob);
+      const optimisticMsg = {
+        id: 'tmp-' + Date.now(), type: 'audio', text: null, replyToId,
+        mediaUrl: URL.createObjectURL(blob), mimetype: blob.type,
+        direction: 'out', status: 'sent', createdAt: new Date().toISOString(),
+      };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+      try {
+        const res = await apiFetch(`${API_BASE}/send-media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: 'audio', mimetype: blob.type, dataBase64, replyToId }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        resolveOptimisticId(optimisticMsg, data.message.id);
+        bumpConversation(a.sessionId, a.phone, { lastText: null, lastType: 'audio', lastDirection: 'out', lastAt: optimisticMsg.createdAt });
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar áudio gravado:', err);
+      }
+    }
+
+    function refreshBtnState() { btn.disabled = !input.value.trim(); }
+
+    // ---------- "Digitando…"/"gravando áudio…" pro CONTATO ver no WhatsApp
+    // dele (sentido empresa -> contato; o inverso é o payload.type ===
+    // 'presence' do WebSocket, ver openSingleInboxSocket) ----------
+    let composingState = null; // null | 'composing' | 'recording' — evita repetir a mesma presença a cada tecla
+    let composingTimer = null;
+
+    function sendPresence(next) {
+      if (composingState === next) return;
+      composingState = next;
+      apiFetch(`${API_BASE}/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, state: next }),
+      }).catch(() => {}); // best-effort — não trava a digitação por causa disso
+    }
+
+    function scheduleComposingPause() {
+      clearTimeout(composingTimer);
+      composingTimer = setTimeout(() => sendPresence('paused'), 4000);
+    }
+
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 110) + 'px';
+      refreshBtnState();
+      if (input.value.trim()) {
+        sendPresence('composing');
+        scheduleComposingPause();
+      } else {
+        clearTimeout(composingTimer);
+        sendPresence('paused');
+      }
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+    // Ctrl+V com uma imagem copiada (print, ou copiada de outro app/site): o
+    // navegador entrega o arquivo via clipboardData.items, não como texto —
+    // sem isso o Ctrl+V simplesmente não fazia nada (nem colava texto nenhum).
+    input.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) sendMediaFile(file);
+          return;
+        }
+      }
+    });
+    btn.addEventListener('click', sendMessage);
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      input.style.height = 'auto';
+      refreshBtnState();
+      clearTimeout(composingTimer);
+      sendPresence('paused');
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+
+      const optimisticMsg = { id: 'tmp-' + Date.now(), text, replyToId, direction: 'out', status: 'sent', createdAt: new Date().toISOString() };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+
+      try {
+        const res = await apiFetch(`${API_BASE}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, text, replyToId }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        resolveOptimisticId(optimisticMsg, data.message.id);
+        bumpConversation(a.sessionId, a.phone, { lastText: text, lastType: 'text', lastDirection: 'out', lastAt: optimisticMsg.createdAt });
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar mensagem:', err);
+      }
+    }
+
+    async function sendMediaFile(file) {
+      const MAX_BYTES = 20 * 1024 * 1024;
+      if (file.size > MAX_BYTES) { if (window.showToast) window.showToast('Arquivo muito grande (máximo 20MB).', 'error'); return; }
+      // Imagem/áudio/vídeo o WhatsApp entrega como mídia embutida; qualquer
+      // outro tipo (PDF, PPT, DOCX, planilha, zip...) vira 'document' — um
+      // anexo genérico, mostrado como cartão com nome do arquivo.
+      const mediaType = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'document';
+      const fileName = mediaType === 'document' ? file.name : null;
+
+      const replyToId = state.replyingTo?.id || null;
+      cancelReply();
+      const dataBase64 = await fileToBase64(file);
+      const optimisticMsg = {
+        id: 'tmp-' + Date.now(), type: mediaType, text: null, replyToId, fileName,
+        mediaUrl: URL.createObjectURL(file), mimetype: file.type,
+        direction: 'out', status: 'sent', createdAt: new Date().toISOString(),
+      };
+      state.messages.push(optimisticMsg);
+      renderMessages();
+
+      try {
+        const res = await apiFetch(`${API_BASE}/send-media`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: mediaType, mimetype: file.type, dataBase64, fileName, replyToId }),
+        });
+        if (!res.ok) throw new Error('Falha no envio');
+        const data = await res.json();
+        resolveOptimisticId(optimisticMsg, data.message.id);
+        bumpConversation(a.sessionId, a.phone, { lastText: null, lastType: mediaType, lastDirection: 'out', lastAt: optimisticMsg.createdAt });
+      } catch (err) {
+        optimisticMsg.status = 'failed';
+        renderMessages();
+        console.error('Erro ao enviar mídia:', err);
+      }
+    }
+  }
+
+  // =========================================================
+  // Tempo real — um socket "de sessão inteira" por instância no filtro
+  // atual, pra atualizar a lista (nova mensagem em qualquer conversa) e a
+  // conversa aberta, sem precisar reabrir a conexão ao trocar de conversa.
+  // =========================================================
+  function openInboxSockets() {
+    state.sessionIds.forEach((id) => openSingleInboxSocket(id));
+  }
+
+  function openSingleInboxSocket(id) {
+    if (!state.sessionIds.includes(id)) return;
+    let socket;
+    try {
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + `/stream?session=${encodeURIComponent(id)}&token=${encodeURIComponent(appToken)}`;
+      socket = new WebSocket(wsUrl);
+    } catch (err) {
+      console.warn('Realtime indisponível para', id, err);
+      return;
+    }
+
+    socket.onmessage = (event) => {
+      let payload;
+      try { payload = JSON.parse(event.data); } catch { return; }
+
+      if (payload.type === 'message') {
+        const phone = payload.phone;
+        const isActive = state.active && state.active.sessionId === id && state.active.phone === phone;
+        if (isActive) {
+          const alreadyShown = state.messages.some((m) => m.id === payload.message.id);
+          if (!alreadyShown) { state.messages.push(payload.message); renderMessages(); scheduleSummaryRefresh(); }
+        }
+
+        // Notifica só quando NÃO é a conversa aberta, é mensagem recebida (não
+        // eco do que a gente mesmo mandou) e a conversa não está silenciada —
+        // sem conversa ainda na lista (é nova) conta como "notifica", já que
+        // o padrão do banco é notificar por padrão.
+        if (!isActive && payload.message.direction === 'in') {
+          const conv = state.conversations.find((c) => c.sessionId === id && c.phone === phone);
+          const notifyEnabled = !conv || conv.notificationsEnabled !== false;
+          if (notifyEnabled) notifyNewMessage(conv?.contactName || phone, payload.message, { sessionId: id, phone, contactName: conv?.contactName });
+        }
+
+        bumpConversation(id, phone, {
+          lastText: payload.message.text ?? null,
+          lastType: payload.message.type || 'text',
+          lastDirection: payload.message.direction,
+          lastAt: payload.message.createdAt,
+        });
+      }
+
+      if (payload.type === 'status') {
+        state.instanceStatus[id] = payload.status;
+        renderConvList();
+        if (state.active && state.active.sessionId === id) {
+          state.connectionStatus = payload.status;
+          updateStatusUI();
+        }
+      }
+
+      if (payload.type === 'message-status' && state.active && state.active.sessionId === id) {
+        const msg = state.messages.find((m) => m.id === payload.messageId);
+        if (msg) { msg.status = payload.status; renderMessages(); }
+      }
+
+      if (payload.type === 'reaction' && state.active && state.active.sessionId === id) {
+        const msg = state.messages.find((m) => m.id === payload.targetId);
+        if (msg) {
+          msg.reaction = payload.emoji;
+          msg.reactionBy = payload.emoji ? payload.direction : null;
+          renderMessages();
+        }
+      }
+
+      // "Digitando…"/"gravando áudio…" do CONTATO — ao vivo, não persiste.
+      // 'available'/'unavailable' (voltou a ficar só online/offline) limpa.
+      if (payload.type === 'presence' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+        state.peerPresence = payload.state === 'composing' || payload.state === 'recording' ? payload.state : null;
+        updateStatusUI();
+        clearTimeout(state.peerPresenceTimer);
+        if (state.peerPresence) {
+          // defensivo: se o 'paused'/'available' de fim nunca chegar (evento
+          // perdido), o indicador não fica preso pra sempre na tela.
+          state.peerPresenceTimer = setTimeout(() => {
+            state.peerPresence = null;
+            updateStatusUI();
+          }, 12000);
+        }
+      }
+    };
+
+    socket.onclose = () => { setTimeout(() => openSingleInboxSocket(id), 4000); };
+
+    state.inboxSockets.push({ id, socket });
+  }
+
+  function closeInboxSockets() {
+    state.inboxSockets.forEach(({ socket }) => { socket.onclose = null; socket.close(); });
+    state.inboxSockets = [];
+  }
+
+  // =========================================================
+  // Boot
+  // =========================================================
+  async function boot() {
+    renderEmptyView();
+    try {
+      await initInstances();
+      // Deep link vindo de fora do Chat (ex: card em /notifications.html) —
+      // mesmo fallback de window.__notifNavigate: usa a conversa já
+      // carregada se achar (nome/tags certos), senão abre só com o telefone cru.
+      const params = new URLSearchParams(location.search);
+      const dlSession = params.get('session');
+      const dlPhone = params.get('phone');
+      if (dlSession && dlPhone) {
+        const conv = state.conversations.find((c) => c.sessionId === dlSession && c.phone === dlPhone);
+        openConversation(conv || { sessionId: dlSession, phone: dlPhone, contactName: dlPhone, dealId: null, tags: [] });
+      }
+    } catch (err) {
+      console.error('Erro ao iniciar o Chat:', err);
+      convList.innerHTML = `<p class="empty">${escapeHtml(err.message || 'Falha ao carregar.')}</p>`;
+    }
+  }
+
+  boot();
+})();
+</script>
+<script>
+(function () {
+  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
+    if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
+    if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

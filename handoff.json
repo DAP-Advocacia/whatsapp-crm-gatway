@@ -1,0 +1,142 @@
+{
+  "project": {
+    "name": "whatsapp-bitrix-gateway",
+    "version": "1.0.0",
+    "description": "Gateway Node.js que conecta sessoes pessoais de WhatsApp (Baileys, protocolo nao-oficial) ao Bitrix24, alimentando uma aba 'WhatsApp' no card de Negocio (placement CRM_DEAL_DETAIL_TAB). Multi-sessao: cada usuario do Bitrix conecta o proprio numero.",
+    "lastUpdated": "2026-07-01",
+    "legalWarning": "Usa engenharia reversa do WhatsApp Web, nao a API oficial da Meta. Viola os Termos de Uso; risco de banimento do numero, sobretudo em volume comercial."
+  },
+  "stack": {
+    "runtime": "Node.js (CommonJS)",
+    "dependencies": {
+      "@whiskeysockets/baileys": "^7.0.0-rc13",
+      "express": "^4.19.2",
+      "ws": "^8.18.0",
+      "qrcode": "^1.5.4",
+      "pino": "^9.3.2",
+      "cors": "^2.8.5",
+      "dotenv": "^16.4.5"
+    },
+    "scripts": {
+      "start": "node src/server.js",
+      "dev": "nodemon src/server.js"
+    }
+  },
+  "architecture": {
+    "multiSession": {
+      "sessionIdFormat": "<member_id>_<userId>",
+      "sessionIdSource": "BX24.getAuth().member_id + BX24.callMethod('user.current').ID",
+      "credentialsPath": "auth_session/<sessionId>/",
+      "note": "Cada usuario do Bitrix tem sessao, credenciais, historico e status separados. QR aparece dentro da propria aba do card."
+    },
+    "transport": {
+      "http": "Express na PORT (default 3333)",
+      "websocket": "ws na mesma porta, rota /api/whatsapp/stream",
+      "statusValues": ["connecting", "online", "offline"]
+    },
+    "storage": {
+      "current": "JSON em data/messages.json, namespaceado por sessao+telefone",
+      "shape": "{ [sessionId]: { [phone]: { dealId, messages: [{id,text,direction,status,createdAt}] } } }",
+      "maxMessagesPerPhone": 500,
+      "productionTodo": "Trocar por Postgres/Mongo"
+    },
+    "lidPhoneMapping": {
+      "problem": "WhatsApp moderno identifica remetentes por endereco opaco <id>@lid em vez do telefone (sistema LID de privacidade)",
+      "wrongFields": ["key.senderPn", "key.participantPn"],
+      "correctFields": ["key.participantAlt (mensagem de grupo)", "key.remoteJidAlt (conversa direta)"],
+      "note": "Confirmado empiricamente no Baileys 7.0.0-rc13 (Jul/2026): os campos wrongFields nunca sao preenchidos; usar remoteJid/participant sem o Alt correspondente extrai o proprio ID @lid como 'telefone', que nao bate com nenhum contato do CRM. Revalidar ao atualizar o Baileys."
+    }
+  },
+  "envVars": [
+    { "name": "PORT", "value": "3333", "purpose": "Porta HTTP+WS" },
+    { "name": "AUTH_FOLDER", "value": "./auth_session", "purpose": "Pasta-base das sessoes (subpasta por usuario). Fazer backup." },
+    { "name": "BITRIX_WEBHOOK_URL", "value": "", "purpose": "Opcional: webhook de entrada p/ logar mensagens na timeline do CRM (crm.timeline.comment.add)" },
+    { "name": "ALLOWED_ORIGINS", "value": "https://bmd.bitrix24.com.br", "purpose": "CORS. Dominio real configurado.", "status": "OK" },
+    { "name": "PUBLIC_URL", "value": "https://maker-impaired-obliged.ngrok-free.dev", "purpose": "Referencia/documentacao apenas — o fluxo de instalacao usa location.origin no navegador, nao depende desta variavel em runtime", "status": "dominio estatico reservado, nao muda em restart do tunel" }
+  ],
+  "bitrixApp": {
+    "type": "Aplicativo local (Servidor)",
+    "portal": "bmd.bitrix24.com.br",
+    "memberId": "2c39349ea593c27fd3092b4fe2c47de7",
+    "config": {
+      "handlerUrl": "https://maker-impaired-obliged.ngrok-free.dev/",
+      "installUrl": "https://maker-impaired-obliged.ngrok-free.dev/install",
+      "scriptOnly": false
+    },
+    "permissions": {
+      "used": ["crm", "placement", "user"],
+      "extraMarkedButUnused": ["imconnector", "call", "contact_center", "messageservice", "im.import", "pull_channel", "pull"]
+    },
+    "installFlow": "POST /install carrega SDK BX24, chama placement.unbind + placement.bind (CRM_DEAL_DETAIL_TAB -> location.origin + '/', TITLE 'WhatsApp') e BX24.installFinish(). Registro feito pelo navegador, nao depende de AUTH_ID no POST.",
+    "ngrokCaveat": "ngrok gratis muda a URL a cada reinicio, A MENOS que se reserve um dominio estatico gratuito (1 por conta, dashboard.ngrok.com/domains) e sempre suba com 'ngrok http --url=https://SEU-DOMINIO 3333'. Atencao a multiplas contas ngrok na mesma maquina: se o authtoken salvo em ngrok.yml for de conta diferente da que reservou o dominio, o tunel falha com ERR_NGROK_320."
+  },
+  "routes": {
+    "http": [
+      { "path": "/", "method": "POST", "purpose": "Handler principal; serve public/index.html; trata evento offline ONAPPINSTALL" },
+      { "path": "/install", "method": "GET|POST", "purpose": "Pagina de instalacao (placement.bind + installFinish)" },
+      { "path": "/api/whatsapp/qr", "method": "GET", "params": ["session"], "purpose": "Cria/inicia sessao e retorna { qr, status }" },
+      { "path": "/api/whatsapp/status", "method": "GET", "params": ["session"], "purpose": "{ status }" },
+      { "path": "/api/whatsapp/history", "method": "GET", "params": ["session", "dealId", "phone"], "purpose": "Historico + connectionStatus; salva vinculo telefone->negocio" },
+      { "path": "/api/whatsapp/send", "method": "POST", "body": ["session", "dealId", "phone", "text"], "purpose": "Envia mensagem" },
+      { "path": "/admin/login", "method": "GET", "params": ["session"], "purpose": "Pagina de debug p/ escanear QR de uma sessao especifica" }
+    ],
+    "websocket": [
+      { "path": "/api/whatsapp/stream", "params": ["session", "phone"], "messages": ["{type:'message', message}", "{type:'status', status}"] }
+    ]
+  },
+  "files": {
+    "src/server.js": "Bootstrap HTTP+WS; rotas /, /install, /admin/login; hub WebSocket (subscribers Map<'sessionId::phone', Set<ws>>); wiring do SessionManager. Logs de debug temporarios removidos nesta sessao.",
+    "src/sessions.js": "SessionManager: 1 WhatsAppGateway por usuario (get lazy + sanitize do id); startAllExisting() retoma sessoes com creds.json no boot.",
+    "src/whatsapp.js": "WhatsAppGateway (EventEmitter): eventos qr/status/message; sendMessage; reconexao automatica (exceto loggedOut); mapeamento telefone real via key.participantAlt/remoteJidAlt (corrigido nesta sessao, ver architecture.lidPhoneMapping). Logs de debug temporarios removidos.",
+    "src/store.js": "Persistencia JSON namespaceada por sessao+telefone.",
+    "src/bitrix.js": "Cliente REST minimo p/ webhook (log opcional na timeline).",
+    "src/routes/whatsapp.js": "Rotas REST /api/whatsapp/* (todas exigem 'session').",
+    "public/index.html": "Frontend da aba (vanilla JS + SDK BX24): resolve sessao, mostra QR embutido, chat, WebSocket. Fetches mandam header ngrok-skip-browser-warning. Dedupe de mensagem enviada por id (corrigido nesta sessao, evita duplicar bolha ao ecoar via WS).",
+    "data/messages.json": "Banco de mensagens (trocar por DB real).",
+    "auth_session/<sessionId>/": "Credenciais Baileys por usuario."
+  },
+  "changelog": [
+    { "step": 1, "title": "Diagnostico inicial", "detail": "Rotas de instalacao existiam em server.js mas a deteccao de instalacao estava errada." },
+    { "step": 2, "title": "Bug de instalacao corrigido", "detail": "placement.bind so rodava com event=ONAPPINSTALL (nao ocorre na instalacao interativa). Criada rota /install que registra placement via BX24 no navegador + installFinish." },
+    { "step": 3, "title": "UX fora de card", "detail": "Placement DEFAULT (menu lateral) agora mostra 'Abra a partir de um Negocio'." },
+    { "step": 4, "title": "Erro ao carregar conversa", "detail": "Pagina de aviso do ngrok gratis interceptava fetch (HTML quebrava res.json()). Corrigido com header ngrok-skip-browser-warning." },
+    { "step": 5, "title": "Refatoracao multi-sessao", "detail": "De sessao global para 1 por usuario: sessions.js novo, store.js namespaceado, routes com param session, server.js subscribers por session::phone, index.html resolve sessao + QR embutido." },
+    { "step": 6, "title": "Envio funcionando", "detail": "Mensagem enviada pelo card chega no destinatario. OK." },
+    { "step": 7, "title": "Falha de decriptacao no recebimento", "detail": "Mensagens de enderecos @lid davam SessionError: No session record no Baileys 6.7.23. Atualizado para Baileys 7.0.0-rc13 (suporte a LID). Sessoes antigas limpas." },
+    { "step": 8, "title": "Infraestrutura corrigida (ngrok + servidor desatualizado)", "detail": "Tunel ngrok apontava para porta 80 (nada rodava ali) em vez de 3333, e o dominio configurado no Bitrix pertencia a outra conta ngrok (authtoken errado em ngrok.yml). Reservado dominio estatico novo na conta correta, corrigido o token, atualizado PUBLIC_URL e HANDLER/INSTALL no Bitrix. Servidor Node tambem estava rodando codigo anterior a refatoracao multi-sessao; reiniciado." },
+    { "step": 9, "title": "Bug de recebimento resolvido", "detail": "Causa raiz: mapeamento de telefone usava key.senderPn/participantPn, campos inexistentes no Baileys 7.0.0-rc13. Corrigido para usar key.participantAlt/remoteJidAlt (ver architecture.lidPhoneMapping). Confirmado com teste real de ponta a ponta." },
+    { "step": 10, "title": "Bug de duplicacao de mensagem enviada corrigido", "detail": "Bolha otimistica + eco da mesma mensagem via broadcast do proprio /send faziam a mensagem aparecer duas vezes. Corrigido com dedupe por id (id temporario trocado pelo id real na resposta do /send; WS ignora id ja exibido)." },
+    { "step": 11, "title": "Limpeza", "detail": "Removidos os logs de debug temporarios de src/whatsapp.js e src/server.js usados para diagnosticar o recebimento." }
+  ],
+  "currentState": {
+    "working": [
+      "Instalacao do app e registro da aba WhatsApp no card (placement.bind)",
+      "Abertura da aba com contexto do Negocio (dealId)",
+      "Multi-sessao por usuario (sessionId = member_id_userId)",
+      "QR Code embutido na aba + onboarding por polling",
+      "Envio de mensagem (card -> destinatario), sem duplicar na tela",
+      "Recebimento de mensagem (destinatario -> card), testado de ponta a ponta",
+      "Reconexao automatica de sessoes ja pareadas no boot do servidor"
+    ],
+    "broken": []
+  },
+  "openIssue": null,
+  "nextSteps": [
+    "Seguranca: validar AUTH_ID/APPLICATION_TOKEN do Bitrix no backend (hoje qualquer session na URL da acesso)",
+    "Trocar store.js (JSON) por banco real",
+    "Tratar imagem/audio/documento (hoje so texto)",
+    "Dominio fixo (sair do ngrok, mesmo o gratuito com dominio estatico) para producao",
+    "Avaliar fixar Baileys em versao estavel (hoje rc13) — revalidar mapeamento LID (participantAlt/remoteJidAlt) ao atualizar",
+    "Persistir AUTH_FOLDER em disco duravel"
+  ],
+  "testContext": {
+    "portal": "bmd.bitrix24.com.br",
+    "dealsUsed": ["5394224", "5366364", "5367598"],
+    "testUsers": [
+      { "sessionId": "2c39349ea593c27fd3092b4fe2c47de7_5305", "ownNumber": "5521959030061" },
+      { "sessionId": "2c39349ea593c27fd3092b4fe2c47de7_183168", "ownNumber": "5521965628397", "displayNameSeenByContacts": "Gabriel Alves (Conta comercial)" }
+    ],
+    "testContact": { "name": "CAIO TESTE", "phone": "5521973892687" },
+    "ngrokDomain": "https://maker-impaired-obliged.ngrok-free.dev"
+  }
+}

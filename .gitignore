@@ -1,0 +1,12 @@
+node_modules/
+auth_session/
+auth_session_backup*/
+data/
+.env
+*.log
+
+# repositório Git próprio, já publicado separadamente (github.com/DanielCosta1997/control-plane)
+control-plane/
+
+# config/estado local do Claude Code (por máquina, não é do projeto)
+.claude/

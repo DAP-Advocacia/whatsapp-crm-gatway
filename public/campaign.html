@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campanha · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
+  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
+  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
+  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO). */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Full-bleed de propósito (mesmo modelo do Dashboard — pedido do
+     usuário porque ficava "muito centralizado"): só desconta a sidebar, sem
+     teto de largura. */
+  #app{
+    margin-left: var(--sidebar-w);
+    padding: 28px 32px 70px;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed #app{ margin-left: var(--sidebar-w-collapsed); }
+
+  /* ======================================================
+     Sidebar de navegação (retrátil) + notificações/toast
+     ====================================================== */
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  /* Grupo "Landing Page" com submenu "Métricas LP" (dropdown/acordeão) —
+     clicar no item principal navega normal; a seta abre/fecha o submenu,
+     que fica lembrado por página (localStorage). No modo ícone (sidebar
+     recolhida) o acordeão não faz sentido — mostra os dois itens sempre,
+     como já era antes de virarem um grupo só. */
+  .nav-group{ position:relative; }
+  .nav-group > .nav-item{ padding-right:34px; }
+  .nav-caret-btn{
+    position:absolute; top:10px; right:6px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
+    transition: color .15s, background .15s;
+  }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
+  .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
+  .nav-subitems{ display:none; flex-direction:column; }
+  .nav-group.open .nav-subitems{ display:flex; }
+  .nav-subitem{ padding-left:30px; font-size:12px; }
+  html.sidebar-collapsed .nav-caret-btn{ display:none; }
+  html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
+  html.sidebar-collapsed .nav-subitems{ display:flex !important; }
+
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  .toast.clickable{ cursor:pointer; }
+  .toast.clickable:hover{ filter: brightness(1.15); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  .layout{ display:flex; gap: 28px; align-items:flex-start; }
+  .form-col{ flex: 1; min-width: 0; }
+  /* Aumentado (era 300px) — pedido do usuário pra ver melhor como a
+     mensagem/mídia vai ficar antes de disparar a campanha. */
+  .preview-col{ width: 400px; flex-shrink: 0; position: sticky; top: 20px; }
+  @media (max-width: 1100px){
+    .layout{ flex-direction: column; }
+    .preview-col{ width: 100%; position: static; }
+  }
+
+  h1{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; margin: 0 0 4px; }
+  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 20px; }
+
+  .warning-banner{
+    background: rgba(var(--red-rgb),.1);
+    border: 1px solid rgba(var(--red-rgb),.3);
+    color: #e89c95;
+    font-size: 12.5px;
+    line-height: 1.5;
+    padding: 12px 14px;
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+  }
+
+  .panel{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .panel h2{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 12px; }
+  .panel .hint{ font-size: 11.5px; color: var(--text-faint); margin: 4px 0 0; }
+  .field-row{ display:flex; gap: 12px; flex-wrap: wrap; }
+  .field-row > div{ flex: 1; min-width: 200px; }
+
+  label.field-label{ display:block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+
+  select, textarea, input[type="text"]{
+    width: 100%;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 9px 11px;
+    outline: none;
+  }
+  select:focus, textarea:focus, input:focus{ border-color: var(--gold-dim); }
+  textarea{ resize: vertical; min-height: 70px; }
+
+  .recipients-list{
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--surface-2);
+  }
+  .recipient-row{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .recipient-row:last-child{ border-bottom: none; }
+  .recipient-row .phone{ color: var(--text); }
+  .recipient-row .meta{ color: var(--text-faint); font-size: 11px; }
+  .recipients-toolbar{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 8px; font-size: 12px; }
+  .recipients-toolbar button{
+    background: none; border: none; color: var(--gold); font-size: 12px; cursor: pointer; padding: 0;
+  }
+
+  .btn{
+    background: var(--gold);
+    color: #1a1408;
+    border: none;
+    border-radius: 9px;
+    padding: 8px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover{ filter: brightness(1.08); }
+  .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled{ opacity: .5; cursor: not-allowed; }
+
+  .overlay{
+    position: fixed; inset: 0; background: rgba(10,8,5,.6);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .overlay.open{ display: flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; width: 100%; max-width: 340px; text-align: center;
+  }
+  .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
+  .modal-actions{ display:flex; justify-content: center; gap: 8px; margin-top: 16px; }
+
+  .send-btn{
+    background: var(--gold);
+    color: #1a1408;
+    border: none;
+    border-radius: 10px;
+    padding: 11px 20px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .send-btn:hover{ filter: brightness(1.08); }
+  .send-btn:disabled{ background: var(--surface-2); color: var(--text-faint); cursor: not-allowed; }
+
+  .progress-bar-bg{ background: var(--surface-2); border-radius: 8px; height: 10px; overflow: hidden; }
+  .progress-bar-fill{ height: 100%; background: linear-gradient(135deg, #e3b65b, #c5912f); transition: width .3s; }
+  .progress-stats{ display:flex; gap: 16px; font-size: 12.5px; color: var(--text-muted); margin-top: 8px; flex-wrap: wrap; }
+  .progress-stats b{ color: var(--text); }
+
+  .empty{ color: var(--text-faint); font-size: 12.5px; padding: 10px 0; }
+
+  .template-row{ display:flex; gap: 8px; margin-bottom: 10px; }
+  .template-row select{ flex: 1; }
+
+  .attach-row{ display:flex; align-items:center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .attach-chip{
+    display:flex; align-items:center; gap: 8px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 100px; padding: 5px 6px 5px 12px; font-size: 12px;
+  }
+  .attach-chip button{ background:none; border:none; color: var(--text-faint); cursor:pointer; font-size:14px; padding: 2px 6px; }
+  .attach-chip button:hover{ color: var(--red); }
+  input[type="file"]{ display:none; }
+  .attach-label{
+    display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size: 12.5px; color: var(--gold);
+    border: 1px dashed var(--border); border-radius: 9px; padding: 8px 12px;
+  }
+  .attach-label:hover{ border-color: var(--gold-dim); }
+
+  .preview-panel{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px;
+  }
+  .preview-panel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 14px; gap: 8px; }
+  .preview-panel-head .preview-title{ font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+  .device-switch{ display:flex; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
+  .device-switch button{
+    background: none; border: none; color: var(--text-faint); padding: 5px 9px; border-radius: 6px; cursor: pointer; font-size: 13px; line-height: 1;
+  }
+  .device-switch button.active{ background: var(--surface); color: var(--gold); }
+  .device-switch button:hover:not(.active){ color: var(--text-muted); }
+
+  .device-frame{ margin: 0 auto; width: 280px; transition: width .18s ease; }
+  .device-frame.tablet{ width: 340px; }
+  .device-frame.desktop{ width: 100%; }
+
+  .device-screen{
+    background: #0b141a; border-radius: 22px; border: 6px solid var(--border); overflow: hidden;
+    aspect-ratio: 9 / 18.5; display:flex; flex-direction:column;
+  }
+  .device-frame.tablet .device-screen{ border-radius: 14px; border-width: 8px; aspect-ratio: 3 / 4; }
+  .device-frame.desktop .device-screen{ border-radius: 8px; border-width: 2px; aspect-ratio: 16 / 10; }
+
+  .chat-header{ display:flex; align-items:center; gap: 8px; background: #202c33; padding: 10px 12px; flex-shrink: 0; }
+  .chat-avatar{
+    width: 26px; height: 26px; border-radius: 50%; background: var(--gold-dim); color: #1a1408;
+    display:flex; align-items:center; justify-content:center; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .chat-name{ font-size: 12px; color: #f3ede2; font-weight: 500; }
+  .chat-body{
+    flex: 1; padding: 12px 8px; overflow-y: auto;
+    background-image: radial-gradient(circle at 20px 20px, rgba(255,255,255,.02) 1px, transparent 0);
+    background-size: 20px 20px; background-color: #0b141a;
+  }
+  .preview-bubble{
+    background: #1f6b4a; color: #f3ede2; border-radius: 10px 10px 2px 10px;
+    max-width: 90%; margin-left: auto; overflow: hidden;
+  }
+  .preview-bubble-text{
+    padding: 9px 12px; font-size: 12.5px; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  /* Mídia anexada (imagem/áudio/vídeo) renderizada de verdade no preview —
+     antes só mostrava uma etiqueta de texto ("📎 Imagem anexado"), agora
+     mostra o arquivo em si, igual ao WhatsApp de verdade. */
+  .preview-media-img, .preview-media-video{ display:block; width:100%; max-height:260px; object-fit:cover; }
+  .preview-media-audio{ display:block; width: calc(100% - 20px); margin:10px auto 0; }
+  /* Link do YouTube não é anexo de verdade (o WhatsApp não tem "vídeo por
+     URL") — vira texto com a URL no fim da mensagem, e o próprio app do
+     destinatário monta essa mesma prévia com miniatura sozinho. */
+  .preview-yt-card{ position:relative; display:block; background:#000; }
+  .preview-yt-card img{ display:block; width:100%; max-height:220px; object-fit:cover; opacity:.85; }
+  .preview-yt-play{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:42px; height:42px; border-radius:50%; background:rgba(0,0,0,.55); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:15px;
+  }
+  .preview-hint{ font-size: 11px; color: var(--text-faint); margin-top: 10px; text-align:center; }
+
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 13px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/dashboard.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <div class="nav-group open" id="navGroupCampaign">
+      <a href="/campaign.html" class="nav-item active">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+        <span class="nav-label">Campanha</span>
+        <span class="nav-tip">Campanha</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupCampaignToggle" title="Mostrar/ocultar Análise de Campanha e Agenda de Envios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/campaign-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg></span>
+          <span class="nav-label">Análise de Campanha</span>
+          <span class="nav-tip">Análise de Campanha</span>
+        </a>
+        <a href="/campaign-schedule.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
+          <span class="nav-label">Agenda de Envios</span>
+          <span class="nav-tip">Agenda de Envios</span>
+        </a>
+      </div>
+    </div>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <div class="nav-group" id="navGroupLP">
+      <a href="/sites.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-label">Landing Page</span>
+        <span class="nav-tip">Landing Page</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupLPToggle" title="Mostrar/ocultar Métricas LP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/lead-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
+          <span class="nav-label">Métricas LP</span>
+          <span class="nav-tip">Métricas LP</span>
+        </a>
+      </div>
+    </div>
+    <a href="/onboarding.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+      <span class="nav-label">Onboarding</span>
+      <span class="nav-tip">Onboarding</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <div class="nav-group" id="navGroupSettings">
+      <a href="/settings.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Configurações</span>
+        <span class="nav-tip">Configurações</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupSettingsToggle" title="Mostrar/ocultar Instâncias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/instances.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">Instâncias</span>
+          <span class="nav-tip">Instâncias</span>
+        </a>
+      </div>
+    </div>
+    <a href="/apresentacao.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
+      <span class="nav-label">Apresentação</span>
+      <span class="nav-tip">Apresentação</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <h1>Campanha</h1>
+  <p class="subtitle">Envia a mesma mensagem (personalizada por contato) pra vários destinatários, um de cada vez.</p>
+
+  <div class="warning-banner">
+    ⚠️ <b>Risco de banimento.</b> Este gateway usa o protocolo não-oficial do
+    WhatsApp Web. Enviar mensagens em volume pra muitos contatos de uma vez é
+    exatamente o padrão que os sistemas antispam do WhatsApp mais penalizam —
+    o número pode ser bloqueado, mesmo com os intervalos que este app já
+    aplica entre os envios. Use só com contatos que já têm relação com você
+    (leads/clientes do CRM), nunca com listas frias.
+  </div>
+
+  <div class="layout">
+    <div class="form-col">
+      <div class="panel">
+        <h2>1. Detalhes da campanha</h2>
+        <div class="field-row">
+          <div>
+            <label class="field-label" for="campaignName">Nome da campanha (opcional, só pra identificar no progresso)</label>
+            <input type="text" id="campaignName" placeholder="Ex: Black Friday — Clientes VIP">
+          </div>
+          <div>
+            <label class="field-label" for="instanceSelect">Enviando pelo WhatsApp de</label>
+            <select id="instanceSelect"><option value="">Carregando instâncias…</option></select>
+            <p class="hint">Só suas próprias instâncias — <a href="/instances.html" style="color:var(--gold)">gerencie ou conecte outra em Instâncias</a>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>2. Destinatários</h2>
+        <label class="field-label" for="contactListSelect">Lista de contatos (opcional)</label>
+        <select id="contactListSelect"><option value="">Nenhuma — usar conversas/manual abaixo</option></select>
+        <p class="hint" id="listContactsHint" style="margin-bottom:12px"></p>
+
+        <div class="recipients-toolbar">
+          <span id="recipientsCount">0 selecionados no total</span>
+          <button type="button" id="toggleAllBtn">Marcar todas as conversas</button>
+        </div>
+        <label class="field-label">Conversas já existentes (vinculadas a negócio)</label>
+        <div class="recipients-list" id="recipientsList">
+          <p class="empty">Carregando conversas…</p>
+        </div>
+        <label class="field-label" style="margin-top:14px">Adicionar números manualmente (um por linha ou separados por vírgula, com DDI — ex: 5521999999999)</label>
+        <textarea id="manualPhones" placeholder="5521999999999&#10;5511988887777"></textarea>
+      </div>
+
+      <div class="panel">
+        <h2>3. Mensagem</h2>
+        <div class="template-row">
+          <select id="templateSelect"><option value="">Escrever mensagem manualmente</option></select>
+          <button class="btn secondary" id="saveTemplateBtn" type="button">Salvar como modelo</button>
+        </div>
+        <textarea id="messageText" placeholder="Olá {{nome}}, tudo bem? Temos uma novidade pra você…" style="min-height:100px"></textarea>
+        <p class="hint">Use <code>{{nome}}</code> e <code>{{telefone}}</code> — são substituídos automaticamente pra cada destinatário (contatos sem nome cadastrado recebem o telefone no lugar de {{nome}}).</p>
+
+        <div class="attach-row">
+          <label class="attach-label" for="mediaInput">📎 Anexar imagem, áudio ou vídeo (até 15MB)</label>
+          <input type="file" id="mediaInput" accept="image/*,audio/*,video/*">
+          <span id="attachChipWrap"></span>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+          <label class="field-label" for="youtubeUrlInput">▶️ Anexar vídeo do YouTube (opcional)</label>
+          <input type="url" id="youtubeUrlInput" placeholder="https://www.youtube.com/watch?v=...">
+          <p class="hint">Cola o link ao final da mensagem — o próprio WhatsApp mostra a prévia (miniatura) do vídeo pro destinatário, do mesmo jeito que acontece quando alguém cola esse link manualmente numa conversa.</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>4. Enviar</h2>
+
+        <label class="field-label">Quando disparar</label>
+        <div class="device-switch" id="sendModeSwitch" style="width:fit-content; margin-bottom:12px">
+          <button type="button" data-mode="now" class="active">Enviar agora</button>
+          <button type="button" data-mode="schedule">Agendar</button>
+        </div>
+
+        <div id="scheduleFields" style="display:none; margin-bottom:14px">
+          <label class="field-label" for="scheduledAt">Data e hora do disparo</label>
+          <input type="datetime-local" id="scheduledAt">
+          <p class="hint">No horário marcado o envio começa sozinho — ou adiante arrastando o card pra "Enviar agora" na <a href="/campaign-schedule.html" style="color:var(--gold)">Agenda de Envios</a>.</p>
+        </div>
+
+        <p class="hint" style="margin-bottom:12px">
+          Intervalo de ~4 a 9s entre cada mensagem (não é ajustável, é uma
+          precaução contra bloqueio). Máximo de 100 destinatários por campanha.
+        </p>
+        <button class="send-btn" id="sendCampaignBtn">Enviar campanha</button>
+
+        <div id="scheduleSuccessBox" class="warning-banner" style="display:none; margin-top:16px; background: rgba(var(--green-rgb),.1); border-color: rgba(var(--green-rgb),.3); color: var(--green);"></div>
+
+        <div id="progressBox" style="display:none; margin-top:16px;">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill" style="width:0%"></div></div>
+          <div class="progress-stats">
+            <span id="statNameWrap"></span>
+            <span>Enviadas: <b id="statSent">0</b></span>
+            <span>Falharam: <b id="statFailed">0</b></span>
+            <span>Total: <b id="statTotal">0</b></span>
+            <span id="statStatus"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-col">
+      <div class="preview-panel">
+        <div class="preview-panel-head">
+          <span class="preview-title">Preview ao vivo</span>
+          <div class="device-switch">
+            <button type="button" data-device="phone" class="active" title="Celular">📱</button>
+            <button type="button" data-device="tablet" title="Tablet">📟</button>
+            <button type="button" data-device="desktop" title="Computador">🖥️</button>
+          </div>
+        </div>
+        <div class="device-frame" id="deviceFrame">
+          <div class="device-screen">
+            <div class="chat-header">
+              <div class="chat-avatar" id="previewAvatar">C</div>
+              <div class="chat-name" id="previewContactName">Cliente Exemplo</div>
+            </div>
+            <div class="chat-body">
+              <div class="preview-bubble" id="previewBubble">Sua mensagem aparecerá aqui…</div>
+            </div>
+          </div>
+        </div>
+        <p class="preview-hint">Mostra o 1º destinatário selecionado</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="credit-row">
+    <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+      <span class="dot"></span> Desenvolvido por Daniel Costa
+    </a>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var lpGroup = document.getElementById('navGroupLP');
+  var lpToggle = document.getElementById('navGroupLPToggle');
+  if (lpGroup && lpToggle) {
+    if (localStorage.getItem('navGroupLPOpen') === '1') lpGroup.classList.add('open');
+    lpToggle.addEventListener('click', function () {
+      var nowOpen = lpGroup.classList.toggle('open');
+      localStorage.setItem('navGroupLPOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var campaignGroup = document.getElementById('navGroupCampaign');
+  var campaignToggle = document.getElementById('navGroupCampaignToggle');
+  if (campaignGroup && campaignToggle) {
+    if (localStorage.getItem('navGroupCampaignOpen') === '1') campaignGroup.classList.add('open');
+    campaignToggle.addEventListener('click', function () {
+      var nowOpen = campaignGroup.classList.toggle('open');
+      localStorage.setItem('navGroupCampaignOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var settingsGroup = document.getElementById('navGroupSettings');
+  var settingsToggle = document.getElementById('navGroupSettingsToggle');
+  if (settingsGroup && settingsToggle) {
+    if (localStorage.getItem('navGroupSettingsOpen') === '1') settingsGroup.classList.add('open');
+    settingsToggle.addEventListener('click', function () {
+      var nowOpen = settingsGroup.classList.toggle('open');
+      localStorage.setItem('navGroupSettingsOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  function escapeHtmlGlobal(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : str;
+    return div.innerHTML;
+  }
+
+  // O histórico de notificações agora é persistido no banco e mostrado em
+  // /notifications.html (sino da sidebar virou link pra lá) — isto aqui é só
+  // o aviso imediato em tela (toast). `target` (opcional): dado livre que a
+  // própria página interpreta ao clicar no toast — ver window.__notifNavigate,
+  // definido só nas páginas que têm "pra onde ir" (hoje, só o Chat).
+  window.showToast = function (message, type, target) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type + (target ? ' clickable' : '');
+      el.textContent = message;
+      if (target && typeof window.__notifNavigate === 'function') {
+        el.addEventListener('click', function () { window.__notifNavigate(target); });
+      }
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  // Badge de não lidas no sino da sidebar (agora um link pra /notifications.html,
+  // não mais um dropdown) — window.updateNotifBadge é chamado com a contagem
+  // vinda de GET /notifications/unread-count assim que o login terminar (ver
+  // resolveOwner() logo abaixo). window.__bumpNotifBadge soma +1 localmente —
+  // só o Chat tem o socket aberto pra saber ao vivo que chegou notificação nova.
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+  window.__bumpNotifBadge = function () {
+    var current = Number(notifDot && notifDot.textContent) || 0;
+    window.updateNotifBadge(current + 1);
+  };
+
+  // Substitui confirm() nativo do navegador — mesmo visual dos outros modais
+  // (.overlay/.modal/.btn já usados no resto do app). Cria o próprio DOM na
+  // primeira chamada, não precisa de HTML duplicado em cada página.
+  var __confirmResolve = null;
+  window.confirmDialog = function (message) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('__confirmOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = '__confirmOverlay';
+        overlay.innerHTML =
+          '<div class="modal" style="max-width:340px;text-align:center;">' +
+            '<h3 id="__confirmMsg" style="font-weight:500;"></h3>' +
+            '<div class="modal-actions" style="justify-content:center;">' +
+              '<button class="btn secondary" id="__confirmCancel">Cancelar</button>' +
+              '<button class="btn" id="__confirmOk">Confirmar</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        overlay.querySelector('#__confirmOk').addEventListener('click', function () { __finishConfirm(true); });
+        overlay.querySelector('#__confirmCancel').addEventListener('click', function () { __finishConfirm(false); });
+      }
+      overlay.querySelector('#__confirmMsg').textContent = message;
+      overlay.classList.add('open');
+      __confirmResolve = resolve;
+    });
+  };
+  function __finishConfirm(result) {
+    var overlay = document.getElementById('__confirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
+  }
+
+  // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o confirmDialog,
+  // que conta como "Cancelar".
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+  });
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_BASE = window.location.origin + '/api';
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+  const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+
+  // BX24.getAuth() só tem dado de verdade DEPOIS que esse callback dispara —
+  // chamá-lo antes devolve vazio. verifyAuth() espera essa promise pra nunca
+  // rodar cedo demais, não importa de onde for chamado.
+  let resolveBx24Ready;
+  const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
+  if (window.BX24) {
+    BX24.init(() => {
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      resolveBx24Ready();
+    });
+  } else {
+    resolveBx24Ready(); // deixa verifyAuth() falhar com uma mensagem clara, em vez de travar pra sempre
+  }
+
+  let appToken = null;
+
+  // Confirma com o backend (que por sua vez confirma com o próprio Bitrix)
+  // que o access_token pertence de verdade a um usuário deste portal, e
+  // devolve um token de app curto — usado em toda chamada de API daqui pra
+  // frente via `Authorization: Bearer`. Ver src/auth.js.
+  async function verifyAuth() {
+    if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
+    await bx24Ready;
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  // O ownerId agora vem do backend (verifyAuth), já verificado contra o
+  // Bitrix de verdade — não é mais calculado só no navegador.
+  async function resolveOwner() {
+    const ownerId = await verifyAuth();
+    fetch(`${API_BASE}/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+      .catch(() => {});
+    return ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  const campaignName = document.getElementById('campaignName');
+  const instanceSelect = document.getElementById('instanceSelect');
+  const contactListSelect = document.getElementById('contactListSelect');
+  const listContactsHint = document.getElementById('listContactsHint');
+  const recipientsList = document.getElementById('recipientsList');
+  const recipientsCount = document.getElementById('recipientsCount');
+  const toggleAllBtn = document.getElementById('toggleAllBtn');
+  const manualPhones = document.getElementById('manualPhones');
+  const templateSelect = document.getElementById('templateSelect');
+  const saveTemplateBtn = document.getElementById('saveTemplateBtn');
+  const messageText = document.getElementById('messageText');
+  const youtubeUrlInput = document.getElementById('youtubeUrlInput');
+  const mediaInput = document.getElementById('mediaInput');
+  const attachChipWrap = document.getElementById('attachChipWrap');
+  const deviceFrame = document.getElementById('deviceFrame');
+  const deviceSwitchButtons = document.querySelectorAll('.device-switch button');
+  const previewAvatar = document.getElementById('previewAvatar');
+  const previewContactName = document.getElementById('previewContactName');
+  const previewBubble = document.getElementById('previewBubble');
+  const sendModeSwitch = document.getElementById('sendModeSwitch');
+  const scheduleFields = document.getElementById('scheduleFields');
+  const scheduledAtInput = document.getElementById('scheduledAt');
+  const sendBtn = document.getElementById('sendCampaignBtn');
+  const scheduleSuccessBox = document.getElementById('scheduleSuccessBox');
+  const progressBox = document.getElementById('progressBox');
+  const progressFill = document.getElementById('progressFill');
+  const statNameWrap = document.getElementById('statNameWrap');
+  const statSent = document.getElementById('statSent');
+  const statFailed = document.getElementById('statFailed');
+  const statTotal = document.getElementById('statTotal');
+  const statStatus = document.getElementById('statStatus');
+
+  let conversations = [];
+  let templates = [];
+  let selectedListContacts = []; // [{id, name, phone}] da lista escolhida
+  let attachedMedia = null; // { type, mimetype, dataBase64, fileName }
+  let sendMode = 'now'; // 'now' | 'schedule'
+  let myOwnerId = null;
+  let mySessionId = null; // id da instância selecionada no momento
+
+  sendModeSwitch.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      sendMode = btn.dataset.mode;
+      sendModeSwitch.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+      scheduleFields.style.display = sendMode === 'schedule' ? 'block' : 'none';
+      sendBtn.textContent = sendMode === 'schedule' ? 'Agendar campanha' : 'Enviar campanha';
+      scheduleSuccessBox.style.display = 'none';
+    });
+  });
+
+  function currentSession() {
+    return mySessionId;
+  }
+
+  function getManualPhones() {
+    return manualPhones.value
+      .split(/[\n,]/)
+      .map((p) => p.replace(/\D/g, ''))
+      .filter(Boolean);
+  }
+
+  // Junta lista de contatos + checkboxes de conversas + números manuais,
+  // sem duplicar por telefone (mantém o nome, quando disponível).
+  function getSelectedRecipients() {
+    const map = new Map();
+
+    for (const c of selectedListContacts) {
+      if (c.phone) map.set(c.phone, { phone: c.phone, name: c.name || null });
+    }
+    recipientsList.querySelectorAll('input[type="checkbox"]:checked').forEach((el) => {
+      const phone = el.dataset.phone;
+      if (phone && !map.has(phone)) map.set(phone, { phone, name: null });
+    });
+    getManualPhones().forEach((phone) => {
+      if (!map.has(phone)) map.set(phone, { phone, name: null });
+    });
+
+    return [...map.values()];
+  }
+
+  function refreshSelectionUi() {
+    const total = getSelectedRecipients().length;
+    recipientsCount.textContent = `${total} selecionado${total === 1 ? '' : 's'} no total`;
+    renderPreview();
+  }
+
+  // ---------------- Instâncias ----------------
+
+  async function initInstances() {
+    try {
+      myOwnerId = await resolveOwner();
+      const res = await apiFetch(`${API_BASE}/whatsapp/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      const list = data.instances || [];
+      if (!list.length) {
+        instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Instâncias</option>';
+        sendBtn.disabled = true;
+        return;
+      }
+      instanceSelect.innerHTML = list.map((i) => `
+        <option value="${escapeHtml(i.id)}">
+          ${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
+        </option>
+      `).join('');
+      mySessionId = instanceSelect.value;
+      onSessionChange();
+    } catch (err) {
+      instanceSelect.innerHTML = '<option value="">Falha ao carregar instâncias</option>';
+      sendBtn.disabled = true;
+      console.error('Erro ao carregar instâncias:', err);
+    }
+  }
+
+  instanceSelect.addEventListener('change', () => {
+    mySessionId = instanceSelect.value;
+    onSessionChange();
+  });
+
+  function onSessionChange() {
+    loadTemplates();
+    loadContactLists();
+  }
+
+  // ---------------- Conversas (checkboxes) ----------------
+
+  async function loadConversations() {
+    try {
+      const res = await apiFetch(`${API_BASE}/whatsapp/metrics`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      conversations = data.conversations || [];
+
+      if (!conversations.length) {
+        recipientsList.innerHTML = '<p class="empty">Nenhuma conversa vinculada a negócio ainda. Use uma lista de contatos ou a entrada manual.</p>';
+        return;
+      }
+
+      recipientsList.innerHTML = conversations.map((c, i) => `
+        <label class="recipient-row">
+          <input type="checkbox" data-phone="${escapeHtml(c.phone)}" data-idx="${i}">
+          <span class="phone">${escapeHtml(c.phone)}</span>
+          <span class="meta">negócio #${escapeHtml(String(c.dealId))} · ${c.origin === 'interna' ? 'Interna' : 'Externa'}</span>
+        </label>
+      `).join('');
+
+      recipientsList.addEventListener('change', refreshSelectionUi);
+    } catch (err) {
+      recipientsList.innerHTML = '<p class="empty">Falha ao carregar conversas.</p>';
+      console.error('Erro ao carregar conversas:', err);
+    }
+  }
+
+  toggleAllBtn.addEventListener('click', () => {
+    const boxes = recipientsList.querySelectorAll('input[type="checkbox"]');
+    const allChecked = [...boxes].every((b) => b.checked);
+    boxes.forEach((b) => { b.checked = !allChecked; });
+    toggleAllBtn.textContent = allChecked ? 'Marcar todas as conversas' : 'Desmarcar todas as conversas';
+    refreshSelectionUi();
+  });
+
+  manualPhones.addEventListener('input', refreshSelectionUi);
+
+  // ---------------- Listas de contatos ----------------
+
+  async function loadContactLists() {
+    try {
+      const res = await apiFetch(`${API_BASE}/contact-lists`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      contactListSelect.innerHTML = '<option value="">Nenhuma — usar conversas/manual abaixo</option>' +
+        (data.lists || []).map((l) => `<option value="${l.id}">${escapeHtml(l.name)} (${l.count})</option>`).join('');
+      selectedListContacts = [];
+      listContactsHint.textContent = '';
+      refreshSelectionUi();
+    } catch (err) {
+      contactListSelect.innerHTML = '<option value="">Falha ao carregar listas</option>';
+      console.error(err);
+    }
+  }
+
+  contactListSelect.addEventListener('change', async () => {
+    const id = contactListSelect.value;
+    if (!id) {
+      selectedListContacts = [];
+      listContactsHint.textContent = '';
+      refreshSelectionUi();
+      return;
+    }
+    try {
+      const res = await apiFetch(`${API_BASE}/contact-lists/${id}`, { headers: FETCH_HEADERS });
+      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      selectedListContacts = data.contacts || [];
+      listContactsHint.textContent = `${selectedListContacts.length} contato(s) carregado(s) da lista "${data.name}".`;
+      refreshSelectionUi();
+    } catch (err) {
+      if (window.showToast) window.showToast('Erro ao carregar lista: ' + err.message, 'error');
+    }
+  });
+
+  // ---------------- Modelos de mensagem ----------------
+
+  async function loadTemplates() {
+    try {
+      const res = await apiFetch(`${API_BASE}/templates?session=${encodeURIComponent(currentSession())}`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      templates = data.templates || [];
+      templateSelect.innerHTML = '<option value="">Escrever mensagem manualmente</option>' +
+        templates.map((t) => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+    } catch (err) {
+      templateSelect.innerHTML = '<option value="">Falha ao carregar modelos</option>';
+      console.error(err);
+    }
+  }
+
+  templateSelect.addEventListener('change', () => {
+    const t = templates.find((t) => String(t.id) === templateSelect.value);
+    if (t) messageText.value = t.body;
+    renderPreview();
+  });
+
+  saveTemplateBtn.addEventListener('click', async () => {
+    const body = messageText.value.trim();
+    if (!body) { if (window.showToast) window.showToast('Escreva a mensagem antes de salvar como modelo.', 'error'); return; }
+    const name = prompt('Nome do modelo:');
+    if (!name || !name.trim()) return;
+
+    try {
+      const res = await apiFetch(`${API_BASE}/templates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: currentSession(), name: name.trim(), body }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      await loadTemplates();
+      if (window.showToast) window.showToast('Modelo salvo.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  messageText.addEventListener('input', renderPreview);
+  youtubeUrlInput.addEventListener('input', renderPreview);
+
+  // ---------------- Anexo ----------------
+
+  mediaInput.addEventListener('change', () => {
+    const file = mediaInput.files[0];
+    if (!file) return;
+
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      if (window.showToast) window.showToast('Arquivo muito grande (máximo 15MB).', 'error');
+      mediaInput.value = '';
+      return;
+    }
+
+    const type = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('audio/') ? 'audio'
+      : file.type.startsWith('video/') ? 'video'
+      : null;
+    if (!type) {
+      if (window.showToast) window.showToast('Tipo de arquivo não suportado. Envie imagem, áudio ou vídeo.', 'error');
+      mediaInput.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataBase64 = reader.result.split(',')[1];
+      attachedMedia = { type, mimetype: file.type, dataBase64, fileName: file.name };
+      renderAttachChip();
+      renderPreview();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function renderAttachChip() {
+    if (!attachedMedia) { attachChipWrap.innerHTML = ''; return; }
+    attachChipWrap.innerHTML = `
+      <span class="attach-chip">
+        ${escapeHtml(attachedMedia.fileName)} (${attachedMedia.type})
+        <button type="button" id="removeAttachBtn">✕</button>
+      </span>
+    `;
+    document.getElementById('removeAttachBtn').addEventListener('click', () => {
+      attachedMedia = null;
+      mediaInput.value = '';
+      renderAttachChip();
+      renderPreview();
+    });
+  }
+
+  // ---------------- Preview ----------------
+
+  deviceSwitchButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      deviceSwitchButtons.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      deviceFrame.classList.remove('tablet', 'desktop');
+      if (btn.dataset.device !== 'phone') deviceFrame.classList.add(btn.dataset.device);
+    });
+  });
+
+  function renderTemplateClient(template, recipient) {
+    return template
+      .replace(/\{\{\s*nome\s*\}\}/gi, recipient.name || '')
+      .replace(/\{\{\s*telefone\s*\}\}/gi, recipient.phone);
+  }
+
+  // Cola o link ao final da mensagem — não existe "vídeo por URL" no
+  // protocolo do WhatsApp (diferente de anexar um arquivo de vídeo de
+  // verdade), então isso é só texto normal; o próprio app do destinatário
+  // gera a prévia com miniatura, igual quando alguém cola um link à mão.
+  function withYoutubeUrl(text) {
+    const url = youtubeUrlInput.value.trim();
+    if (!url) return text;
+    return (text ? text + '\n\n' : '') + url;
+  }
+
+  // Extrai o id do vídeo (11 caracteres) de qualquer formato comum de link
+  // do YouTube, só pra montar a miniatura pública (img.youtube.com não
+  // precisa de chave de API nenhuma).
+  function extractYoutubeId(url) {
+    const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/);
+    return m ? m[1] : null;
+  }
+
+  function renderPreview() {
+    const recipients = getSelectedRecipients();
+    const sample = recipients[0] || { phone: '5599999999999', name: 'Cliente Exemplo' };
+    const rendered = withYoutubeUrl(renderTemplateClient(messageText.value || '', sample));
+
+    const displayName = sample.name || sample.phone;
+    previewContactName.textContent = displayName;
+    previewAvatar.textContent = displayName.trim().charAt(0).toUpperCase() || '?';
+
+    let mediaHtml = '';
+    if (attachedMedia) {
+      const src = `data:${attachedMedia.mimetype};base64,${attachedMedia.dataBase64}`;
+      if (attachedMedia.type === 'image') mediaHtml = `<img class="preview-media-img" src="${src}" alt="">`;
+      else if (attachedMedia.type === 'video') mediaHtml = `<video class="preview-media-video" src="${src}" controls></video>`;
+      else if (attachedMedia.type === 'audio') mediaHtml = `<audio class="preview-media-audio" src="${src}" controls></audio>`;
+    }
+
+    const youtubeId = extractYoutubeId(youtubeUrlInput.value.trim());
+    const youtubeHtml = youtubeId
+      ? `<div class="preview-yt-card"><img src="https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg" alt=""><span class="preview-yt-play">▶</span></div>`
+      : '';
+
+    const textHtml = rendered
+      ? escapeHtml(rendered)
+      : (attachedMedia || youtubeId ? '' : 'Sua mensagem aparecerá aqui…');
+
+    previewBubble.innerHTML = mediaHtml + youtubeHtml + (textHtml ? `<div class="preview-bubble-text">${textHtml}</div>` : '');
+  }
+
+  // ---------------- Envio ----------------
+
+  function pollCampaign(campaignId) {
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/whatsapp/campaign/${campaignId}`, { headers: FETCH_HEADERS });
+        if (!res.ok) throw new Error('campanha não encontrada');
+        const c = await res.json();
+
+        statSent.textContent = c.sent;
+        statFailed.textContent = c.failed;
+        statTotal.textContent = c.total;
+        const pct = c.total ? Math.round(((c.sent + c.failed) / c.total) * 100) : 0;
+        progressFill.style.width = pct + '%';
+
+        if (c.status === 'done') {
+          statStatus.textContent = 'Concluída ✓';
+          clearInterval(interval);
+          sendBtn.disabled = false;
+          if (window.showToast) window.showToast(`Campanha concluída: ${c.sent} enviadas, ${c.failed} falharam.`, c.failed > 0 ? 'error' : 'success');
+        } else {
+          statStatus.textContent = 'Enviando…';
+        }
+      } catch (err) {
+        clearInterval(interval);
+        statStatus.textContent = 'Erro ao acompanhar progresso';
+        console.error(err);
+      }
+    }, 2000);
+  }
+
+  sendBtn.addEventListener('click', async () => {
+    const session = mySessionId;
+    const recipients = getSelectedRecipients();
+    const rawYoutubeUrl = youtubeUrlInput.value.trim();
+    if (rawYoutubeUrl && !/^https?:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(rawYoutubeUrl)) {
+      if (window.showToast) window.showToast('O link precisa ser do YouTube (youtube.com ou youtu.be).', 'error');
+      return;
+    }
+    const text = withYoutubeUrl(messageText.value.trim());
+
+    if (!session) { if (window.showToast) window.showToast('Não foi possível identificar sua sessão do WhatsApp.', 'error'); return; }
+    if (!recipients.length) { if (window.showToast) window.showToast('Selecione ao menos um destinatário.', 'error'); return; }
+    if (!text && !attachedMedia) { if (window.showToast) window.showToast('Escreva a mensagem, cole um link do YouTube ou anexe uma mídia.', 'error'); return; }
+    if (recipients.length > 100) { if (window.showToast) window.showToast('Máximo de 100 destinatários por campanha.', 'error'); return; }
+
+    const mediaPayload = attachedMedia
+      ? { type: attachedMedia.type, mimetype: attachedMedia.mimetype, dataBase64: attachedMedia.dataBase64 }
+      : undefined;
+
+    if (sendMode === 'schedule') {
+      if (!scheduledAtInput.value) { if (window.showToast) window.showToast('Escolha a data e hora do disparo.', 'error'); return; }
+      const scheduledDate = new Date(scheduledAtInput.value);
+      if (isNaN(scheduledDate.getTime()) || scheduledDate.getTime() <= Date.now()) {
+        if (window.showToast) window.showToast('A data agendada precisa ser no futuro.', 'error');
+        return;
+      }
+
+      sendBtn.disabled = true;
+      scheduleSuccessBox.style.display = 'none';
+      try {
+        const res = await apiFetch(`${API_BASE}/whatsapp/campaign/schedule`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session,
+            name: campaignName.value.trim() || undefined,
+            recipients,
+            text,
+            media: mediaPayload,
+            scheduledAt: scheduledDate.toISOString(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'falha ao agendar campanha');
+        scheduleSuccessBox.textContent = `Campanha agendada para ${scheduledDate.toLocaleString('pt-BR')}. Acompanhe na Agenda de Envios.`;
+        scheduleSuccessBox.style.display = 'block';
+        if (window.showToast) window.showToast('Campanha agendada com sucesso.', 'success');
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      } finally {
+        sendBtn.disabled = false;
+      }
+      return;
+    }
+
+    const confirmed = await window.confirmDialog(
+      `Isso vai mandar essa mensagem pra ${recipients.length} contato(s), um de cada vez, ` +
+      `com alguns segundos de intervalo entre cada envio (pode demorar alguns minutos). ` +
+      `Tem certeza que quer continuar?`
+    );
+    if (!confirmed) return;
+
+    sendBtn.disabled = true;
+    progressBox.style.display = 'block';
+    progressFill.style.width = '0%';
+    statNameWrap.textContent = campaignName.value.trim() ? `“${campaignName.value.trim()}”` : '';
+    statSent.textContent = '0';
+    statFailed.textContent = '0';
+    statTotal.textContent = String(recipients.length);
+    statStatus.textContent = 'Iniciando…';
+
+    try {
+      const res = await apiFetch(`${API_BASE}/whatsapp/campaign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session,
+          name: campaignName.value.trim() || undefined,
+          recipients,
+          text,
+          media: mediaPayload,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao iniciar campanha');
+      pollCampaign(data.campaignId);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+      sendBtn.disabled = false;
+      statStatus.textContent = 'Falhou';
+    }
+  });
+
+  initInstances();
+  loadConversations();
+})();
+</script>
+<script>
+(function () {
+  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
+    if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
+    if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

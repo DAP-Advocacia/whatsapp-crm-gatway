@@ -1,0 +1,1556 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
+  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
+  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
+  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO). */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Full-bleed de propósito (pedido do usuário — "muito centralizado,
+     deixe pegando toda a área da tela"): só desconta a sidebar, sem teto de
+     largura — diferente das outras páginas com esse mesmo boilerplate, que
+     mantêm o max-width:1080px (coluna de leitura). */
+  #app{
+    margin-left: var(--sidebar-w);
+    padding: 28px 32px 70px;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed #app{ margin-left: var(--sidebar-w-collapsed); }
+
+  /* ======================================================
+     Sidebar de navegação (retrátil) + notificações/toast
+     ====================================================== */
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  /* Grupo "Landing Page" com submenu "Métricas LP" (dropdown/acordeão) —
+     clicar no item principal navega normal; a seta abre/fecha o submenu,
+     que fica lembrado por página (localStorage). No modo ícone (sidebar
+     recolhida) o acordeão não faz sentido — mostra os dois itens sempre,
+     como já era antes de virarem um grupo só. */
+  .nav-group{ position:relative; }
+  .nav-group > .nav-item{ padding-right:34px; }
+  .nav-caret-btn{
+    position:absolute; top:10px; right:6px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
+    transition: color .15s, background .15s;
+  }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
+  .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
+  .nav-subitems{ display:none; flex-direction:column; }
+  .nav-group.open .nav-subitems{ display:flex; }
+  .nav-subitem{ padding-left:30px; font-size:12px; }
+  html.sidebar-collapsed .nav-caret-btn{ display:none; }
+  html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
+  html.sidebar-collapsed .nav-subitems{ display:flex !important; }
+
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  .toast.clickable{ cursor:pointer; }
+  .toast.clickable:hover{ filter: brightness(1.15); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  h1{
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 22px;
+    margin: 0 0 4px;
+  }
+  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
+
+  .refresh-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
+  .refresh-btn{
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 7px 14px;
+    border-radius: 9px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .refresh-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .sidebar-updated{ font-size: 10.5px; color: var(--text-faint); }
+
+  .btn{
+    background: var(--gold); color: #1a1408; border: none; border-radius: 9px;
+    padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover{ filter: brightness(1.08); }
+  .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter:none; }
+
+  .overlay{
+    position: fixed; inset: 0; background: rgba(10,8,5,.6);
+    display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px;
+  }
+  .overlay.open{ display: flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; width: 100%; max-width: 340px; text-align: center;
+  }
+  .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
+  .modal-actions{ display:flex; justify-content: center; gap: 8px; margin-top: 16px; }
+
+  .origin-filter{
+    display: inline-flex;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .origin-filter button{
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .origin-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
+  .origin-filter button:not(.active):hover{ color: var(--gold); }
+
+  /* auto-fit em vez de repeat(4,1fr) fixo: em telas largas, os cards
+     preenchem a linha inteira (podendo caber mais de 4 por linha) em vez de
+     ficarem 4 colunas artificialmente esticadas com muito vão interno. */
+  .kpi-grid{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 700px){
+    .kpi-grid{ grid-template-columns: repeat(2, 1fr); }
+  }
+
+  /* Par de painéis lado a lado (gráfico diário+dispersão, tipo+sessão) —
+     antes empilhados um embaixo do outro mesmo com a tela cheia disponível. */
+  .panel-row{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; margin-bottom: 20px; }
+  .panel-row .panel{ margin-bottom: 0; }
+  @media (max-width: 1100px){ .panel-row{ grid-template-columns: 1fr; } }
+
+  /* Insights de IA — cards no topo do Dashboard, com diagnóstico/recomendação
+     curtos sobre os números do time (ver GET /api/whatsapp/insights). */
+  .insights-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .insights-head h2{ font-family:'Fraunces',serif; font-weight:600; font-size:14px; margin:0; display:flex; align-items:center; gap:7px; }
+  .insights-head h2 svg{ width:15px; height:15px; color:var(--gold); }
+  .insights-refresh{
+    background:none; border:1px solid var(--border); color:var(--text-muted); border-radius:7px;
+    padding:5px 10px; font-size:11.5px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:5px;
+  }
+  .insights-refresh:hover:not(:disabled){ border-color:var(--gold-dim); color:var(--gold); }
+  .insights-refresh:disabled{ opacity:.5; cursor:not-allowed; }
+  .insights-refresh svg{ width:12px; height:12px; }
+  .insights-refresh.spinning svg{ animation: spin .8s linear infinite; }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  .insights-meta{ font-size:10.5px; color:var(--text-faint); margin:6px 0 0; }
+  .insights-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:14px; margin-bottom:22px; }
+  .insight-card{
+    background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    border-radius:var(--radius); padding:14px 16px;
+  }
+  .insight-card.positive{ border-left-color:var(--green); }
+  .insight-card.warning{ border-left-color:var(--red); }
+  .insight-card-title{ font-size:12.5px; font-weight:700; color:var(--text); margin:0 0 5px; }
+  .insight-card-text{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }
+  .kpi-card{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+  }
+  .kpi-card .value{
+    font-family: 'Fraunces', serif;
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--gold);
+  }
+  .kpi-card .label{ font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+  .kpi-trends{ display: flex; flex-direction: column; gap: 2px; margin-top: 9px; }
+  .kpi-trend{ font-size: 10.5px; font-weight: 500; }
+  .kpi-trend-up{ color: var(--green); }
+  .kpi-trend-down{ color: var(--red); }
+  .kpi-trend-flat{ color: var(--text-faint); }
+
+  .panel{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+    margin-bottom: 20px;
+  }
+  .panel h2{
+    font-family: 'Fraunces', serif;
+    font-weight: 600;
+    font-size: 15px;
+    margin: 0 0 14px;
+    color: var(--text);
+  }
+
+  .chart-wrap{ overflow-x: auto; }
+
+  .type-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
+  .type-row .type-label{ width: 70px; color: var(--text-muted); flex-shrink:0; }
+  .type-row .bar-bg{ flex:1; background: var(--surface-2); border-radius: 6px; height: 10px; overflow:hidden; }
+  .type-row .bar-fill{ height:100%; background: var(--gold); border-radius: 6px; }
+  .type-row .count{ width: 40px; text-align:right; color: var(--text-faint); flex-shrink:0; }
+  /* Etapas do Bitrix têm nome mais longo que tipo de mensagem — label mais
+     largo, texto cortado com "…" se ainda assim não couber. */
+  .stage-chart .type-label{ width: 170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  table{ width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td{ text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  th{ color: var(--text-muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+  td{ color: var(--text); }
+  td.num, th.num{ text-align: right; }
+
+  .empty{ color: var(--text-faint); font-size: 13px; padding: 20px 0; text-align:center; }
+  .legend{ display:flex; gap: 16px; font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
+  .legend span{ display:inline-flex; align-items:center; gap: 6px; }
+  .legend .dot{ width: 9px; height: 9px; border-radius: 2px; display:inline-block; }
+
+  /* ---------- Menu de ações por linha (⋯) ---------- */
+  td.actions{ position: relative; text-align: right; width: 36px; }
+  .row-menu-btn{
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+  }
+  .row-menu-btn:hover{ background: var(--surface-2); color: var(--gold); }
+  .row-menu{
+    position: absolute;
+    right: 8px;
+    top: 100%;
+    z-index: 10;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.4);
+    min-width: 150px;
+    padding: 4px;
+    display: none;
+  }
+  .row-menu.open{ display: block; }
+  .row-menu button{
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 12.5px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .row-menu button:hover{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .row-menu button:disabled{ color: var(--text-faint); cursor: not-allowed; }
+  .contact-cell .phone{ color: var(--text-faint); font-size: 11px; }
+
+  .pagination{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .pagination button{
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .pagination button:hover:not(:disabled){ border-color: var(--gold-dim); color: var(--gold); }
+  .pagination button:disabled{ color: var(--text-faint); cursor: not-allowed; opacity: .5; }
+  .pagination-info{ color: var(--text-muted); font-size: 12px; }
+  .origin-tag{
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 100px;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+  }
+  .origin-tag.externa{ background: rgba(var(--green-rgb),.14); color: var(--green); }
+  .origin-tag.interna{ background: rgba(var(--gold-rgb),.14); color: var(--gold); }
+
+  .axis-line{ stroke: var(--border); stroke-width: 1; }
+  .axis-label{ fill: var(--text-faint); font-size: 9.5px; }
+  .grid-line{ stroke: var(--border); stroke-width: 1; }
+  .grid-label{ fill: var(--text-faint); font-size: 9.5px; }
+  .ref-line{ stroke: var(--border); stroke-width: 1; }
+  .chart-crosshair{ stroke: var(--text-faint); stroke-width: 1; pointer-events: none; }
+  .chart-hover-dot{ stroke: var(--surface); stroke-width: 2; pointer-events: none; }
+  .daily-chart-svg{ display: block; width: 100%; height: auto; cursor: crosshair; }
+  .scatter-chart-svg{ display: block; }
+  .scatter-dot{ transition: r .1s ease; }
+  .scatter-dot.hovered{ r: 6; stroke: var(--surface); stroke-width: 2; }
+  .scatter-hit{ fill: transparent; cursor: pointer; }
+  .area-fill{ opacity: .12; }
+
+  .chart-tooltip{
+    position: fixed;
+    z-index: 90;
+    pointer-events: none;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 11.5px;
+    box-shadow: 0 10px 24px rgba(0,0,0,.35);
+    display: none;
+  }
+  .chart-tooltip .tt-title{ color: var(--text-muted); font-size: 10.5px; margin-bottom: 5px; }
+  .chart-tooltip .tt-row{ display:flex; align-items:center; justify-content: space-between; gap:14px; }
+  .chart-tooltip .tt-row + .tt-row{ margin-top:3px; }
+  .chart-tooltip .tt-value{ font-weight:600; color: var(--text); }
+  .chart-tooltip .tt-label{ display:inline-flex; align-items:center; gap:6px; color: var(--text-muted); }
+  .chart-tooltip .tt-label i{ width:10px; height:3px; border-radius:2px; display:inline-block; flex-shrink:0; }
+
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 5px 13px;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/dashboard.html" class="nav-item active">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <div class="nav-group" id="navGroupCampaign">
+      <a href="/campaign.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+        <span class="nav-label">Campanha</span>
+        <span class="nav-tip">Campanha</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupCampaignToggle" title="Mostrar/ocultar Análise de Campanha e Agenda de Envios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/campaign-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg></span>
+          <span class="nav-label">Análise de Campanha</span>
+          <span class="nav-tip">Análise de Campanha</span>
+        </a>
+        <a href="/campaign-schedule.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
+          <span class="nav-label">Agenda de Envios</span>
+          <span class="nav-tip">Agenda de Envios</span>
+        </a>
+      </div>
+    </div>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <div class="nav-group" id="navGroupLP">
+      <a href="/sites.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-label">Landing Page</span>
+        <span class="nav-tip">Landing Page</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupLPToggle" title="Mostrar/ocultar Métricas LP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/lead-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
+          <span class="nav-label">Métricas LP</span>
+          <span class="nav-tip">Métricas LP</span>
+        </a>
+      </div>
+    </div>
+    <a href="/onboarding.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+      <span class="nav-label">Onboarding</span>
+      <span class="nav-tip">Onboarding</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <div class="nav-group" id="navGroupSettings">
+      <a href="/settings.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Configurações</span>
+        <span class="nav-tip">Configurações</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupSettingsToggle" title="Mostrar/ocultar Instâncias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/instances.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">Instâncias</span>
+          <span class="nav-tip">Instâncias</span>
+        </a>
+      </div>
+    </div>
+    <a href="/apresentacao.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
+      <span class="nav-label">Apresentação</span>
+      <span class="nav-tip">Apresentação</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+<div class="chart-tooltip" id="chartTooltip"></div>
+
+<div id="app">
+  <h1>Dashboard</h1>
+  <p class="subtitle">Conversas de WhatsApp vinculadas a negócios, e métricas agregadas de todas as sessões conectadas.</p>
+
+  <div class="refresh-row">
+    <button class="refresh-btn" id="refreshBtn">Atualizar agora</button>
+    <div class="origin-filter" id="originFilter">
+      <button type="button" data-origin="interna">Internas</button>
+      <button type="button" data-origin="externa">Externas</button>
+      <button type="button" data-origin="">Todas</button>
+    </div>
+    <span class="sidebar-updated" id="updatedAt"></span>
+  </div>
+
+  <div id="insightsSection"></div>
+
+  <div id="content">
+    <p class="empty">Carregando…</p>
+  </div>
+
+  <div class="credit-row">
+    <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+      <span class="dot"></span> Desenvolvido por Daniel Costa
+    </a>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var lpGroup = document.getElementById('navGroupLP');
+  var lpToggle = document.getElementById('navGroupLPToggle');
+  if (lpGroup && lpToggle) {
+    if (localStorage.getItem('navGroupLPOpen') === '1') lpGroup.classList.add('open');
+    lpToggle.addEventListener('click', function () {
+      var nowOpen = lpGroup.classList.toggle('open');
+      localStorage.setItem('navGroupLPOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var campaignGroup = document.getElementById('navGroupCampaign');
+  var campaignToggle = document.getElementById('navGroupCampaignToggle');
+  if (campaignGroup && campaignToggle) {
+    if (localStorage.getItem('navGroupCampaignOpen') === '1') campaignGroup.classList.add('open');
+    campaignToggle.addEventListener('click', function () {
+      var nowOpen = campaignGroup.classList.toggle('open');
+      localStorage.setItem('navGroupCampaignOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var settingsGroup = document.getElementById('navGroupSettings');
+  var settingsToggle = document.getElementById('navGroupSettingsToggle');
+  if (settingsGroup && settingsToggle) {
+    if (localStorage.getItem('navGroupSettingsOpen') === '1') settingsGroup.classList.add('open');
+    settingsToggle.addEventListener('click', function () {
+      var nowOpen = settingsGroup.classList.toggle('open');
+      localStorage.setItem('navGroupSettingsOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  function escapeHtmlGlobal(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : str;
+    return div.innerHTML;
+  }
+
+  // O histórico de notificações agora é persistido no banco e mostrado em
+  // /notifications.html (sino da sidebar virou link pra lá) — isto aqui é só
+  // o aviso imediato em tela (toast). `target` (opcional): dado livre que a
+  // própria página interpreta ao clicar no toast — ver window.__notifNavigate,
+  // definido só nas páginas que têm "pra onde ir" (hoje, só o Chat).
+  window.showToast = function (message, type, target) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type + (target ? ' clickable' : '');
+      el.textContent = message;
+      if (target && typeof window.__notifNavigate === 'function') {
+        el.addEventListener('click', function () { window.__notifNavigate(target); });
+      }
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  // Badge de não lidas no sino da sidebar (agora um link pra /notifications.html,
+  // não mais um dropdown) — window.updateNotifBadge é chamado com a contagem
+  // vinda de GET /notifications/unread-count assim que o login terminar (ver
+  // resolveOwner() logo abaixo). window.__bumpNotifBadge soma +1 localmente —
+  // só o Chat tem o socket aberto pra saber ao vivo que chegou notificação nova.
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+  window.__bumpNotifBadge = function () {
+    var current = Number(notifDot && notifDot.textContent) || 0;
+    window.updateNotifBadge(current + 1);
+  };
+
+  // Substitui confirm() nativo do navegador — mesmo visual dos outros modais
+  // (.overlay/.modal/.btn já usados no resto do app). Cria o próprio DOM na
+  // primeira chamada, não precisa de HTML duplicado em cada página.
+  var __confirmResolve = null;
+  window.confirmDialog = function (message) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('__confirmOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = '__confirmOverlay';
+        overlay.innerHTML =
+          '<div class="modal" style="max-width:340px;text-align:center;">' +
+            '<h3 id="__confirmMsg" style="font-weight:500;"></h3>' +
+            '<div class="modal-actions" style="justify-content:center;">' +
+              '<button class="btn secondary" id="__confirmCancel">Cancelar</button>' +
+              '<button class="btn" id="__confirmOk">Confirmar</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        overlay.querySelector('#__confirmOk').addEventListener('click', function () { __finishConfirm(true); });
+        overlay.querySelector('#__confirmCancel').addEventListener('click', function () { __finishConfirm(false); });
+      }
+      overlay.querySelector('#__confirmMsg').textContent = message;
+      overlay.classList.add('open');
+      __confirmResolve = resolve;
+    });
+  };
+  function __finishConfirm(result) {
+    var overlay = document.getElementById('__confirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
+  }
+
+  // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o confirmDialog,
+  // que conta como "Cancelar".
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+  });
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_METRICS = window.location.origin + '/api/whatsapp/metrics';
+  const API_INSIGHTS = window.location.origin + '/api/whatsapp/insights';
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+  const content = document.getElementById('content');
+  const updatedAt = document.getElementById('updatedAt');
+  const chartTooltip = document.getElementById('chartTooltip');
+
+  // "Recebidas" fica numa cor fixa (contraste com a de destaque, não faz
+  // parte da paleta de marca). "Enviadas" acompanha a paleta escolhida
+  // (mesma cor usada nos balões enviados no chat) — lida na hora de
+  // desenhar cada gráfico (não como const fixa) porque atributos de
+  // apresentação SVG (fill="...") precisam do hex já resolvido, var() nem
+  // sempre funciona ali em todo navegador.
+  const CHART_BLUE = '#3987e5'; // recebidas
+  function chartGold() {
+    return getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#d8ab4f';
+  }
+
+  // Filtro padrão: só conversas internas (testes entre usuários do Bitrix).
+  // "" = todas, sem filtro.
+  let currentOrigin = 'interna';
+
+  const originFilterEl = document.getElementById('originFilter');
+  function syncOriginButtons() {
+    originFilterEl.querySelectorAll('button').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.origin === currentOrigin);
+    });
+  }
+  originFilterEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-origin]');
+    if (!btn) return;
+    currentOrigin = btn.dataset.origin;
+    syncOriginButtons();
+    conversationsPage = 1; // troca de filtro sempre volta pra primeira página
+    load();
+  });
+  syncOriginButtons();
+
+  // Paginação da tabela de Conversas — client-side, sem rebuscar do servidor
+  // (guardamos a última resposta de /metrics em `lastMetrics` e só re-renderizamos).
+  const CONVERSATIONS_PAGE_SIZE = 10;
+  let conversationsPage = 1;
+  let lastMetrics = null;
+
+  let appToken = null;
+
+  // Confirma com o backend (que por sua vez confirma com o próprio Bitrix)
+  // que o access_token pertence de verdade a um usuário deste portal, e
+  // devolve um token de app curto — usado em toda chamada de API daqui pra
+  // frente via `Authorization: Bearer`. Ver src/auth.js. Diferente das outras
+  // páginas, aqui não importa QUEM é o usuário (métricas são agregadas/de
+  // time, de propósito) — só que seja alguém real logado neste portal.
+  async function verifyAuth() {
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  // Essa página é uma aba dentro do card de Negócio (placement), mas não
+  // depende de um negócio específico pra carregar. Diferente de antes, agora
+  // EXIGE estar dentro do Bitrix (BX24 de verdade) — as métricas só carregam
+  // depois de autenticar com o portal; abrir fora do Bitrix mostra um erro em
+  // vez de silenciosamente deixar as métricas abertas pra qualquer um.
+  let bx24Ready = false;
+  if (window.BX24) {
+    BX24.init(async () => {
+      bx24Ready = true;
+      // Pede pro Bitrix redimensionar o iframe pra ocupar o espaço vertical
+      // disponível, em vez de deixar uma altura padrão com espaço em branco embaixo.
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      try {
+        const ownerId = await verifyAuth();
+        fetch(`${window.location.origin}/api/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+          .catch(() => {});
+        load();
+        setInterval(load, 30000);
+        loadInsights(false); // cacheado no servidor (30min) — não entra no polling de 30s do load()
+      } catch (err) {
+        content.innerHTML = `<p class="empty">Não foi possível autenticar com o Bitrix. ${escapeHtml(err.message)}</p>`;
+      }
+    });
+  } else {
+    content.innerHTML = '<p class="empty">Abra esta página de dentro do Bitrix24.</p>';
+  }
+
+  function openConversation(dealId) {
+    if (!bx24Ready) {
+      if (window.showToast) window.showToast('Essa ação só funciona quando a página está aberta dentro do Bitrix (dentro de um card de Negócio).', 'error');
+      return;
+    }
+    try {
+      if (typeof BX24.openPath !== 'function') {
+        throw new Error('BX24.openPath não existe nesta versão do SDK carregado');
+      }
+      BX24.openPath('/crm/deal/details/' + dealId + '/');
+    } catch (err) {
+      console.error('Erro ao abrir negócio pelo BX24.openPath:', err);
+      if (window.showToast) window.showToast('Não foi possível abrir o negócio automaticamente (' + err.message + '). Copie esse erro e me avise.', 'error');
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str ?? '';
+    return div.innerHTML;
+  }
+
+  function formatDay(dayStr) {
+    const [y, m, d] = dayStr.split('-');
+    return `${d}/${m}`;
+  }
+
+  const TYPE_LABELS = { text: 'Texto', image: 'Imagem', audio: 'Áudio', video: 'Vídeo' };
+
+  function formatPercent(v) {
+    return v == null ? '—' : `${Math.round(v)}%`;
+  }
+
+  function formatDecimal(v) {
+    return v == null ? '—' : v.toFixed(1);
+  }
+
+  // Variação percentual entre o valor do mês atual e o de referência (mês
+  // anterior pro MoM, mesmo mês do ano passado pro YoY). `null` quando não
+  // há base de comparação (0 dado no período de referência e no atual).
+  function pctChange(current, previous) {
+    const cur = current == null ? 0 : current;
+    if (previous == null || previous === 0) {
+      return cur > 0 ? { text: 'novo', arrow: '▲', sign: 1 } : null;
+    }
+    const pct = ((cur - previous) / previous) * 100;
+    const sign = pct > 0 ? 1 : pct < 0 ? -1 : 0;
+    const arrow = sign > 0 ? '▲' : sign < 0 ? '▼' : '●';
+    return { text: `${pct > 0 ? '+' : ''}${pct.toFixed(0)}%`, arrow, sign };
+  }
+
+  // `invert`: pra métricas onde subir é ruim (ex: tempo médio de resposta),
+  // inverte qual sinal pinta de verde/vermelho.
+  function trendBadge(prefix, change, invert) {
+    if (!change) return `<span class="kpi-trend kpi-trend-flat">${prefix} —</span>`;
+    const good = invert ? change.sign < 0 : change.sign > 0;
+    const bad = invert ? change.sign > 0 : change.sign < 0;
+    const cls = good ? 'kpi-trend-up' : bad ? 'kpi-trend-down' : 'kpi-trend-flat';
+    return `<span class="kpi-trend ${cls}">${prefix} ${change.arrow} ${change.text}</span>`;
+  }
+
+  function renderKpis(m) {
+    const cards = [
+      { value: m.totals.total, label: 'Mensagens totais', key: 'total' },
+      { value: m.totals.in, label: 'Recebidas', key: 'in' },
+      { value: m.totals.out, label: 'Enviadas', key: 'out' },
+      { value: m.totals.conversas, label: 'Conversas ativas', key: 'conversas' },
+      { value: m.totals.sessoes, label: 'Sessões (usuários)', key: 'sessoes' },
+      { value: m.avgResponseLabel || '—', label: 'Tempo médio de resposta', key: 'avgResponseMs', invert: true },
+      { value: formatPercent(m.responseRate), label: 'Taxa de resposta', key: 'responseRate' },
+      { value: formatDecimal(m.avgMessagesPerConversation), label: 'Msgs por conversa', key: 'avgMessagesPerConversation' },
+    ];
+    const trend = m.trend || {};
+    const cur = trend.current || {};
+    const prevMonth = trend.prevMonth || {};
+    const prevYear = trend.prevYear || {};
+    return `
+      <div class="kpi-grid">
+        ${cards.map(c => `
+          <div class="kpi-card">
+            <div class="value">${escapeHtml(String(c.value))}</div>
+            <div class="label">${c.label}</div>
+            <div class="kpi-trends">
+              ${trendBadge('MoM', pctChange(cur[c.key], prevMonth[c.key]), c.invert)}
+              ${trendBadge('YoY', pctChange(cur[c.key], prevYear[c.key]), c.invert)}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // Arredonda pra cima num número "redondo" (1/2/5×10ⁿ), pra rótulo de eixo
+  // não terminar em algo tipo "17" — sempre um teto limpo pra escala.
+  function niceCeil(v) {
+    if (v <= 4) return Math.ceil(v) || 1;
+    const mag = Math.pow(10, Math.floor(Math.log10(v)));
+    const norm = v / mag;
+    const step = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return step * mag;
+  }
+
+  // Guarda a escala/posições do último render do gráfico de linhas — o hover
+  // (crosshair) usa isso pra achar o dia mais próximo do mouse sem precisar
+  // re-renderizar o SVG inteiro a cada movimento.
+  let dailyChartMeta = null;
+  // Idem pro scatter: só precisa da lista de dias (cada ponto já carrega o
+  // índice em data-idx).
+  let scatterChartMeta = null;
+  let hoveredScatterDot = null;
+
+  function hideChartTooltip() {
+    chartTooltip.style.display = 'none';
+    const crosshair = document.getElementById('dailyCrosshair');
+    if (crosshair) crosshair.setAttribute('visibility', 'hidden');
+    const hoverIn = document.getElementById('dailyHoverIn');
+    if (hoverIn) hoverIn.setAttribute('visibility', 'hidden');
+    const hoverOut = document.getElementById('dailyHoverOut');
+    if (hoverOut) hoverOut.setAttribute('visibility', 'hidden');
+    if (hoveredScatterDot) { hoveredScatterDot.classList.remove('hovered'); hoveredScatterDot = null; }
+  }
+
+  function showChartTooltip(clientX, clientY, html) {
+    chartTooltip.innerHTML = html;
+    chartTooltip.style.display = 'block';
+    const gap = 16;
+    let left = clientX + gap;
+    let top = clientY + gap;
+    const rect = chartTooltip.getBoundingClientRect();
+    if (left + rect.width > window.innerWidth - 8) left = clientX - rect.width - gap;
+    if (top + rect.height > window.innerHeight - 8) top = clientY - rect.height - gap;
+    chartTooltip.style.left = `${Math.max(8, left)}px`;
+    chartTooltip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function dayTooltipHtml(day) {
+    return `
+      <div class="tt-title">${formatDay(day.day)}</div>
+      <div class="tt-row"><span class="tt-label"><i style="background:${CHART_BLUE}"></i>Recebidas</span><span class="tt-value">${day.in}</span></div>
+      <div class="tt-row"><span class="tt-label"><i style="background:${chartGold()}"></i>Enviadas</span><span class="tt-value">${day.out}</span></div>
+    `;
+  }
+
+  // Crosshair vertical que gruda no dia mais próximo do mouse — a posição X
+  // é convertida de pixel de tela pra unidade do viewBox (o SVG estica pra
+  // 100% da largura do painel via CSS, então os dois nem sempre batem 1:1).
+  function updateDailyHover(svg, evt) {
+    const meta = dailyChartMeta;
+    if (!meta) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const xInSvg = (evt.clientX - rect.left) * (meta.vbW / rect.width);
+    const relX = Math.min(Math.max(xInSvg - meta.padLeft, 0), meta.plotW);
+    const frac = meta.days.length > 1 ? relX / meta.plotW : 0;
+    const idx = Math.max(0, Math.min(meta.days.length - 1, Math.round(frac * (meta.days.length - 1))));
+    const day = meta.days[idx];
+    if (!day) return;
+
+    const x = meta.padLeft + (meta.days.length > 1 ? (idx / (meta.days.length - 1)) * meta.plotW : 0);
+    const yIn = meta.padTop + meta.chartH - (day.in / meta.axisMax) * meta.chartH;
+    const yOut = meta.padTop + meta.chartH - (day.out / meta.axisMax) * meta.chartH;
+
+    const crosshair = svg.querySelector('#dailyCrosshair');
+    crosshair.setAttribute('x1', x); crosshair.setAttribute('x2', x); crosshair.setAttribute('visibility', 'visible');
+    const dotIn = svg.querySelector('#dailyHoverIn');
+    dotIn.setAttribute('cx', x); dotIn.setAttribute('cy', yIn); dotIn.setAttribute('visibility', 'visible');
+    const dotOut = svg.querySelector('#dailyHoverOut');
+    dotOut.setAttribute('cx', x); dotOut.setAttribute('cy', yOut); dotOut.setAttribute('visibility', 'visible');
+
+    if (hoveredScatterDot) { hoveredScatterDot.classList.remove('hovered'); hoveredScatterDot = null; }
+    showChartTooltip(evt.clientX, evt.clientY, dayTooltipHtml(day));
+  }
+
+  function updateScatterHover(hitEl, evt) {
+    const meta = scatterChartMeta;
+    if (!meta) return;
+    const day = meta.perDay[Number(hitEl.dataset.idx)];
+    if (!day) return;
+
+    const crosshair = document.getElementById('dailyCrosshair');
+    if (crosshair) crosshair.setAttribute('visibility', 'hidden');
+    const hoverIn = document.getElementById('dailyHoverIn');
+    if (hoverIn) hoverIn.setAttribute('visibility', 'hidden');
+    const hoverOut = document.getElementById('dailyHoverOut');
+    if (hoverOut) hoverOut.setAttribute('visibility', 'hidden');
+
+    const dot = hitEl.previousElementSibling;
+    if (hoveredScatterDot !== dot) {
+      if (hoveredScatterDot) hoveredScatterDot.classList.remove('hovered');
+      hoveredScatterDot = dot;
+      if (hoveredScatterDot) hoveredScatterDot.classList.add('hovered');
+    }
+    showChartTooltip(evt.clientX, evt.clientY, dayTooltipHtml(day));
+  }
+
+  // Delegado num único listener em `content` (que é recriado inteiro a cada
+  // render) em vez de um por gráfico — sobrevive ao innerHTML ser trocado a
+  // cada atualização/poll de 30s.
+  content.addEventListener('mousemove', (e) => {
+    const dailySvg = e.target.closest('svg.daily-chart-svg');
+    if (dailySvg) { updateDailyHover(dailySvg, e); return; }
+    const hit = e.target.closest('.scatter-hit');
+    if (hit) { updateScatterHover(hit, e); return; }
+    hideChartTooltip();
+  });
+  content.addEventListener('mouseleave', hideChartTooltip);
+
+  // Gráfico de linhas, últimos 30 dias (o mês inteiro) — uma linha para
+  // recebidas e outra para enviadas. SVG responsivo (estica pra 100% do
+  // painel via viewBox) com grade, eixo Y e crosshair de hover.
+  function renderDailyChart(perDay) {
+    if (!perDay.length) {
+      dailyChartMeta = null;
+      return `<div class="panel"><h2>Mensagens por dia</h2><p class="empty">Sem dados ainda.</p></div>`;
+    }
+    // perDay já vem zero-preenchido do dia 1 do mês atual até hoje (ver
+    // src/metrics.js) — não é mais uma janela rolante de N dias.
+    const days = perDay;
+    const axisMax = niceCeil(Math.max(1, ...days.map(d => Math.max(d.in, d.out))));
+    const padTop = 10, padBottom = 24, padLeft = 30, padRight = 10, chartH = 140;
+    const vbW = 640;
+    const plotW = vbW - padLeft - padRight;
+    const vbH = padTop + chartH + padBottom;
+
+    dailyChartMeta = { days, axisMax, padTop, padLeft, plotW, chartH, vbW };
+
+    const xAt = (i) => padLeft + (days.length > 1 ? (i / (days.length - 1)) * plotW : 0);
+    const yAt = (v) => padTop + chartH - (v / axisMax) * chartH;
+
+    const pointsFor = (key) => days.map((d, i) => `${xAt(i)},${yAt(d[key])}`).join(' ');
+    const areaFor = (key) => {
+      const baseline = padTop + chartH;
+      return `${xAt(0)},${baseline} ${pointsFor(key)} ${xAt(days.length - 1)},${baseline}`;
+    };
+    const dotsFor = (key, color) => days.map((d, i) => `<circle cx="${xAt(i)}" cy="${yAt(d[key])}" r="2.5" fill="${color}"></circle>`).join('');
+
+    const grid = [0, 1 / 3, 2 / 3, 1].map((frac) => {
+      const y = padTop + chartH - frac * chartH;
+      return `
+        <line class="grid-line" x1="${padLeft}" y1="${y}" x2="${vbW - padRight}" y2="${y}"></line>
+        <text class="grid-label" x="${padLeft - 6}" y="${y + 3}" text-anchor="end">${Math.round(axisMax * frac)}</text>
+      `;
+    }).join('');
+
+    const xLabels = days.map((d, i) => {
+      // não cabe rótulo pra todo dia em 30 dias — mostra a cada ~4
+      if (i % 4 !== 0 && i !== days.length - 1) return '';
+      return `<text class="axis-label" x="${xAt(i)}" y="${padTop + chartH + 16}" text-anchor="middle">${formatDay(d.day)}</text>`;
+    }).join('');
+
+    return `
+      <div class="panel">
+        <h2>Mensagens por dia (mês atual)</h2>
+        <div class="chart-wrap">
+          <svg class="daily-chart-svg" viewBox="0 0 ${vbW} ${vbH}">
+            ${grid}
+            <polygon class="area-fill" points="${areaFor('in')}" fill="${CHART_BLUE}"></polygon>
+            <polygon class="area-fill" points="${areaFor('out')}" fill="${chartGold()}"></polygon>
+            <polyline points="${pointsFor('in')}" fill="none" stroke="${CHART_BLUE}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+            <polyline points="${pointsFor('out')}" fill="none" stroke="${chartGold()}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+            ${dotsFor('in', CHART_BLUE)}
+            ${dotsFor('out', chartGold())}
+            ${xLabels}
+            <line class="chart-crosshair" id="dailyCrosshair" x1="0" y1="${padTop}" x2="0" y2="${padTop + chartH}" visibility="hidden"></line>
+            <circle class="chart-hover-dot" id="dailyHoverIn" r="4" fill="${CHART_BLUE}" visibility="hidden"></circle>
+            <circle class="chart-hover-dot" id="dailyHoverOut" r="4" fill="${chartGold()}" visibility="hidden"></circle>
+          </svg>
+        </div>
+        <div class="legend">
+          <span><span class="dot" style="background:${CHART_BLUE}"></span> Recebidas</span>
+          <span><span class="dot" style="background:${chartGold()}"></span> Enviadas</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // Dispersão: cada ponto é um dia, posição = (recebidas, enviadas) naquele
+  // dia. Ajuda a ver se dias com mais mensagens recebidas também têm mais
+  // respostas enviadas (correlação), ou se ficam bem desequilibrados. A
+  // diagonal marca onde recebidas = enviadas — pontos acima dela responderam
+  // mais do que receberam naquele dia.
+  function renderScatterChart(perDay) {
+    if (!perDay.length) {
+      scatterChartMeta = null;
+      return `<div class="panel"><h2>Dispersão: recebidas × enviadas por dia</h2><p class="empty">Sem dados ainda.</p></div>`;
+    }
+    const size = 240, padL = 34, padB = 24, padT = 10, padR = 10;
+    const axisMax = niceCeil(Math.max(1, ...perDay.map(d => Math.max(d.in, d.out))));
+    const plotSize = size - padL - padR;
+    const scaleX = (v) => padL + (v / axisMax) * plotSize;
+    const scaleY = (v) => (size - padB) - (v / axisMax) * plotSize;
+
+    scatterChartMeta = { perDay };
+
+    const grid = [0, 1 / 3, 2 / 3, 1].map((frac) => {
+      const val = Math.round(axisMax * frac);
+      const x = padL + frac * plotSize;
+      const y = (size - padB) - frac * plotSize;
+      return `
+        <line class="grid-line" x1="${padL}" y1="${y}" x2="${size - padR}" y2="${y}"></line>
+        <line class="grid-line" x1="${x}" y1="${padT}" x2="${x}" y2="${size - padB}"></line>
+        <text class="grid-label" x="${padL - 5}" y="${y + 3}" text-anchor="end">${val}</text>
+        <text class="grid-label" x="${x}" y="${size - padB + 14}" text-anchor="middle">${val}</text>
+      `;
+    }).join('');
+
+    const points = perDay.map((d, i) => `
+      <circle class="scatter-dot" cx="${scaleX(d.in)}" cy="${scaleY(d.out)}" r="4" fill="${chartGold()}" fill-opacity="0.8"></circle>
+      <circle class="scatter-hit" data-idx="${i}" cx="${scaleX(d.in)}" cy="${scaleY(d.out)}" r="11"></circle>
+    `).join('');
+
+    return `
+      <div class="panel">
+        <h2>Dispersão: recebidas × enviadas por dia</h2>
+        <div class="chart-wrap">
+          <svg class="scatter-chart-svg" width="${size}" height="${size + 6}" viewBox="0 0 ${size} ${size + 6}">
+            ${grid}
+            <line class="ref-line" x1="${padL}" y1="${size - padB}" x2="${size - padR}" y2="${padT}"></line>
+            <line class="axis-line" x1="${padL}" y1="${padT}" x2="${padL}" y2="${size - padB}"></line>
+            <line class="axis-line" x1="${padL}" y1="${size - padB}" x2="${size - padR}" y2="${size - padB}"></line>
+            ${points}
+            <text class="axis-label" x="${padL + plotSize / 2}" y="${size + 4}" text-anchor="middle">Recebidas</text>
+            <text class="axis-label" x="-${padT + plotSize / 2}" y="10" text-anchor="middle" transform="rotate(-90)">Enviadas</text>
+          </svg>
+        </div>
+        <p class="empty" style="text-align:left; padding:6px 0 0;">Cada ponto é um dia — passe o mouse pra ver os valores. A diagonal marca onde recebidas = enviadas.</p>
+      </div>
+    `;
+  }
+
+  // Quantos negócios (dos já vinculados às conversas desta tela) estão em
+  // cada etapa do funil no Bitrix agora — `stages` vem pronto do backend
+  // (GET /metrics, ver src/bitrixCrm.js:getStageDistribution), já ordenado
+  // pela posição real da etapa no funil. Vazio quando não há webhook do
+  // Bitrix configurado, ou nenhum negócio vinculado ainda.
+  function renderStageChart(stages) {
+    if (!stages || !stages.length) {
+      return `<div class="panel stage-chart"><h2>Leads por etapa (Bitrix)</h2><p class="empty">Sem negócios vinculados a conversas ainda.</p></div>`;
+    }
+    const max = Math.max(...stages.map((s) => s.count));
+    const rows = stages.map((s) => `
+      <div class="type-row">
+        <span class="type-label" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+        <span class="bar-bg"><span class="bar-fill" style="width:${(s.count / max) * 100}%"></span></span>
+        <span class="count">${s.count}</span>
+      </div>
+    `).join('');
+    return `<div class="panel stage-chart"><h2>Leads por etapa (Bitrix)</h2>${rows}</div>`;
+  }
+
+  function renderByType(byType) {
+    const entries = Object.entries(byType);
+    if (!entries.length) {
+      return `<div class="panel"><h2>Por tipo de mensagem</h2><p class="empty">Sem dados ainda.</p></div>`;
+    }
+    const max = Math.max(...entries.map(([, v]) => v));
+    const rows = entries
+      .sort((a, b) => b[1] - a[1])
+      .map(([type, count]) => `
+        <div class="type-row">
+          <span class="type-label">${escapeHtml(TYPE_LABELS[type] || type)}</span>
+          <span class="bar-bg"><span class="bar-fill" style="width:${(count / max) * 100}%"></span></span>
+          <span class="count">${count}</span>
+        </div>
+      `).join('');
+    return `<div class="panel"><h2>Por tipo de mensagem</h2>${rows}</div>`;
+  }
+
+  function renderPerSession(perSession) {
+    if (!perSession.length) {
+      return `<div class="panel"><h2>Por sessão (usuário do Bitrix)</h2><p class="empty">Sem dados ainda.</p></div>`;
+    }
+    const rows = perSession.map(s => `
+      <tr>
+        <td>${escapeHtml(s.label || s.sessionId)}</td>
+        <td class="num">${s.conversas}</td>
+        <td class="num">${s.in}</td>
+        <td class="num">${s.out}</td>
+        <td class="num">${s.in + s.out}</td>
+      </tr>
+    `).join('');
+    return `
+      <div class="panel">
+        <h2>Por sessão (usuário do Bitrix)</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Sessão</th>
+              <th class="num">Conversas</th>
+              <th class="num">Recebidas</th>
+              <th class="num">Enviadas</th>
+              <th class="num">Total</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function formatDateTime(iso) {
+    return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Lista de conversas vinculadas a um negócio — cada linha tem um menu (⋯)
+  // com a ação "Abrir conversa", que leva pro negócio no CRM (BX24.openPath).
+  // Paginada: `page` decide o recorte de `conversations` mostrado.
+  function renderConversations(conversations, page) {
+    if (!conversations.length) {
+      return `<div class="panel"><h2>Conversas</h2><p class="empty">Nenhuma conversa vinculada a um negócio ainda.</p></div>`;
+    }
+
+    const totalPages = Math.max(1, Math.ceil(conversations.length / CONVERSATIONS_PAGE_SIZE));
+    const clampedPage = Math.min(Math.max(page, 1), totalPages);
+    const startIdx = (clampedPage - 1) * CONVERSATIONS_PAGE_SIZE;
+    const pageItems = conversations.slice(startIdx, startIdx + CONVERSATIONS_PAGE_SIZE);
+
+    const rows = pageItems.map((c, i) => {
+      const menuId = startIdx + i; // índice global, único mesmo entre páginas
+      return `
+      <tr>
+        <td class="contact-cell">
+          ${escapeHtml(c.phone)}
+          <div class="phone">negócio #${escapeHtml(String(c.dealId))} · ${escapeHtml(c.sessionId)}</div>
+        </td>
+        <td><span class="origin-tag ${c.origin}">${c.origin === 'interna' ? 'Interna' : 'Externa'}</span></td>
+        <td>${c.lastMessageDirection === 'out' ? '↑ ' : '↓ '}${escapeHtml(c.lastMessageText || '—')}</td>
+        <td class="num">${formatDateTime(c.lastMessageAt)}</td>
+        <td class="num">${c.messageCount}</td>
+        <td class="actions">
+          <button class="row-menu-btn" data-menu-toggle="${menuId}" type="button">⋯</button>
+          <div class="row-menu" data-menu="${menuId}">
+            <button type="button" data-open-deal="${escapeHtml(String(c.dealId))}">Abrir conversa</button>
+          </div>
+        </td>
+      </tr>
+    `;
+    }).join('');
+
+    const pagination = totalPages > 1 ? `
+      <div class="pagination">
+        <button type="button" data-page-nav="prev" ${clampedPage <= 1 ? 'disabled' : ''}>‹ Anterior</button>
+        <span class="pagination-info">Página ${clampedPage} de ${totalPages}</span>
+        <button type="button" data-page-nav="next" ${clampedPage >= totalPages ? 'disabled' : ''}>Próxima ›</button>
+      </div>
+    ` : '';
+
+    return `
+      <div class="panel">
+        <h2>Conversas (${conversations.length})</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Contato</th>
+              <th>Origem</th>
+              <th>Última mensagem</th>
+              <th class="num">Quando</th>
+              <th class="num">Msgs</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${pagination}
+      </div>
+    `;
+  }
+
+  // Delegação de evento: os menus/paginação são recriados a cada render, então
+  // o bind fica uma vez só aqui em cima, no container fixo #content.
+  content.addEventListener('click', (e) => {
+    const toggleBtn = e.target.closest('[data-menu-toggle]');
+    const openBtn = e.target.closest('[data-open-deal]');
+    const pageNavBtn = e.target.closest('[data-page-nav]');
+
+    if (pageNavBtn) {
+      if (pageNavBtn.disabled) return;
+      conversationsPage += pageNavBtn.dataset.pageNav === 'next' ? 1 : -1;
+      if (lastMetrics) renderAll(lastMetrics);
+      return;
+    }
+
+    // fecha qualquer menu aberto antes de decidir a próxima ação
+    content.querySelectorAll('.row-menu.open').forEach((el) => {
+      if (!toggleBtn || el.dataset.menu !== toggleBtn.dataset.menuToggle) el.classList.remove('open');
+    });
+
+    if (toggleBtn) {
+      const menu = content.querySelector(`.row-menu[data-menu="${toggleBtn.dataset.menuToggle}"]`);
+      menu.classList.toggle('open');
+      return;
+    }
+
+    if (openBtn) {
+      openConversation(openBtn.dataset.openDeal);
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-menu-toggle]') && !e.target.closest('.row-menu')) {
+      content.querySelectorAll('.row-menu.open').forEach((el) => el.classList.remove('open'));
+    }
+  });
+
+  const insightsSection = document.getElementById('insightsSection');
+  const SPARKLE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2 2m-9 9-2 2m13-2-2-2m-9-9-2-2"/><circle cx="12" cy="12" r="3"/></svg>';
+  const REFRESH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>';
+
+  function renderInsights(data) {
+    const cards = (data.insights || []).map((i) => `
+      <div class="insight-card ${i.tone || 'neutral'}">
+        <p class="insight-card-title">${escapeHtml(i.title)}</p>
+        <p class="insight-card-text">${escapeHtml(i.text)}</p>
+      </div>
+    `).join('');
+    const meta = data.generatedAt
+      ? `<p class="insights-meta">Gerado em ${new Date(data.generatedAt).toLocaleString('pt-BR')}${data.cached ? ' (em cache)' : ''}</p>`
+      : '';
+    insightsSection.innerHTML = `
+      <div class="insights-head">
+        <h2>${SPARKLE_ICON} Insights de IA</h2>
+        <button type="button" class="insights-refresh" id="insightsRefreshBtn" title="Gerar de novo">${REFRESH_ICON} Atualizar</button>
+      </div>
+      <div class="insights-row">${cards || '<p class="empty">Sem insights ainda.</p>'}</div>
+      ${meta}
+    `;
+    document.getElementById('insightsRefreshBtn').addEventListener('click', () => loadInsights(true));
+  }
+
+  async function loadInsights(force) {
+    const btn = document.getElementById('insightsRefreshBtn');
+    if (btn) { btn.disabled = true; btn.classList.add('spinning'); }
+    else {
+      insightsSection.innerHTML = `
+        <div class="insights-head"><h2>${SPARKLE_ICON} Insights de IA</h2></div>
+        <p class="empty">Gerando insights…</p>
+      `;
+    }
+    try {
+      const url = force ? `${API_INSIGHTS}?refresh=1` : API_INSIGHTS;
+      const res = await apiFetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar insights');
+      renderInsights(data);
+    } catch (err) {
+      insightsSection.innerHTML = `
+        <div class="insights-head"><h2>${SPARKLE_ICON} Insights de IA</h2></div>
+        <p class="empty">Não foi possível gerar os insights. ${escapeHtml(err.message)}</p>
+      `;
+    }
+  }
+
+  function renderAll(m) {
+    content.innerHTML =
+      renderKpis(m) +
+      renderConversations(m.conversations || [], conversationsPage) +
+      renderStageChart(m.stages) +
+      `<div class="panel-row">${renderDailyChart(m.perDay)}${renderScatterChart(m.perDay)}</div>` +
+      `<div class="panel-row">${renderByType(m.byType)}${renderPerSession(m.perSession)}</div>`;
+  }
+
+  async function load() {
+    try {
+      const url = currentOrigin ? `${API_METRICS}?origin=${encodeURIComponent(currentOrigin)}` : API_METRICS;
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('falha ao buscar métricas');
+      const m = await res.json();
+      lastMetrics = m;
+
+      renderAll(m);
+
+      updatedAt.textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR');
+      return true;
+    } catch (err) {
+      content.innerHTML = `<p class="empty">Não foi possível carregar as métricas. ${escapeHtml(err.message)}</p>`;
+      return false;
+    }
+  }
+
+  document.getElementById('refreshBtn').addEventListener('click', async () => {
+    const ok = await load();
+    if (window.showToast) showToast(ok ? 'Métricas atualizadas.' : 'Falha ao atualizar métricas.', ok ? 'success' : 'error');
+  });
+  // load() e o polling de 30s só começam depois de autenticar (ver BX24.init acima).
+})();
+</script>
+<script>
+(function () {
+  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
+    if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
+    if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(function () {});
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Abrindo conversa…</title>
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --red: #d9685f;
+  }
+  html, body{
+    margin: 0; min-height: 100vh;
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .box{ text-align: center; padding: 32px 24px; max-width: 360px; }
+  .spinner{
+    width: 34px; height: 34px; margin: 0 auto 16px;
+    border: 3px solid var(--border); border-top-color: var(--gold);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  h3{ font-size: 15px; margin: 0 0 6px; font-weight: 600; }
+  p{ font-size: 12.5px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+  .error h3{ color: var(--red); }
+</style>
+</head>
+<body>
+
+<div class="box" id="box">
+  <div class="spinner"></div>
+  <h3 id="title">Abrindo conversa…</h3>
+  <p id="detail">Localizando o contato deste negócio.</p>
+</div>
+
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  // Página-ponte do placement CRM_DEAL_DETAIL_TOOLBAR ("Abrir WhatsApp" no
+  // menu do botão superior do card de Negócio). Resolve dealId -> telefone
+  // do contato -> instância do dono, e redireciona pro Chat já na conversa
+  // certa (deep-link chat.html?session=&phone=, ver boot() em chat.html).
+  // Mesma lógica de resolução que a aba do card (public/index.html) já usa.
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+  const API_BASE = window.location.origin + '/api/whatsapp';
+
+  let appToken = null;
+
+  function showError(title, detail) {
+    const box = document.getElementById('box');
+    box.classList.add('error');
+    box.querySelector('.spinner').style.display = 'none';
+    document.getElementById('title').textContent = title;
+    document.getElementById('detail').textContent = detail;
+  }
+
+  function callMethod(method, params) {
+    return new Promise((resolve, reject) => {
+      BX24.callMethod(method, params, (result) => {
+        if (result.error()) reject(result.error());
+        else resolve(result.data());
+      });
+    });
+  }
+
+  // Mesma normalização de public/index.html: só dígitos + DDI 55 se curto.
+  function normalizePhone(raw) {
+    let digits = (raw || '').replace(/\D/g, '');
+    if (digits.length <= 11) digits = '55' + digits;
+    return digits;
+  }
+
+  async function verifyAuth() {
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth || !auth.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: Object.assign({}, FETCH_HEADERS, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function loadDealContact(dealId) {
+    const deal = await callMethod('crm.deal.get', { id: dealId });
+    if (!deal.CONTACT_ID) throw { code: 'NO_CONTACT' };
+    const contact = await callMethod('crm.contact.get', { id: deal.CONTACT_ID });
+    const phoneEntry = (contact.PHONE || [])[0];
+    if (!phoneEntry) throw { code: 'NO_PHONE' };
+    return normalizePhone(phoneEntry.VALUE);
+  }
+
+  async function loadInstances(ownerId) {
+    const res = await fetch(`${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}`, {
+      headers: Object.assign({}, FETCH_HEADERS, { Authorization: `Bearer ${appToken}` }),
+    });
+    if (!res.ok) throw new Error('falha ao carregar instâncias de WhatsApp');
+    const data = await res.json();
+    return data.instances || [];
+  }
+
+  BX24.init(async () => {
+    try {
+      const placementInfo = BX24.placement.info();
+      // TOOLBAR/TAB entregam options.ID; DETAIL_ACTIVITY entregaria entityId —
+      // tratamos os dois por segurança (o nome varia por tipo de placement).
+      const dealId = placementInfo && placementInfo.options
+        ? (placementInfo.options.ID || placementInfo.options.entityId)
+        : null;
+      if (!dealId) {
+        showError('Contexto não encontrado', 'Abra este botão de dentro de um Negócio do CRM.');
+        return;
+      }
+
+      const [phone, ownerId] = await Promise.all([
+        loadDealContact(dealId),
+        verifyAuth(),
+      ]);
+
+      const instances = await loadInstances(ownerId);
+      if (!instances.length) {
+        showError('Nenhuma instância', 'Conecte um número de WhatsApp em Instâncias antes de abrir conversas.');
+        return;
+      }
+
+      // Mesma memória por-negócio da aba do card (index.html): reabre na
+      // instância que o usuário já usava nesse negócio, senão a primeira.
+      let session = null;
+      try {
+        const remembered = localStorage.getItem(`wa-instance-deal-${dealId}`);
+        if (remembered && instances.some((i) => i.id === remembered)) session = remembered;
+      } catch (e) { /* localStorage indisponível no iframe: segue pro fallback */ }
+      if (!session) session = instances[0].id;
+
+      // Preserva os query params atuais (DOMAIN/APP_SID etc. que o Bitrix
+      // anexa ao abrir o iframe) pro SDK BX24 continuar funcionando no Chat.
+      const params = new URLSearchParams(location.search);
+      params.set('session', session);
+      params.set('phone', phone);
+      location.replace('/chat.html?' + params.toString());
+    } catch (err) {
+      if (err && err.code === 'NO_CONTACT') {
+        showError('Negócio sem contato', 'Vincule um contato a este negócio para abrir a conversa.');
+      } else if (err && err.code === 'NO_PHONE') {
+        showError('Contato sem telefone', 'Cadastre um telefone no contato deste negócio para abrir a conversa.');
+      } else {
+        showError('Não foi possível abrir', (err && (err.message || err.error_description)) || 'Erro inesperado.');
+        console.error('[bridge] erro:', err);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Configurações · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (mesmo cache das outras telas) — aplica ANTES do
+  // primeiro paint, pra esta própria tela (Configurações) não piscar a cor
+  // padrão antes da de verdade chegar. O load() abaixo (via /api/settings,
+  // não /api/brand — mas os valores são os mesmos) atualiza esse cache.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
+    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
+    // escuro; multiplicar quase não move um valor perto de zero, por isso
+    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --radius: 14px;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO). */
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app{
+    max-width: 720px;
+    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 720px) / 2));
+    padding: 28px 20px 70px;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 720px) / 2)); }
+
+  /* ======================================================
+     Sidebar de navegação (retrátil) + notificações/toast
+     ====================================================== */
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  /* Grupo "Landing Page" com submenu "Métricas LP" (dropdown/acordeão) —
+     clicar no item principal navega normal; a seta abre/fecha o submenu,
+     que fica lembrado por página (localStorage). No modo ícone (sidebar
+     recolhida) o acordeão não faz sentido — mostra os dois itens sempre,
+     como já era antes de virarem um grupo só. */
+  .nav-group{ position:relative; }
+  .nav-group > .nav-item{ padding-right:34px; }
+  .nav-caret-btn{
+    position:absolute; top:10px; right:6px; width:22px; height:22px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
+    transition: color .15s, background .15s;
+  }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
+  .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
+  .nav-subitems{ display:none; flex-direction:column; }
+  .nav-group.open .nav-subitems{ display:flex; }
+  .nav-subitem{ padding-left:30px; font-size:12px; }
+  html.sidebar-collapsed .nav-caret-btn{ display:none; }
+  html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
+  html.sidebar-collapsed .nav-subitems{ display:flex !important; }
+
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  h1{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; margin: 0 0 4px; }
+  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
+
+  .panel{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; margin-bottom: 20px;
+  }
+  .panel h2{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 6px; }
+  .panel .panel-hint{ color: var(--text-muted); font-size: 12.5px; margin: 0 0 18px; line-height:1.5; }
+
+  .field-label{ display:block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight:500; }
+  .color-row{ display:flex; align-items:center; gap: 8px; margin-bottom: 8px; }
+  .color-row input[type="color"]{ width: 44px; height: 40px; padding: 2px; flex-shrink:0; cursor:pointer; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); }
+  .color-row input[type="text"]{
+    flex:1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+    color: var(--text); font-family: inherit; font-size: 14px; padding: 11px 14px; outline: none;
+  }
+  .color-row input[type="text"]:focus{ border-color: var(--gold-dim); }
+  .hint{ color: var(--text-faint); font-size: 11.5px; margin: 0 0 18px; line-height:1.5; }
+
+  .swatches{ display:flex; gap:8px; margin: 0 0 20px; flex-wrap:wrap; }
+  .swatch{
+    width:28px; height:28px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    transition: transform .12s ease, border-color .12s ease;
+  }
+  .swatch:hover{ transform: scale(1.12); }
+  .swatch.selected{ border-color: var(--text); }
+
+  .template-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+  .template-card{
+    background: var(--surface-2); border:1.5px solid var(--border); border-radius:10px;
+    padding:12px; cursor:pointer; text-align:left; font-family:inherit;
+    transition: border-color .12s ease, transform .12s ease;
+  }
+  .template-card:hover{ transform: translateY(-2px); border-color: var(--gold-dim); }
+  .template-card.active{ border-color: var(--gold); }
+  .template-swatches{ display:flex; gap:5px; margin-bottom:9px; }
+  .template-swatches span{ width:16px; height:16px; border-radius:50%; display:inline-block; border:1px solid rgba(255,255,255,.15); }
+  .template-name{ font-size:12.5px; font-weight:600; color:var(--text); }
+
+  .preview-row{ display:flex; align-items:center; gap:14px; margin-bottom: 22px; flex-wrap:wrap; }
+  .preview-btn{
+    background: var(--preview-color, var(--gold)); color: #1a1408; border: none; border-radius: 9px;
+    padding: 10px 18px; font-size: 12.5px; font-weight: 700;
+  }
+  .preview-link{ color: var(--preview-color, var(--gold)); font-size: 13px; font-weight:600; }
+  .preview-tag{ font-size:11px; font-weight:700; padding:4px 10px; border-radius:100px; }
+  .preview-tag.success{ background: rgba(var(--green-rgb),.14); color: var(--preview-green, var(--green)); }
+  .preview-tag.error{ background: rgba(var(--red-rgb),.14); color: var(--preview-red, var(--red)); }
+
+  /* ======================================================
+     Prévia ao vivo — miniatura das telas reais do app.
+     Usa var(--gold)/var(--gold-dim)/var(--green)/var(--red)
+     direto, então atualiza sozinha (sem JS) enquanto os campos
+     acima mudam essas variáveis no documento inteiro.
+     ====================================================== */
+  .app-preview{ display:flex; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--bg); }
+  .ap-sidebar{ width:148px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--border); padding:14px 8px; display:flex; flex-direction:column; gap:4px; }
+  .ap-nav-item{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; font-size:11px; color:var(--text-muted); }
+  .ap-nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .ap-dot{ width:6px; height:6px; border-radius:50%; background:currentColor; flex-shrink:0; }
+  .ap-main{ flex:1; padding:18px; display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .ap-badge-row{ display:flex; align-items:center; gap:8px; }
+  .ap-badge{ font-family:'Fraunces',serif; font-size:12px; color: var(--gold-dim); }
+  .ap-badge-label{ font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color: var(--text-faint); }
+  .ap-stat{ display:flex; flex-direction:column; gap:2px; }
+  .ap-stat-num{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color: var(--gold); line-height:1; }
+  .ap-stat-label{ font-size:11px; color: var(--text-muted); }
+  .ap-chat{ display:flex; flex-direction:column; gap:6px; }
+  .ap-bubble{ max-width:78%; padding:8px 12px; border-radius:12px; font-size:12px; line-height:1.4; }
+  .ap-bubble.in{ background: var(--surface-2); color: var(--text); align-self:flex-start; border-bottom-left-radius:3px; }
+  .ap-bubble.out{ background: var(--gold); color:#1a1408; align-self:flex-end; border-bottom-right-radius:3px; }
+  .ap-row{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .ap-btn{ background: var(--gold); color:#1a1408; border:none; border-radius:8px; padding:7px 14px; font-size:11.5px; font-weight:700; }
+  .ap-tag{ font-size:10px; font-weight:700; padding:3px 9px; border-radius:100px; }
+  .ap-tag.success{ background: rgba(var(--green-rgb),.14); color: var(--green); }
+  .ap-tag.error{ background: rgba(var(--red-rgb),.14); color: var(--red); }
+  .ap-link{ color: var(--gold); font-size:11.5px; font-weight:600; text-decoration:none; }
+  @media (max-width:560px){ .app-preview{ flex-direction:column; } .ap-sidebar{ width:100%; flex-direction:row; overflow-x:auto; } }
+
+  .btn{
+    background: var(--gold); color: #1a1408; border: none; border-radius: 9px;
+    padding: 9px 16px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover{ filter: brightness(1.08); }
+  .btn:disabled{ opacity:.55; cursor:not-allowed; filter:none; }
+  .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter:none; }
+  .actions-row{ display:flex; gap:10px; }
+
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 100px; padding: 5px 13px; font-size: 11px;
+    color: var(--text-muted); text-decoration: none; white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/dashboard.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <div class="nav-group" id="navGroupCampaign">
+      <a href="/campaign.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg></span>
+        <span class="nav-label">Campanha</span>
+        <span class="nav-tip">Campanha</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupCampaignToggle" title="Mostrar/ocultar Análise de Campanha e Agenda de Envios">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/campaign-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 7 13.5 15.5 8.5 10.5 2 17"/><path d="M16 7h6v6"/></svg></span>
+          <span class="nav-label">Análise de Campanha</span>
+          <span class="nav-tip">Análise de Campanha</span>
+        </a>
+        <a href="/campaign-schedule.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></span>
+          <span class="nav-label">Agenda de Envios</span>
+          <span class="nav-tip">Agenda de Envios</span>
+        </a>
+      </div>
+    </div>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <div class="nav-group" id="navGroupLP">
+      <a href="/sites.html" class="nav-item">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg></span>
+        <span class="nav-label">Landing Page</span>
+        <span class="nav-tip">Landing Page</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupLPToggle" title="Mostrar/ocultar Métricas LP">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/lead-metrics.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg></span>
+          <span class="nav-label">Métricas LP</span>
+          <span class="nav-tip">Métricas LP</span>
+        </a>
+      </div>
+    </div>
+    <a href="/onboarding.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+      <span class="nav-label">Onboarding</span>
+      <span class="nav-tip">Onboarding</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <div class="nav-group open" id="navGroupSettings">
+      <a href="/settings.html" class="nav-item active">
+        <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+        <span class="nav-label">Configurações</span>
+        <span class="nav-tip">Configurações</span>
+      </a>
+      <button type="button" class="nav-caret-btn" id="navGroupSettingsToggle" title="Mostrar/ocultar Instâncias">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="nav-subitems">
+        <a href="/instances.html" class="nav-item nav-subitem">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">Instâncias</span>
+          <span class="nav-tip">Instâncias</span>
+        </a>
+      </div>
+    </div>
+    <a href="/apresentacao.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
+      <span class="nav-label">Apresentação</span>
+      <span class="nav-tip">Apresentação</span>
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <h1>Configurações</h1>
+  <p class="subtitle">Preferências gerais desta instalação — hoje só a paleta de cores, mas é aqui que futuras configurações globais entram.</p>
+
+  <div class="panel">
+    <h2>Modelos prontos</h2>
+    <p class="panel-hint">Aplica a paleta inteira de um clique só (inspirados em apps conhecidos, como o WhatsApp). Depois de escolher um, ainda dá pra ajustar qualquer cor à mão logo abaixo.</p>
+    <div class="template-grid" id="templateGrid"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Cor de destaque</h2>
+    <p class="panel-hint">Substitui o dourado padrão em todas as telas internas e nas páginas públicas das LPs (quando a própria LP não tiver uma cor própria configurada). Se você nunca mexer aqui, o app continua com a cor padrão de sempre.</p>
+
+    <label class="field-label">Cor principal</label>
+    <div class="color-row">
+      <input type="color" id="colorPicker" value="#d8ab4f">
+      <input type="text" id="colorHex" placeholder="#d8ab4f">
+    </div>
+    <p class="hint">Cole um código hex (ex: <code>#2e6b52</code>) ou use o seletor.</p>
+
+    <label class="field-label">Sugestões rápidas</label>
+    <div class="swatches" id="swatches"></div>
+
+    <label class="field-label" style="margin-top:8px;">
+      <input type="checkbox" id="autoDimCheck" checked style="margin-right:6px;vertical-align:middle;">
+      Cor secundária (hovers/bordas) automática, a partir da principal
+    </label>
+    <div class="color-row" id="dimRow" style="opacity:.5;">
+      <input type="color" id="colorDimPicker" value="#8a6b32" disabled>
+      <input type="text" id="colorDimHex" placeholder="#8a6b32" disabled>
+    </div>
+    <p class="hint">Desmarque a caixa acima pra escolher essa cor você mesmo.</p>
+
+    <label class="field-label">Verde (sucesso)</label>
+    <div class="color-row">
+      <input type="color" id="greenPicker" value="#4caf6e">
+      <input type="text" id="greenHex" placeholder="#4caf6e">
+    </div>
+
+    <label class="field-label">Vermelho (erro/alerta)</label>
+    <div class="color-row">
+      <input type="color" id="redPicker" value="#d9685f">
+      <input type="text" id="redHex" placeholder="#d9685f">
+    </div>
+
+    <label class="field-label">Cor de fundo</label>
+    <div class="color-row">
+      <input type="color" id="bgPicker" value="#15120d">
+      <input type="text" id="bgHex" placeholder="#15120d">
+    </div>
+    <p class="hint">O fundo dos cards/painéis (as "superfícies") clareia sozinho a partir dessa cor — não precisa escolher à parte.</p>
+
+    <label class="field-label">Prévia</label>
+    <div class="preview-row" id="previewRow">
+      <button type="button" class="preview-btn" disabled>Botão de exemplo</button>
+      <a href="#" class="preview-link" onclick="return false">Link de exemplo</a>
+      <span class="preview-tag success">Sucesso</span>
+      <span class="preview-tag error">Erro</span>
+    </div>
+
+    <div class="actions-row">
+      <button class="btn" id="saveBtn">Salvar</button>
+      <button class="btn secondary" id="resetBtn">Restaurar padrão</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Prévia ao vivo</h2>
+    <p class="panel-hint">Como a paleta fica nas telas reais do sistema — atualiza sozinha enquanto você ajusta as cores acima, mesmo antes de salvar.</p>
+    <div class="app-preview">
+      <div class="ap-sidebar">
+        <div class="ap-nav-item active"><span class="ap-dot"></span> Dashboard</div>
+        <div class="ap-nav-item"><span class="ap-dot"></span> Chat</div>
+        <div class="ap-nav-item"><span class="ap-dot"></span> Contatos</div>
+        <div class="ap-nav-item"><span class="ap-dot"></span> Sites</div>
+      </div>
+      <div class="ap-main">
+        <div class="ap-badge-row">
+          <span class="ap-badge">01</span>
+          <span class="ap-badge-label">Dashboard</span>
+        </div>
+        <div class="ap-stat">
+          <span class="ap-stat-num">128</span>
+          <span class="ap-stat-label">Conversas hoje</span>
+        </div>
+        <div class="ap-chat">
+          <div class="ap-bubble in">Olá! Gostaria de mais informações.</div>
+          <div class="ap-bubble out">Claro, vou te ajudar agora mesmo 👋</div>
+        </div>
+        <div class="ap-row">
+          <button type="button" class="ap-btn" disabled>Enviar</button>
+          <a href="#" class="ap-link" onclick="return false">Ver detalhes</a>
+          <span class="ap-tag success">Entregue</span>
+          <span class="ap-tag error">Falhou</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Token de API</h2>
+    <p class="panel-hint">Pra puxar dados deste sistema por fora do navegador (scripts, Postman, Power Query do Excel, etc.) — veja as rotas disponíveis na <a href="/api-docs" target="_blank" rel="noopener">documentação da API</a>. Cada token vale por 90 dias; gerar um novo não invalida os anteriores, cada um expira sozinho no seu prazo.</p>
+    <div class="actions-row">
+      <button class="btn" id="genTokenBtn">Gerar novo token</button>
+      <a href="/api-docs" target="_blank" rel="noopener" class="btn secondary">Ver documentação da API</a>
+    </div>
+    <div id="tokenResult" style="display:none;margin-top:16px;">
+      <label class="field-label">Token gerado — copie agora, não é possível ver de novo depois (válido até <span id="tokenExpiry"></span>)</label>
+      <div class="color-row">
+        <input type="text" id="tokenValue" readonly style="font-family:monospace;font-size:12px;flex:1;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+        <button class="btn secondary" id="copyTokenBtn" type="button">Copiar</button>
+      </div>
+      <p class="hint">Use como <code>Authorization: Bearer &lt;token&gt;</code> nas chamadas — guarde num lugar seguro, quem tiver esse token acessa os dados desta conta.</p>
+    </div>
+  </div>
+
+  <div class="credit-row">
+    <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+      <span class="dot"></span> Desenvolvido por Daniel Costa
+    </a>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var lpGroup = document.getElementById('navGroupLP');
+  var lpToggle = document.getElementById('navGroupLPToggle');
+  if (lpGroup && lpToggle) {
+    if (localStorage.getItem('navGroupLPOpen') === '1') lpGroup.classList.add('open');
+    lpToggle.addEventListener('click', function () {
+      var nowOpen = lpGroup.classList.toggle('open');
+      localStorage.setItem('navGroupLPOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var campaignGroup = document.getElementById('navGroupCampaign');
+  var campaignToggle = document.getElementById('navGroupCampaignToggle');
+  if (campaignGroup && campaignToggle) {
+    if (localStorage.getItem('navGroupCampaignOpen') === '1') campaignGroup.classList.add('open');
+    campaignToggle.addEventListener('click', function () {
+      var nowOpen = campaignGroup.classList.toggle('open');
+      localStorage.setItem('navGroupCampaignOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var settingsGroup = document.getElementById('navGroupSettings');
+  var settingsToggle = document.getElementById('navGroupSettingsToggle');
+  if (settingsGroup && settingsToggle) {
+    if (localStorage.getItem('navGroupSettingsOpen') === '1') settingsGroup.classList.add('open');
+    settingsToggle.addEventListener('click', function () {
+      var nowOpen = settingsGroup.classList.toggle('open');
+      localStorage.setItem('navGroupSettingsOpen', nowOpen ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  window.showToast = function (message, type) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = message;
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_BASE = window.location.origin + '/api';
+  const DEFAULTS = { accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#15120d' };
+  const SWATCHES = ['#d8ab4f', '#4caf6e', '#5b8dd8', '#c05c8f', '#d9685f', '#2e6b52', '#8a6b32', '#7d5ba6'];
+
+  // Modelos prontos — paleta inteira de um clique, incluindo o fundo (cada
+  // um com um tom de fundo próprio, não só a cor de destaque). "WhatsApp"
+  // usa as cores reais da marca (verde #25D366 / teal #128C7E) e o fundo bem
+  // escuro do WhatsApp Web no modo escuro; os demais são combinações
+  // próprias, todos com "dim" escolhido à mão (não pela derivação automática
+  // de 63%), pra ficar fiel ao visual de referência de cada um.
+  const TEMPLATES = [
+    { id: 'default', name: 'Padrão', accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#15120d' },
+    { id: 'whatsapp', name: 'WhatsApp', accentColor: '#25D366', accentColorDim: '#128C7E', greenColor: '#25D366', redColor: '#d9685f', bgColor: '#0b141a' },
+    { id: 'blue', name: 'Azul Corporativo', accentColor: '#5b8dd8', accentColorDim: '#3a5f96', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#0f1420' },
+    { id: 'wine', name: 'Bordô', accentColor: '#c05c8f', accentColorDim: '#7d3a5a', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#180f12' },
+  ];
+
+  // Mesma proporção real entre --gold (#d8ab4f) e --gold-dim (#8a6b32) já
+  // usada no app inteiro (~63% de cada canal) — deriva uma cor secundária
+  // sensata a partir da principal sem precisar perguntar pro usuário.
+  function deriveDim(hex) {
+    const num = parseInt(hex.slice(1), 16);
+    const channel = (shift) => Math.round(((num >> shift) & 0xff) * 0.63).toString(16).padStart(2, '0');
+    return '#' + channel(16) + channel(8) + channel(0);
+  }
+
+  let resolveBx24Ready;
+  const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
+  if (window.BX24) {
+    BX24.init(() => {
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      resolveBx24Ready();
+    });
+  } else {
+    resolveBx24Ready();
+  }
+
+  let appToken = null;
+
+  async function verifyAuth() {
+    if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
+    await bx24Ready;
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function resolveOwner() {
+    const ownerId = await verifyAuth();
+    fetch(`${window.location.origin}/api/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { Authorization: `Bearer ${appToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+      .catch(() => {});
+    return ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  const colorPicker = document.getElementById('colorPicker');
+  const colorHex = document.getElementById('colorHex');
+  const colorDimPicker = document.getElementById('colorDimPicker');
+  const colorDimHex = document.getElementById('colorDimHex');
+  const dimRow = document.getElementById('dimRow');
+  const autoDimCheck = document.getElementById('autoDimCheck');
+  const greenPicker = document.getElementById('greenPicker');
+  const greenHex = document.getElementById('greenHex');
+  const redPicker = document.getElementById('redPicker');
+  const redHex = document.getElementById('redHex');
+  const bgPicker = document.getElementById('bgPicker');
+  const bgHex = document.getElementById('bgHex');
+  const swatchesWrap = document.getElementById('swatches');
+  const previewRow = document.getElementById('previewRow');
+  const saveBtn = document.getElementById('saveBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  // Cada campo é {picker, hex, cssVar, previewVar} — trata os 5 de forma
+  // genérica pra não repetir a mesma lógica em cada um.
+  const FIELD_DEFS = [
+    { key: 'accentColor', picker: colorPicker, hex: colorHex, cssVar: '--gold', rgbVar: '--gold-rgb', previewVar: '--preview-color' },
+    { key: 'accentColorDim', picker: colorDimPicker, hex: colorDimHex, cssVar: '--gold-dim', rgbVar: null, previewVar: null },
+    { key: 'greenColor', picker: greenPicker, hex: greenHex, cssVar: '--green', rgbVar: '--green-rgb', previewVar: '--preview-green' },
+    { key: 'redColor', picker: redPicker, hex: redHex, cssVar: '--red', rgbVar: '--red-rgb', previewVar: '--preview-red' },
+    { key: 'bgColor', picker: bgPicker, hex: bgHex, cssVar: '--bg', rgbVar: null, previewVar: null, isBg: true },
+  ];
+
+  // rgba() não aceita hex direto — mantém a versão "216,171,79" à parte pra
+  // fundos translúcidos (ex: item de menu ativo na prévia ao vivo) também
+  // acompanharem a cor escolhida.
+  function hexToRgbStr(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+  }
+
+  // --surface/--surface-2 não são campo à parte — derivam do fundo
+  // clareando um pouco cada canal (mesma lógica usada em __applyPalette,
+  // ver o script no <head>).
+  function deriveSurfaces(hex) {
+    const n = parseInt(hex.slice(1), 16);
+    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    const lighten = (amt) => {
+      const rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+      const gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+      const bb = Math.min(255, b + amt).toString(16).padStart(2, '0');
+      return '#' + rr + gg + bb;
+    };
+    return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+  }
+
+  function setField(def, color) {
+    def.picker.value = color;
+    def.hex.value = color;
+    document.documentElement.style.setProperty(def.cssVar, color);
+    if (def.rgbVar) document.documentElement.style.setProperty(def.rgbVar, hexToRgbStr(color));
+    if (def.previewVar) previewRow.style.setProperty(def.previewVar, color);
+    if (def.isBg) {
+      const surf = deriveSurfaces(color);
+      document.documentElement.style.setProperty('--surface', surf.surface);
+      document.documentElement.style.setProperty('--surface-2', surf.surface2);
+      document.documentElement.style.setProperty('--border', surf.border);
+    }
+    // Ponto único por onde toda mudança de cor passa (swatch, input manual,
+    // modelo pronto, load() e reset) — atualiza o destaque do card de
+    // modelo ativo aqui em vez de espalhar a chamada em cada handler.
+    updateActiveTemplate();
+  }
+
+  function currentAccentColor() {
+    return colorHex.value.trim() || DEFAULTS.accentColor;
+  }
+
+  // Mantém o cache local (localStorage) usado pelo script do <head> desta
+  // MESMA tela em sincronia — sem isso, a próxima vez que o usuário navegar
+  // de volta pra Configurações o flash da cor padrão volta a acontecer.
+  function syncPaletteCache(values) {
+    if (window.__applyPalette) window.__applyPalette(values);
+  }
+
+  function refreshDimFromAccent() {
+    if (!autoDimCheck.checked) return;
+    setField(FIELD_DEFS[1], deriveDim(currentAccentColor()));
+  }
+
+  // Modelos prontos — grid de cards, cada um aplica as 4 cores de uma vez.
+  const templateGrid = document.getElementById('templateGrid');
+
+  function currentColors() {
+    return {
+      accentColor: colorHex.value.trim(), accentColorDim: colorDimHex.value.trim(),
+      greenColor: greenHex.value.trim(), redColor: redHex.value.trim(), bgColor: bgHex.value.trim(),
+    };
+  }
+
+  function updateActiveTemplate() {
+    const cur = currentColors();
+    templateGrid.querySelectorAll('.template-card').forEach((el) => {
+      const t = TEMPLATES.find((tt) => tt.id === el.dataset.id);
+      const match = t && t.accentColor.toLowerCase() === cur.accentColor.toLowerCase()
+        && t.accentColorDim.toLowerCase() === cur.accentColorDim.toLowerCase()
+        && t.greenColor.toLowerCase() === cur.greenColor.toLowerCase()
+        && t.redColor.toLowerCase() === cur.redColor.toLowerCase()
+        && t.bgColor.toLowerCase() === cur.bgColor.toLowerCase();
+      el.classList.toggle('active', !!match);
+    });
+  }
+
+  function applyTemplate(t) {
+    setField(FIELD_DEFS[0], t.accentColor);
+    setField(FIELD_DEFS[1], t.accentColorDim);
+    setField(FIELD_DEFS[2], t.greenColor);
+    setField(FIELD_DEFS[3], t.redColor);
+    setField(FIELD_DEFS[4], t.bgColor);
+    // O modelo já traz uma cor secundária pensada pra combinar (não é a
+    // derivada automática de 63%) — desmarca o "automático" pra não
+    // sobrescrever na próxima vez que a principal mudar.
+    autoDimCheck.checked = false;
+    colorDimPicker.disabled = false;
+    colorDimHex.disabled = false;
+    dimRow.style.opacity = '1';
+    updateActiveTemplate();
+  }
+
+  templateGrid.innerHTML = TEMPLATES.map((t) => `
+    <button type="button" class="template-card" data-id="${t.id}">
+      <div class="template-swatches">
+        <span style="background:${t.bgColor}"></span>
+        <span style="background:${t.accentColor}"></span>
+        <span style="background:${t.accentColorDim}"></span>
+        <span style="background:${t.greenColor}"></span>
+        <span style="background:${t.redColor}"></span>
+      </div>
+      <div class="template-name">${t.name}</div>
+    </button>
+  `).join('');
+  templateGrid.querySelectorAll('.template-card').forEach((el) => {
+    el.addEventListener('click', () => applyTemplate(TEMPLATES.find((t) => t.id === el.dataset.id)));
+  });
+
+  swatchesWrap.innerHTML = SWATCHES.map((c) => `<span class="swatch" data-color="${c}" style="background:${c}" title="${c}"></span>`).join('');
+  swatchesWrap.querySelectorAll('.swatch').forEach((el) => {
+    el.addEventListener('click', () => {
+      setField(FIELD_DEFS[0], el.dataset.color);
+      refreshDimFromAccent();
+      swatchesWrap.querySelectorAll('.swatch').forEach((s) => s.classList.toggle('selected', s === el));
+    });
+  });
+
+  colorPicker.addEventListener('input', () => { setField(FIELD_DEFS[0], colorPicker.value); refreshDimFromAccent(); });
+  colorHex.addEventListener('input', () => {
+    const v = colorHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) { setField(FIELD_DEFS[0], v); refreshDimFromAccent(); }
+  });
+  colorDimPicker.addEventListener('input', () => setField(FIELD_DEFS[1], colorDimPicker.value));
+  colorDimHex.addEventListener('input', () => {
+    const v = colorDimHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[1], v);
+  });
+  greenPicker.addEventListener('input', () => setField(FIELD_DEFS[2], greenPicker.value));
+  greenHex.addEventListener('input', () => {
+    const v = greenHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[2], v);
+  });
+  redPicker.addEventListener('input', () => setField(FIELD_DEFS[3], redPicker.value));
+  redHex.addEventListener('input', () => {
+    const v = redHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[3], v);
+  });
+  bgPicker.addEventListener('input', () => setField(FIELD_DEFS[4], bgPicker.value));
+  bgHex.addEventListener('input', () => {
+    const v = bgHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[4], v);
+  });
+
+  autoDimCheck.addEventListener('change', () => {
+    const auto = autoDimCheck.checked;
+    colorDimPicker.disabled = auto;
+    colorDimHex.disabled = auto;
+    dimRow.style.opacity = auto ? '.5' : '1';
+    if (auto) refreshDimFromAccent();
+  });
+
+  async function load() {
+    try {
+      const res = await apiFetch(`${API_BASE}/settings`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar configurações');
+      const data = await res.json();
+      setField(FIELD_DEFS[0], data.accentColor || DEFAULTS.accentColor);
+      setField(FIELD_DEFS[2], data.greenColor || DEFAULTS.greenColor);
+      setField(FIELD_DEFS[3], data.redColor || DEFAULTS.redColor);
+      setField(FIELD_DEFS[4], data.bgColor || DEFAULTS.bgColor);
+      // Se o dono nunca customizou a secundária à mão (não é exatamente a
+      // derivada da principal salva), assume "automática" — melhor
+      // suposição possível sem guardar um booleano à parte no banco.
+      const expectedDim = deriveDim(currentAccentColor());
+      const savedDim = data.accentColorDim || null;
+      const isAuto = !savedDim || savedDim.toLowerCase() === expectedDim.toLowerCase();
+      autoDimCheck.checked = isAuto;
+      colorDimPicker.disabled = isAuto;
+      colorDimHex.disabled = isAuto;
+      dimRow.style.opacity = isAuto ? '.5' : '1';
+      setField(FIELD_DEFS[1], savedDim || expectedDim);
+      syncPaletteCache({
+        color: data.accentColor || null,
+        colorDim: data.accentColorDim || null,
+        green: data.greenColor || null,
+        red: data.redColor || null,
+        bg: data.bgColor || null,
+      });
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    const patch = {
+      accentColor: colorHex.value.trim(),
+      accentColorDim: colorDimHex.value.trim(),
+      greenColor: greenHex.value.trim(),
+      redColor: redHex.value.trim(),
+      bgColor: bgHex.value.trim(),
+    };
+    for (const [field, value] of Object.entries(patch)) {
+      if (!/^#[0-9a-f]{6}$/i.test(value)) {
+        if (window.showToast) window.showToast('Cor inválida em "' + field + '" — use um código hex, ex: #d8ab4f.', 'error');
+        return;
+      }
+    }
+    saveBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao salvar');
+      syncPaletteCache({ color: patch.accentColor, colorDim: patch.accentColorDim, green: patch.greenColor, red: patch.redColor, bg: patch.bgColor });
+      if (window.showToast) window.showToast('Paleta salva — já vale em todas as telas.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  resetBtn.addEventListener('click', async () => {
+    resetBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accentColor: null, accentColorDim: null, greenColor: null, redColor: null, bgColor: null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao restaurar');
+      setField(FIELD_DEFS[0], DEFAULTS.accentColor);
+      setField(FIELD_DEFS[1], DEFAULTS.accentColorDim);
+      setField(FIELD_DEFS[2], DEFAULTS.greenColor);
+      setField(FIELD_DEFS[3], DEFAULTS.redColor);
+      setField(FIELD_DEFS[4], DEFAULTS.bgColor);
+      autoDimCheck.checked = true;
+      colorDimPicker.disabled = true;
+      colorDimHex.disabled = true;
+      dimRow.style.opacity = '.5';
+      syncPaletteCache({ color: null, colorDim: null, green: null, red: null, bg: null });
+      if (window.showToast) window.showToast('Paleta padrão restaurada.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      resetBtn.disabled = false;
+    }
+  });
+
+  const genTokenBtn = document.getElementById('genTokenBtn');
+  const copyTokenBtn = document.getElementById('copyTokenBtn');
+  const tokenResult = document.getElementById('tokenResult');
+  const tokenValue = document.getElementById('tokenValue');
+  const tokenExpiry = document.getElementById('tokenExpiry');
+
+  genTokenBtn.addEventListener('click', async () => {
+    genTokenBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/settings/api-token`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar token');
+      tokenValue.value = data.token;
+      tokenExpiry.textContent = new Date(data.expiresAt).toLocaleDateString('pt-BR');
+      tokenResult.style.display = '';
+      if (window.showToast) window.showToast('Token gerado — copie agora.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      genTokenBtn.disabled = false;
+    }
+  });
+
+  copyTokenBtn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(tokenValue.value);
+      if (window.showToast) window.showToast('Copiado.', 'success');
+    } catch {
+      tokenValue.select();
+      if (window.showToast) window.showToast('Selecionado — copie com Ctrl+C.', 'success');
+    }
+  });
+
+  async function init() {
+    try {
+      await resolveOwner();
+      await load();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
