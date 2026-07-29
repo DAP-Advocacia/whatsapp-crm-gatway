@@ -1,4 +1,4 @@
-FROM node:20-bookworm-slim
+FROM node:22-bookworm-slim
 
 # ffmpeg-static baixa um binário no postinstall e o código o referencia por
 # caminho absoluto (src/audioConvert.js), então não precisamos do ffmpeg do
