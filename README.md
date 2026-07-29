@@ -230,6 +230,11 @@ Caddy, Cloudflare Tunnel) com domínio fixo. Garanta que `/api/whatsapp/stream`
 (WebSocket) também passe pelo proxy — em nginx isso exige os headers
 `Upgrade`/`Connection` configurados no `location`.
 
+> 📦 **A produção atual já está montada** — VPS Hostinger + EasyPanel (Traefik),
+> em `https://whatsapp.bmdholding.com.br`. Não há nginx: o Traefik encaminha o
+> WebSocket sem configuração extra. Deploy, variáveis de ambiente, persistência
+> da sessão do WhatsApp e diagnóstico estão em **[DEPLOY.md](DEPLOY.md)**.
+
 ---
 
 ## 6. Configuração no Bitrix24 (Aplicativo Local)
@@ -1377,13 +1382,11 @@ replicada manualmente em todas.
 - `ALLOWED_ORIGINS` deve conter o domínio real do portal Bitrix (não o placeholder de
   exemplo).
 - ~~O servidor rodava direto via `node src/server.js`, sem supervisor~~ —
-  **resolvido**: roda sob PM2 (`pm2 start src/server.js --name
-  whatsapp-gateway`), que reinicia sozinho numa falha fatal (`kill`/crash do
-  SO, exceção que escape do `process.on('uncaughtException')` em
-  `server.js`) — testado forçando a queda do processo direto pelo PID,
-  voltou ao ar em poucos segundos sem intervenção manual. `pm2 save` +
-  `pm2-windows-startup` registrados pra sobreviver a reinícios da máquina
-  (ver §20).
+  **resolvido**: em produção roda como serviço do EasyPanel (Docker Swarm), que
+  recria a task sozinho numa falha fatal e volta no boot da VPS. O histórico
+  com PM2 valia para o deploy anterior em máquina Windows; ver
+  [DEPLOY.md](DEPLOY.md) §4 para como reiniciar (`docker service update
+  --force`, **não** `docker restart`).
 - ~~O bucket `media` no Supabase Storage é público~~ — **resolvido**: o bucket é
   privado, mídia é servida via signed URL de curta duração por uma rota
   autenticada (`GET /media/:filename`, qualquer usuário deste portal — não
@@ -1396,7 +1399,23 @@ replicada manualmente em todas.
   em `src/db.js`, que só loga o erro (o pool cria conexão nova sozinho na
   próxima query).
 - `SUPABASE_SERVICE_ROLE_KEY` e as connection strings do Postgres dão acesso total
-  ao banco — nunca as exponha no frontend nem em repositórios públicos.
+  ao banco — nunca as exponha no frontend nem em repositórios públicos. Note que
+  `docker inspect` imprime **todas** as env vars em claro; ver
+  [DEPLOY.md](DEPLOY.md) §5 e §9.
+- ~~`POST /` logava o payload de instalação do Bitrix inteiro~~ — **resolvido**
+  (2026-07-29): `console.log('[debug] POST / body:', ...)` em `src/server.js`
+  despejava `AUTH_ID`, `REFRESH_ID` e `APPLICATION_TOKEN` no log do container,
+  legíveis por qualquer um com acesso à VPS via `docker logs`. Agora loga só
+  `event`, `PLACEMENT` e `member_id`. **O `REFRESH_ID` e o `APPLICATION_TOKEN`
+  não expiram sozinhos** — só reinstalar o app local no Bitrix os revoga.
+- **Retry agressivo em `403`** (`src/whatsapp.js`, branch `!loggedOut` do
+  `connection.update`): reconecta a cada 3s indefinidamente. Em jul/2026 uma
+  sessão ficou 41h em loop de `403 (forbidden)` — risco de ban do número.
+  Falta um backoff exponencial e tratamento específico para `403` (que costuma
+  significar rejeição daquela conexão, não instabilidade de rede).
+- **12 vulnerabilidades no `npm audit`** (1 low, 2 moderate, 9 high), em boa
+  parte arrastadas por dependências antigas do Baileys. Não rodar
+  `npm audit fix --force` sem testar — aplica breaking changes.
 - ~~`scheduled_campaigns` guarda mídia anexada como base64 direto na tabela~~ —
   **resolvido**: a mídia sobe pro Storage já na hora de agendar, só o caminho
   fica na tabela (`media_url`) — ver §13.
