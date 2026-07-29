@@ -90,7 +90,7 @@ function renderInstallPage() {
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><title>Instalando…</title></head>
 <body style="font-family:sans-serif;padding:24px;color:#222">
-  <p id="msg">Registrando a aba "WhatsApp" nos cards de Negócio…</p>
+  <p id="msg">Registrando a aba "DapZAP" nos cards de Negócio…</p>
   <script src="https://api.bitrix24.com/api/v1/"></script>
   <script>
     BX24.init(function () {
@@ -101,13 +101,13 @@ function renderInstallPage() {
         BX24.callMethod('placement.bind', {
           PLACEMENT: 'CRM_DEAL_DETAIL_TAB',
           HANDLER: location.origin + '/',
-          TITLE: 'WhatsApp'
+          TITLE: 'DapZAP'
         }, function (res) {
           if (res.error()) {
             el.textContent = 'Erro ao registrar a aba: ' + JSON.stringify(res.error());
             return;
           }
-          el.textContent = 'Aba registrada. Registrando o botão "Abrir WhatsApp"…';
+          el.textContent = 'Aba registrada. Registrando o botão "DapZAP"…';
 
           // Item "Abrir WhatsApp" no menu do botão superior do card — abre a
           // página-ponte /bridge, que resolve o telefone do contato do negócio
@@ -118,17 +118,17 @@ function renderInstallPage() {
             BX24.callMethod('placement.bind', {
               PLACEMENT: 'CRM_DEAL_DETAIL_TOOLBAR',
               HANDLER: location.origin + '/bridge',
-              TITLE: 'Abrir WhatsApp'
+              TITLE: 'DapZAP'
             }, function (res2) {
               if (res2.error()) {
                 // Não aborta a instalação: a aba (recurso principal) já está
                 // registrada; este placement pode não existir em toda
                 // edição/plano do Bitrix. Só informa e finaliza mesmo assim.
-                el.textContent = 'Aba registrada; botão "Abrir WhatsApp" indisponível neste portal (' + JSON.stringify(res2.error()) + '). Finalizando…';
+                el.textContent = 'Aba registrada; botão "DapZAP" indisponível neste portal (' + JSON.stringify(res2.error()) + '). Finalizando…';
                 BX24.installFinish();
                 return;
               }
-              el.textContent = 'Aba e botão "Abrir WhatsApp" registrados! Finalizando…';
+              el.textContent = 'Aba e botão "DapZAP" registrados! Finalizando…';
               BX24.installFinish();
             });
           });
@@ -163,7 +163,14 @@ app.post('/bridge', (req, res) => res.sendFile(path.join(__dirname, '../public/b
 // chegue via server-to-server (alguns fluxos de reinstalação).
 // ---------------------------------------------------------------
 app.post('/', async (req, res) => {
-  console.log('[debug] POST / body:', JSON.stringify(req.body));
+  // Só os campos não-sensíveis: o payload do Bitrix traz AUTH_ID/REFRESH_ID/
+  // APPLICATION_TOKEN, que dão acesso ao portal e não podem ir pro log (ele é
+  // lido por `docker logs`, que qualquer um com acesso à VPS consegue).
+  console.log('[bitrix] POST /', {
+    event: req.body?.event,
+    placement: req.body?.PLACEMENT,
+    member_id: req.body?.member_id,
+  });
 
   // Evento offline de instalação (server-to-server): só confirma.
   if (req.body?.event === 'ONAPPINSTALL') {
