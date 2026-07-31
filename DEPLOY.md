@@ -42,10 +42,18 @@ O build usa o `Dockerfile` da raiz do repositório. Configuração no painel:
 - **Build**: Dockerfile, arquivo `Dockerfile`
 - **Port**: `3333`
 
-> ⚠️ **O webhook de deploy automático não está funcionando.** Depois do `git push`
-> é preciso clicar em **Deploy** na UI. Investigar em `Settings → Github` (a
-> integração pode nunca ter sido estabelecida, já que o Source foi preenchido
-> manualmente). Verificar `last-modified` confirma qual build está no ar:
+> ✅ **Webhook de deploy automático resolvido em 31/07/2026.** A integração
+> Github↔EasyPanel (Settings → Github) de fato nunca chegou a ser
+> estabelecida (Source preenchido manualmente). Em vez de refazer aquele
+> fluxo, cadastramos direto um webhook no repositório do GitHub
+> (`Settings → Webhooks` no repo, evento `push`) apontando pra
+> **Deployment Trigger** que já existe na aba Deployments deste serviço
+> (`http://179.198.96.125:3000/api/deploy/<token>` — token visível/renovável
+> ali, botão "Refresh Deploy Token" se precisar invalidar o atual). Testado
+> com `pings` da API do GitHub, entrega `status: OK, 200`. `git push` agora
+> dispara o deploy sozinho, sem precisar clicar em nada no painel.
+>
+> Verificar `last-modified` confirma qual build está no ar:
 > ```bash
 > curl -sI https://whatsapp.bmdholding.com.br | grep -i last-modified
 > ```

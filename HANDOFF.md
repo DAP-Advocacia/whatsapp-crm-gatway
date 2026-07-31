@@ -3898,9 +3898,10 @@ partir do Node 22 — com Node 20 o processo morre no boot).
   (Traefik do EasyPanel).
 - [x] ~~Tirar o processo da máquina local pro mesmo VPS~~ — resolvido: PM2
   local parado, gateway roda só na VPS agora.
-- [ ] Webhook de deploy automático do EasyPanel não funciona — precisa
-  clicar "Deploy" manualmente no painel depois de cada `git push` (ver
-  `DEPLOY.md` §2). Investigar `Settings → Github` do serviço.
+- [x] ~~Webhook de deploy automático do EasyPanel não funciona~~ — resolvido
+  em 2026-07-31 cadastrando um webhook de `push` no repositório do GitHub
+  apontando pra Deployment Trigger do serviço (ver `DEPLOY.md` §2). `git
+  push` já dispara o deploy sozinho.
 - [ ] Porta 3000 (UI do EasyPanel) exposta a qualquer origem, e login `root`
   por senha ainda habilitado na VPS — levantado no próprio `DEPLOY.md` §9,
   não resolvido ainda.
@@ -3951,9 +3952,9 @@ virar uma notificação incompleta).
 - [ ] `shouldSyncHistoryMessage` não foi alterado — o Baileys por padrão já
   exclui o `HistorySyncType.FULL` (só aceita INITIAL_BOOTSTRAP/RECENT/etc.).
   Reavaliar se o volume default vier baixo demais.
-- [ ] Depende do deploy ser feito no EasyPanel — webhook automático ainda
-  não funciona (ver pendência da Parte CA), precisa do Caio clicar "Deploy"
-  manualmente depois do push.
+- [x] ~~Depende do deploy ser feito no EasyPanel — webhook automático ainda
+  não funciona~~ — resolvido logo depois, mesma sessão (ver pendência da
+  Parte CA): `git push` já dispara o deploy sozinho agora.
 
 ---
 
