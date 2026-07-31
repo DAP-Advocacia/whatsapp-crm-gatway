@@ -3849,6 +3849,68 @@ no banco novo.
   WhatsApp, mesmo comportamento de antes do corte); não foi acompanhado até
   o resultado final (reconectou ou pediu QR de novo) nesta sessão.
 
+### Parte CA — Migração pra VPS própria, saindo do ngrok (2026-07-27 a 2026-07-29)
+
+Pedido do usuário: eliminar o item bloqueante da Revisão de Prontidão (Parte
+BU) — sair do ngrok grátis e do processo local no Windows. Usuário já tinha
+contratado a VPS (Hostinger, `179.198.96.125`) e o domínio
+`whatsapp.bmdholding.com.br` (DNS já apontando pra ela).
+
+**Descoberta em cima da hora**: a VPS já vinha com **EasyPanel** pré-instalado
+(Docker Swarm + Traefik, provavelmente template da Hostinger), mas sem conta
+de admin utilizável no momento. Sem acesso ao painel, o deploy inicial foi
+feito **por fora dele**: imagem buildada e container rodado manualmente via
+`docker run` (rede `easypanel` compartilhada com o Traefik já existente,
+mais um arquivo novo de config dinâmica do Traefik apontando o domínio pro
+container) — documentado em detalhe no plano da sessão, não neste arquivo,
+já que o passo seguinte tornou boa parte disso obsoleto.
+
+**Passagem de bastão**: durante a mesma janela, o repositório do projeto
+migrou pra conta da empresa
+(`github.com/DAP-Advocacia/whatsapp-crm-gatway`, renomeado internamente pra
+**DapZAP**), e o Caio (TI) assumiu o deploy — obteve acesso ao EasyPanel e
+migrou o serviço do `docker run` manual pra um **serviço gerenciado pelo
+EasyPanel**, buildando direto do GitHub a cada push (com um ressalva: o
+webhook automático não funcionou, precisa clicar "Deploy" manualmente por
+enquanto). O container manual anterior foi preservado como
+`whatsapp-gateway-old` (parado, não apagado) em vez de rodar os dois ao
+mesmo tempo — cuidado necessário porque o Baileys é stateful e duas
+instâncias lendo a mesma sessão do WhatsApp corrompem as credenciais (o
+mesmo tipo de conflito que já tínhamos visto nos logs como `statusCode=403`
+em sessões anteriores).
+
+**A infraestrutura de produção agora é documentada no `DEPLOY.md`** (novo,
+na raiz do repo) — é a fonte de verdade pra qualquer dúvida operacional
+daqui pra frente (como reiniciar sem duplicar réplica no Swarm, onde ficam
+as env vars de produção, versão obrigatória do Node, gotchas de SSL/domínio,
+scripts de manutenção). Este HANDOFF.md continua sendo o histórico de
+decisões de produto; `DEPLOY.md` é o operacional da VPS.
+
+Também nessa mesma leva de commits do Caio: renomeação da aba/toolbar do
+Bitrix de "WhatsApp" pra **DapZAP**, correção de um vazamento de segredo
+real (`src/server.js` logava o `POST /` inteiro do Bitrix, incluindo
+`AUTH_ID`/`REFRESH_ID`/`APPLICATION_TOKEN` em claro), e Dockerfile fixado em
+Node 22 (`@supabase/realtime-js` exige `WebSocket` nativo, só existe a
+partir do Node 22 — com Node 20 o processo morre no boot).
+
+- [x] ~~Domínio fixo (sair do ngrok grátis)~~ — resolvido: `PUBLIC_URL` é
+  `https://whatsapp.bmdholding.com.br`, HTTPS automático via Let's Encrypt
+  (Traefik do EasyPanel).
+- [x] ~~Tirar o processo da máquina local pro mesmo VPS~~ — resolvido: PM2
+  local parado, gateway roda só na VPS agora.
+- [ ] Webhook de deploy automático do EasyPanel não funciona — precisa
+  clicar "Deploy" manualmente no painel depois de cada `git push` (ver
+  `DEPLOY.md` §2). Investigar `Settings → Github` do serviço.
+- [ ] Porta 3000 (UI do EasyPanel) exposta a qualquer origem, e login `root`
+  por senha ainda habilitado na VPS — levantado no próprio `DEPLOY.md` §9,
+  não resolvido ainda.
+- [ ] Credenciais antigas (env vars do container manual, salvas em
+  `/root/whatsapp-gateway-inspect.json` na VPS) ainda não foram rotacionadas
+  nem o container/imagem antigos (`whatsapp-gateway-old`,
+  `whatsapp-gateway:latest`) removidos — `DEPLOY.md` §11 já deixa o comando
+  pronto, só falta confirmar que o serviço novo está estável por mais tempo
+  antes de apagar a rede de segurança.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
@@ -3943,17 +4005,11 @@ Detalhes de arquitetura, rotas e mapa de arquivos: ver `README.md`.
   contra o Bitrix + checagem de posse em toda rota REST/WS, incluindo
   `/dashboard.html`/`/api/whatsapp/metrics` (exige usuário válido do portal,
   mesmo continuando agregado/sem filtro por dono).
-- [ ] **Domínio fixo (sair do ngrok grátis)** — deixou de ser só conveniência
-  (evitar reconfigurar o app a cada reinício do túnel) e virou item
-  **bloqueante pra produção em escala**, levantado na Revisão de Prontidão
-  de 2026-07-16 (ver Parte BU): ngrok grátis não tem compromisso de
-  disponibilidade nem banda pra ~400 instâncias simultâneas — precisa de
-  VPS próprio + domínio + HTTPS de verdade (Let's Encrypt) antes de passar
-  de ~30 usuários.
-- [ ] **Tirar o processo da máquina local pro mesmo VPS acima** (mesma
-  Revisão de Prontidão) — hoje é ponto único de falha numa máquina de uso
-  pessoal; migrar o PM2 já existente pra um servidor dedicado, sem mudar a
-  forma como ele é operado.
+- [x] ~~**Domínio fixo (sair do ngrok grátis)**~~ — resolvido na Parte CA
+  (2026-07-29): VPS própria + domínio + HTTPS automático (Let's Encrypt).
+- [x] ~~**Tirar o processo da máquina local pro mesmo VPS acima**~~ —
+  resolvido na Parte CA: gateway roda só na VPS, sob EasyPanel, ver
+  `DEPLOY.md`.
 - [ ] **Escalonar a reconexão em massa de muitas sessões no boot** — hoje
   o `SessionManager` tenta reconectar todas as sessões salvas de uma vez
   só ao reiniciar o processo; com poucas dezenas isso é inofensivo, mas em
