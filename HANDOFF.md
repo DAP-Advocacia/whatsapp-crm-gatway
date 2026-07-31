@@ -3979,6 +3979,17 @@ outras contagens bem menores em outras instâncias (35, 11, 10, 9, 3, 1),
 espalhadas por horas, foram deixadas intocadas por ambiguidade — não dá
 pra garantir que não tem notificação real de verdade misturada nessas.
 
+- [ ] **Duas instâncias deslogadas de verdade pelo WhatsApp**
+  (`..._153064` e `..._178810`, `statusCode=401 loggedOut=true`, precisam
+  reescanear QR em `/instances.html`) — efeito colateral provável de vários
+  redeploys em sequência num intervalo curto nesta sessão (testes manuais
+  do webhook + 3 pushes reais), cada um reconectando as ~44 instâncias de
+  uma vez. Não confirmado como causa raiz (WhatsApp não explica o motivo
+  do logout), só a correlação de horário. Reforça a pendência já registrada
+  antes (Revisão de Prontidão, item 03: escalonar reconexão em massa no
+  boot) — vale revisitar com prioridade maior agora que já aconteceu de
+  verdade, não só teórico. Avisar os donos desses dois números.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
