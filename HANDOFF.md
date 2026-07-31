@@ -3942,16 +3942,22 @@ legenda, já que mensagem antiga sem mídia ainda tem valor histórico
 (mensagem nova sem mídia continua sendo descartada, como sempre foi, pra não
 virar uma notificação incompleta).
 
-- [ ] **Não testado em produção ainda** — depende do próximo boot/reconexão
-  natural de cada instância (decisão consciente do usuário: testar primeiro
-  sem forçar reescaneio de QR de nenhum número). Falta confirmar quanto
-  histórico o WhatsApp realmente manda pra uma sessão já pareada há tempo
-  (pode ser bem menos que "tudo desde o início" — isso é decidido do lado do
-  WhatsApp, não do código) e, se vier pouco, decidir com o usuário se vale
-  forçar um re-pareamento numa instância de teste.
+- [x] ~~Não testado em produção ainda~~ — testado e confirmado funcionando
+  logo depois do deploy, mesma sessão: numa reconexão **normal** (sem forçar
+  reescaneio de QR de nenhum número), várias instâncias receberam
+  `messaging-history.set` de verdade. Destaque: a instância `..._5305`
+  recebeu **1.112 mensagens históricas reais** (datas de 2026-05-05 a
+  2026-07-30 — quase 3 meses de conversa que nunca tinham sido salvas),
+  todas persistidas certo no banco (total de mensagens saltou pra 6068).
+  Outras duas instâncias também receberam lotes (860 e 2392 mensagens no
+  evento, algumas descartadas pelos filtros normais de grupo/status). Uma
+  instância recebeu um lote de 5000 sem salvar nenhuma — provavelmente quase
+  só mensagem de grupo (filtro correto funcionando), não investigado a fundo
+  por não ser o caso comum.
 - [ ] `shouldSyncHistoryMessage` não foi alterado — o Baileys por padrão já
   exclui o `HistorySyncType.FULL` (só aceita INITIAL_BOOTSTRAP/RECENT/etc.).
-  Reavaliar se o volume default vier baixo demais.
+  Não foi necessário mudar isso pra já vir muito volume; reavaliar só se
+  algum caso específico vier claramente incompleto.
 - [x] ~~Depende do deploy ser feito no EasyPanel — webhook automático ainda
   não funciona~~ — resolvido logo depois, mesma sessão (ver pendência da
   Parte CA): `git push` já dispara o deploy sozinho agora.
