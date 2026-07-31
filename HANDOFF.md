@@ -3911,6 +3911,50 @@ partir do Node 22 — com Node 20 o processo morre no boot).
   pronto, só falta confirmar que o serviço novo está estável por mais tempo
   antes de apagar a rede de segurança.
 
+### Parte CB — Captura do histórico de conversas do WhatsApp (2026-07-31)
+
+Pedido do usuário: carregar o histórico de conversas de uma instância já
+pareada (mensagens que aconteceram antes ou fora deste app) pra dentro do
+Chat, não só o que passa em tempo real depois de conectado.
+
+**Diagnóstico**: o Baileys já pede histórico em toda conexão
+(`syncFullHistory: true`, default nunca sobrescrito) e entrega tudo pronto
+pra uso no evento `messaging-history.set` (`{ chats, contacts, messages,
+isLatest, syncType }`, já decodificado, sem protobuf cru) — só que **nada no
+código escutava esse evento**. O histórico chegava e era descartado
+silenciosamente desde sempre.
+
+**Correção** em `src/whatsapp.js`: a lógica de normalização de mensagem que
+só existia dentro do listener de `messages.upsert` (filtro de status/grupo/
+newsletter/reação, resolução de telefone via LID, download de mídia) foi
+extraída pro método `_processIncomingMessage(m, { isHistory })`, reusado
+pelos dois listeners agora. Novo listener de `messaging-history.set` roda
+cada mensagem por esse método e emite o mesmo `this.emit('message', ...)` de
+sempre — **nenhuma mudança** em `src/sessions.js`/`src/server.js`, o dedupe
+por `(conversation_id, wa_message_id)` que já existe em `store.addMessage`
+cobre sozinho mensagens que cheguem de novo depois em tempo real.
+
+Única diferença de comportamento entre os dois caminhos: mídia que falha ao
+baixar (link do CDN do WhatsApp expirado, comum em mensagem antiga) não
+descarta mais a mensagem inteira quando `isHistory: true` — mantém o texto/
+legenda, já que mensagem antiga sem mídia ainda tem valor histórico
+(mensagem nova sem mídia continua sendo descartada, como sempre foi, pra não
+virar uma notificação incompleta).
+
+- [ ] **Não testado em produção ainda** — depende do próximo boot/reconexão
+  natural de cada instância (decisão consciente do usuário: testar primeiro
+  sem forçar reescaneio de QR de nenhum número). Falta confirmar quanto
+  histórico o WhatsApp realmente manda pra uma sessão já pareada há tempo
+  (pode ser bem menos que "tudo desde o início" — isso é decidido do lado do
+  WhatsApp, não do código) e, se vier pouco, decidir com o usuário se vale
+  forçar um re-pareamento numa instância de teste.
+- [ ] `shouldSyncHistoryMessage` não foi alterado — o Baileys por padrão já
+  exclui o `HistorySyncType.FULL` (só aceita INITIAL_BOOTSTRAP/RECENT/etc.).
+  Reavaliar se o volume default vier baixo demais.
+- [ ] Depende do deploy ser feito no EasyPanel — webhook automático ainda
+  não funciona (ver pendência da Parte CA), precisa do Caio clicar "Deploy"
+  manualmente depois do push.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

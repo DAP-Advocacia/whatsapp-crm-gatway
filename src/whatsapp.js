@@ -137,105 +137,34 @@ class WhatsAppGateway extends EventEmitter {
       if (type !== 'notify') return;
 
       for (const m of messages) {
-        if (!m.message) continue;
-
-        // Status/Stories do WhatsApp (remoteJid "status@broadcast") — quando
-        // o número conectado consegue ver o Status de um contato, o Baileys
-        // entrega isso aqui igual a uma mensagem normal, com `participant`
-        // identificando quem postou. Sem esse descarte, o Status virava uma
-        // "mensagem" de verdade salva na conversa 1:1 daquele contato (uma
-        // foto/vídeo que a pessoa nunca mandou pra ninguém, só postou no
-        // Status dela). Descarta e segue, sem gravar nada.
-        if (isJidBroadcast(m.key.remoteJid)) continue;
-
-        // Mensagem de GRUPO (remoteJid termina em "@g.us") — decisão do
-        // usuário depois de ver que, mesmo isolando numa conversa própria e
-        // já arquivada (primeira tentativa de correção), o conteúdo do
-        // grupo continuava fisicamente salvo no banco (visível direto pelo
-        // Table Editor do Supabase) — o que ele não quer de jeito nenhum.
-        // Descarta por completo, mesmo tratamento do Status acima. Efeito
-        // colateral aceito: a funcionalidade de "criar grupo" (ver
-        // createGroup()) continua criando/enviando pro grupo normalmente,
-        // só que respostas de quem está no grupo não aparecem em lugar
-        // nenhum do CRM — só a mensagem enviada pela própria empresa (que
-        // segue outro caminho, sendMessage/sendMedia, não passa por aqui).
-        if ((m.key.remoteJid || '').endsWith('@g.us')) continue;
-
-        // Canal do WhatsApp (remoteJid termina em "@newsletter") — posts de
-        // canais seguidos (ex: ESPN Brasil, Netflix Brasil) chegam pelo mesmo
-        // evento messages.upsert, igual Status e grupo. Não é conversa com
-        // cliente nenhum, então descarta por completo também.
-        if (isJidNewsletter(m.key.remoteJid)) continue;
-
-        // Reação (emoji) a uma mensagem existente — não é uma mensagem nova,
-        // é um "ponteiro" pra mensagem original (reactionMessage.key.id).
-        // `text` vazio significa que a reação foi removida.
-        if (m.message.reactionMessage) {
-          const r = m.message.reactionMessage;
-          if (!r.key?.id) continue;
-          const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
-          this.emit('reaction', {
-            phone: this._jidToPhone(phoneSource),
-            targetId: r.key.id,
-            emoji: r.text || null,
-            direction: m.key.fromMe ? 'out' : 'in',
-          });
-          continue;
-        }
-
-        // Não filtramos fromMe aqui: mensagens enviadas pelo próprio usuário direto
-        // do celular (fora do widget) também chegam como fromMe:true, e precisam
-        // ser salvas. As que já foram enviadas via sendMessage()/sendMedia() também
-        // passam por aqui (o WhatsApp ecoa a própria mensagem enviada) — o dedupe
-        // por id em store.addMessage evita salvar/mostrar elas duas vezes.
-
-        // O WhatsApp novo entrega o remetente/destinatário como "<id>@lid" (sistema LID).
-        // Nesta versão do Baileys, o telefone real vem em key.participantAlt
-        // (mensagem de grupo) ou key.remoteJidAlt (conversa direta) — os campos
-        // key.senderPn/participantPn documentados não existem nesta versão.
-        // Mensagem de grupo já foi descartada acima, então participant* aqui
-        // só apareceria num caso estranho (não deveria acontecer na prática).
-        const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
-        const phone = this._jidToPhone(phoneSource);
-
-        const media = this._extractMediaInfo(m.message);
-        let text = media ? media.caption : this._extractText(m.message);
-        let mediaUrl = null;
-        let mimetype = null;
-
-        if (media) {
-          try {
-            const buffer = await downloadMediaMessage(m, 'buffer', {});
-            mediaUrl = await saveMedia(m.key.id, buffer, media.mimetype);
-            mimetype = media.mimetype;
-          } catch (err) {
-            console.error('[whatsapp] falha ao baixar mídia recebida:', err.message);
-            continue;
-          }
-        }
-
-        if (!media && !text) continue;
-
-        this.emit('message', {
-          phone,
-          // Nome que o próprio contato definiu no WhatsApp dele — só vem em
-          // mensagens recebidas (m.key.fromMe === false); usado pra já
-          // preencher o nome do contato na interface sem cadastro manual.
-          pushName: m.key.fromMe ? null : m.pushName || null,
-          message: {
-            id: m.key.id,
-            type: media ? media.type : 'text',
-            text,
-            mediaUrl,
-            mimetype,
-            direction: m.key.fromMe ? 'out' : 'in',
-            status: m.key.fromMe ? 'sent' : 'delivered',
-            createdAt: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-            replyToId: this._extractReplyToId(m.message),
-            fileName: media?.fileName || null,
-          },
-        });
+        const payload = await this._processIncomingMessage(m);
+        if (payload) this.emit('message', payload);
       }
+    });
+
+    // Histórico de conversas que o próprio WhatsApp manda pro dispositivo —
+    // Baileys já pede isso em toda conexão (syncFullHistory: true é o
+    // default, nunca sobrescrito aqui) e entrega tudo já decodificado neste
+    // evento, mas até agora nada escutava e o histórico era descartado.
+    // Reusa o mesmo `_processIncomingMessage` do caminho de mensagem nova
+    // (mesmos filtros de status/grupo/newsletter/reação, mesma resolução de
+    // telefone) — o dedupe por (conversation_id, wa_message_id) em
+    // store.addMessage cobre sozinho o caso de a mesma mensagem chegar de
+    // novo depois por messages.upsert.
+    this.sock.ev.on('messaging-history.set', async ({ messages, syncType, isLatest }) => {
+      if (!messages?.length) return;
+
+      let saved = 0;
+      for (const m of messages) {
+        const payload = await this._processIncomingMessage(m, { isHistory: true });
+        if (payload) {
+          this.emit('message', payload);
+          saved++;
+        }
+      }
+      console.log(
+        `[whatsapp] histórico recebido: ${saved}/${messages.length} mensagens processadas (syncType=${syncType}, isLatest=${isLatest})`
+      );
     });
 
     // Confirmações de entrega/leitura de mensagens que NÓS enviamos (é isso
@@ -551,6 +480,124 @@ class WhatsAppGateway extends EventEmitter {
       console.error('[whatsapp] falha ao resolver LID->telefone:', err.message);
     }
     return this._jidToPhone(jid);
+  }
+
+  // Normaliza UMA mensagem crua do Baileys pro formato que o resto da
+  // aplicação consome (mesmo payload de `this.emit('message', ...)`) —
+  // usado tanto por `messages.upsert` (mensagem em tempo real) quanto por
+  // `messaging-history.set` (histórico). Devolve `null` quando a mensagem
+  // deve ser descartada (status, grupo, newsletter, reação, sem conteúdo).
+  //
+  // `isHistory: true` muda só o tratamento de falha ao baixar mídia: mensagem
+  // nova sem mídia seria uma notificação incompleta (descarta, como sempre
+  // foi), mas mensagem antiga sem mídia (link do CDN do WhatsApp expirado,
+  // comum em histórico) ainda tem valor — mantém o texto/legenda em vez de
+  // jogar a mensagem toda fora.
+  async _processIncomingMessage(m, { isHistory = false } = {}) {
+    if (!m.message) return null;
+
+    // Status/Stories do WhatsApp (remoteJid "status@broadcast") — quando
+    // o número conectado consegue ver o Status de um contato, o Baileys
+    // entrega isso aqui igual a uma mensagem normal, com `participant`
+    // identificando quem postou. Sem esse descarte, o Status virava uma
+    // "mensagem" de verdade salva na conversa 1:1 daquele contato (uma
+    // foto/vídeo que a pessoa nunca mandou pra ninguém, só postou no
+    // Status dela). Descarta e segue, sem gravar nada.
+    if (isJidBroadcast(m.key.remoteJid)) return null;
+
+    // Mensagem de GRUPO (remoteJid termina em "@g.us") — decisão do
+    // usuário depois de ver que, mesmo isolando numa conversa própria e
+    // já arquivada (primeira tentativa de correção), o conteúdo do
+    // grupo continuava fisicamente salvo no banco (visível direto pelo
+    // Table Editor do Supabase) — o que ele não quer de jeito nenhum.
+    // Descarta por completo, mesmo tratamento do Status acima. Efeito
+    // colateral aceito: a funcionalidade de "criar grupo" (ver
+    // createGroup()) continua criando/enviando pro grupo normalmente,
+    // só que respostas de quem está no grupo não aparecem em lugar
+    // nenhum do CRM — só a mensagem enviada pela própria empresa (que
+    // segue outro caminho, sendMessage/sendMedia, não passa por aqui).
+    if ((m.key.remoteJid || '').endsWith('@g.us')) return null;
+
+    // Canal do WhatsApp (remoteJid termina em "@newsletter") — posts de
+    // canais seguidos (ex: ESPN Brasil, Netflix Brasil) chegam pelo mesmo
+    // evento messages.upsert, igual Status e grupo. Não é conversa com
+    // cliente nenhum, então descarta por completo também.
+    if (isJidNewsletter(m.key.remoteJid)) return null;
+
+    // Reação (emoji) a uma mensagem existente — não é uma mensagem nova,
+    // é um "ponteiro" pra mensagem original (reactionMessage.key.id).
+    // `text` vazio significa que a reação foi removida.
+    if (m.message.reactionMessage) {
+      const r = m.message.reactionMessage;
+      if (!r.key?.id) return null;
+      const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
+      this.emit('reaction', {
+        phone: this._jidToPhone(phoneSource),
+        targetId: r.key.id,
+        emoji: r.text || null,
+        direction: m.key.fromMe ? 'out' : 'in',
+      });
+      return null;
+    }
+
+    // Não filtramos fromMe aqui: mensagens enviadas pelo próprio usuário direto
+    // do celular (fora do widget) também chegam como fromMe:true, e precisam
+    // ser salvas. As que já foram enviadas via sendMessage()/sendMedia() também
+    // passam por aqui (o WhatsApp ecoa a própria mensagem enviada) — o dedupe
+    // por id em store.addMessage evita salvar/mostrar elas duas vezes.
+
+    // O WhatsApp novo entrega o remetente/destinatário como "<id>@lid" (sistema LID).
+    // Nesta versão do Baileys, o telefone real vem em key.participantAlt
+    // (mensagem de grupo) ou key.remoteJidAlt (conversa direta) — os campos
+    // key.senderPn/participantPn documentados não existem nesta versão.
+    // Mensagem de grupo já foi descartada acima, então participant* aqui
+    // só apareceria num caso estranho (não deveria acontecer na prática).
+    const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
+    const phone = this._jidToPhone(phoneSource);
+
+    const media = this._extractMediaInfo(m.message);
+    const text = media ? media.caption : this._extractText(m.message);
+    let mediaUrl = null;
+    let mimetype = null;
+
+    if (media) {
+      try {
+        const buffer = await downloadMediaMessage(m, 'buffer', {});
+        mediaUrl = await saveMedia(m.key.id, buffer, media.mimetype);
+        mimetype = media.mimetype;
+      } catch (err) {
+        if (!isHistory) {
+          console.error('[whatsapp] falha ao baixar mídia recebida:', err.message);
+          return null;
+        }
+        console.warn(
+          '[whatsapp] mídia histórica indisponível (link do WhatsApp provavelmente expirado), salvando só o texto/legenda:',
+          err.message
+        );
+      }
+    }
+
+    if (!mediaUrl && !text) return null;
+
+    return {
+      phone,
+      // Nome que o próprio contato definiu no WhatsApp dele — só vem em
+      // mensagens recebidas (m.key.fromMe === false); usado pra já
+      // preencher o nome do contato na interface sem cadastro manual.
+      pushName: m.key.fromMe ? null : m.pushName || null,
+      message: {
+        id: m.key.id,
+        type: mediaUrl ? media.type : 'text',
+        text,
+        mediaUrl,
+        mimetype: mediaUrl ? mimetype : null,
+        direction: m.key.fromMe ? 'out' : 'in',
+        status: m.key.fromMe ? 'sent' : 'delivered',
+        createdAt: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
+        replyToId: this._extractReplyToId(m.message),
+        fileName: media?.fileName || null,
+      },
+    };
   }
 
   _extractText(message) {
