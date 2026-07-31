@@ -397,6 +397,9 @@
   .conv-item-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
   .conv-item-name{ font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .conv-item-top-right{ display:flex; align-items:center; gap:4px; flex-shrink:0; }
+  /* Indicador de notificação(ões) não lida(s) — some ao abrir a conversa
+     (POST /conversations/mark-read, ver openConversation). */
+  .conv-item-unread-dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); flex-shrink:0; }
   .conv-item-time{ font-size:10.5px; color:var(--text-faint); flex-shrink:0; }
   .conv-item-snippet{ font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
   .conv-item-tags{ display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
@@ -1942,6 +1945,7 @@
             <div class="conv-item-top">
               <span class="conv-item-name">${escapeHtml(name)}</span>
               <span class="conv-item-top-right">
+                ${c.unreadCount > 0 ? `<span class="conv-item-unread-dot" title="${c.unreadCount} notificação(ões) não lida(s)"></span>` : ''}
                 <span class="conv-item-time">${formatListTime(c.lastAt)}</span>
                 <button class="conv-item-action-btn ${muted ? 'muted' : ''}" data-mute-toggle title="${muted ? 'Ativar notificações' : 'Silenciar notificações'}" type="button">
                   ${muted
@@ -2213,6 +2217,29 @@
     if (!state.active.avatarUrl) fetchAvatarFor(conv.sessionId, conv.phone);
     fetchStatus();
     loadContactPanel();
+    markConversationRead(conv);
+  }
+
+  // Marca como lidas as notificações desta conversa (indicador na lista e
+  // contagem do sininho da sidebar) — chamado ao abrir a conversa, não
+  // precisa passar pela Central de Notificações pra sumir o indicador.
+  function markConversationRead(conv) {
+    if (!conv.unreadCount) return;
+    const justRead = conv.unreadCount;
+    conv.unreadCount = 0;
+    renderConvList();
+    apiFetch(`${API_BASE}/conversations/mark-read`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: conv.sessionId, phone: conv.phone }),
+    })
+      .then((res) => { if (!res.ok) throw new Error('falha ao marcar como lida'); })
+      .then(() => {
+        if (!window.updateNotifBadge || !notifDot) return;
+        const current = Number(notifDot.textContent) || 0;
+        window.updateNotifBadge(Math.max(0, current - justRead));
+      })
+      .catch((err) => console.error('Erro ao marcar conversa como lida:', err));
   }
 
   function closeConversation() {

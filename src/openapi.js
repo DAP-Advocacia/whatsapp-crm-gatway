@@ -156,6 +156,14 @@ module.exports = {
         responses: { 200: jsonResponse('ok') },
       },
     },
+    '/api/whatsapp/conversations/mark-read': {
+      post: {
+        tags: ['WhatsApp — chat e conversas'],
+        summary: 'Marca como lidas as notificações desta conversa',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['session', 'phone'], properties: { session: { type: 'string' }, phone: { type: 'string' } } } } } },
+        responses: { 200: jsonResponse('ok') },
+      },
+    },
     '/api/whatsapp/conversations/notifications': {
       post: {
         tags: ['WhatsApp — chat e conversas'],

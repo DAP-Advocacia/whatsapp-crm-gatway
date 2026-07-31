@@ -723,6 +723,26 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // (some da principal, aparece em "Arquivadas"); não muda nada no envio ou
   // recebimento. Mensagem nova numa conversa arquivada não desarquiva sozinha.
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // POST /conversations/mark-read  { session, phone }
+  // Marca como lidas todas as notificações desta conversa — chamado ao
+  // abrir a conversa no Chat (ver public/chat.html openConversation), pra
+  // sumir o indicador de não lida na lista sem precisar ir na Central de
+  // Notificações. Não afeta o status das mensagens em si (✓✓), só a
+  // notificação.
+  // ---------------------------------------------------------------
+  router.post('/conversations/mark-read', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    try {
+      await store.markNotificationsReadForConversation(session, phone);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[conversations:mark-read] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   router.post('/conversations/archive', requireSession((req) => req.body?.session), async (req, res) => {
     const { session, phone, archived } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });

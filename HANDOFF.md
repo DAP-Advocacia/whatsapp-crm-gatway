@@ -3990,6 +3990,39 @@ pra garantir que não tem notificação real de verdade misturada nessas.
   boot) — vale revisitar com prioridade maior agora que já aconteceu de
   verdade, não só teórico. Avisar os donos desses dois números.
 
+### Parte CC — Indicador de não lida no Chat, ligado à Central de Notificações (2026-07-31)
+
+Pedido do usuário: mensagem de notificação deve aparecer só na Central de
+Notificações (não "no Chat" — era o bug da Parte CB, já corrigido), e
+quando uma notificação for lida, isso deveria refletir de alguma forma no
+Chat. Investigado: o Chat não tinha **nenhum** indicador de lida/não lida
+por conversa antes disso — só o sininho da sidebar com a contagem total.
+
+**Decisão de design** (confirmada com o usuário): marca visual na lista de
+conversas (bolinha, não um filtro/dropdown separado), e marcar como lida
+**automaticamente** ao abrir a conversa no Chat (sem precisar ir na Central
+de Notificações).
+
+- `src/store.js`: `listConversations` ganhou `unreadCount` por conversa
+  (lateral join contando `notifications` com `read = false` e
+  `target->>'sessionId'/'phone'` casando com a conversa). Nova
+  `markNotificationsReadForConversation(sessionId, phone)`.
+- `src/routes/whatsapp.js`: `POST /conversations/mark-read { session, phone }`
+  — mesmo padrão de `/conversations/archive`. Documentado no
+  `src/openapi.js`.
+- `public/chat.html`: bolinha dourada (`.conv-item-unread-dot`) na lista
+  quando `unreadCount > 0`; `openConversation` chama
+  `markConversationRead`, que zera o contador local (otimista, sem esperar
+  resposta), chama a rota nova, e decrementa o sininho da sidebar
+  (`window.updateNotifBadge`).
+
+- [ ] Não valida visualmente dentro do Bitrix ainda — só leitura de código
+  e revisão desta sessão, sem servidor local pra testar com notificação
+  real chegando.
+- [ ] Não existe filtro/dropdown separado pra "só não lidas" — decisão
+  consciente do usuário (só queria a marca visual por agora); revisitar se
+  pedir depois.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

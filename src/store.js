@@ -293,6 +293,19 @@ async function markAllNotificationsRead(ownerId) {
   await pool.query(`update notifications set read = true where owner_id = $1 and read = false`, [ownerId]);
 }
 
+// Marca como lidas todas as notificações de UMA conversa (sessionId+phone) —
+// chamado ao abrir a conversa no Chat (ver POST /conversations/mark-read),
+// pra sumir o indicador de não lida na lista sem precisar ir na Central de
+// Notificações. Mesmo casamento por target->>'sessionId'/'phone' usado em
+// listConversations (unreadCount).
+async function markNotificationsReadForConversation(sessionId, phone) {
+  await pool.query(
+    `update notifications set read = true
+     where read = false and target->>'sessionId' = $1 and target->>'phone' = $2`,
+    [sessionId, phone]
+  );
+}
+
 // Devolve tudo (todas as sessões/conversas/mensagens), no mesmo formato que o
 // antigo JSON tinha: { [sessionId]: { [phone]: { dealId, messages: [] } } }.
 // Usado só pelo dashboard de métricas (src/metrics.js) — mantém o formato
@@ -362,7 +375,8 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        lm.type as "lastType",
        lm.direction as "lastDirection",
        coalesce(lm.created_at, c.updated_at) as "lastAt",
-       coalesce(tg.tags, '[]'::json) as tags
+       coalesce(tg.tags, '[]'::json) as tags,
+       coalesce(un.count, 0)::int as "unreadCount"
      from conversations c
      left join instances i on i.id = c.session_id
      left join contacts ct on ct.owner_id = coalesce(i.owner_id, c.session_id) and ct.phone = c.phone
@@ -379,6 +393,13 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        join tags t on t.id = ctag.tag_id
        where ctag.conversation_id = c.id
      ) tg on true
+     left join lateral (
+       select count(*)::int as count
+       from notifications n
+       where n.read = false
+         and n.target->>'sessionId' = c.session_id
+         and n.target->>'phone' = c.phone
+     ) un on true
      where c.session_id = any($1::text[]) and c.archived = $2
      ${searchClause}
      order by "lastAt" desc
@@ -519,6 +540,7 @@ module.exports = {
   getNotificationOwner,
   markNotificationRead,
   markAllNotificationsRead,
+  markNotificationsReadForConversation,
   getAll,
   listConversations,
   listTags,
