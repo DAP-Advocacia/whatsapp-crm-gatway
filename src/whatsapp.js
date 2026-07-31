@@ -585,6 +585,11 @@ class WhatsAppGateway extends EventEmitter {
       // mensagens recebidas (m.key.fromMe === false); usado pra já
       // preencher o nome do contato na interface sem cadastro manual.
       pushName: m.key.fromMe ? null : m.pushName || null,
+      // true pra mensagem que veio de messaging-history.set (backfill) —
+      // usado por quem consome o evento 'message' pra decidir se dispara
+      // notificação/broadcast/timeline (mensagem histórica não deveria,
+      // ver src/server.js onMessage).
+      isHistory,
       message: {
         id: m.key.id,
         type: mediaUrl ? media.type : 'text',

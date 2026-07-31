@@ -3962,6 +3962,23 @@ virar uma notificação incompleta).
   não funciona~~ — resolvido logo depois, mesma sessão (ver pendência da
   Parte CA): `git push` já dispara o deploy sozinho agora.
 
+**Bug encontrado e corrigido na mesma sessão**: mensagem de histórico
+importada disparava os mesmos efeitos colaterais de mensagem nova de
+verdade — broadcast em tempo real por WebSocket (parecia mensagem chegando
+agora pra quem tivesse o Chat aberto), log retroativo na timeline do
+Bitrix, e uma notificação por mensagem. Na prática: a instância `..._5305`
+sozinha gerou **2325 notificações falsas em 2min45s**. Corrigido
+propagando uma flag `isHistory` desde `_processIncomingMessage`
+(`src/whatsapp.js`) por `SessionManager.onMessage` (`src/sessions.js`) até
+`onMessage` em `src/server.js`, que agora retorna antes do
+broadcast/timeline/notificação quando `isHistory` é `true` — mensagem
+histórica continua sendo salva no banco (esse é o objetivo), só não gera
+mais esses efeitos colaterais. As 2325 notificações falsas já criadas
+foram apagadas do banco (janela de horário inequívoca, volume anômalo);
+outras contagens bem menores em outras instâncias (35, 11, 10, 9, 3, 1),
+espalhadas por horas, foram deixadas intocadas por ambiguidade — não dá
+pra garantir que não tem notificação real de verdade misturada nessas.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

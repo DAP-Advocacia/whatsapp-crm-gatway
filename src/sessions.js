@@ -19,7 +19,7 @@ class SessionManager {
   constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
-    this.onMessage = onMessage; // (sessionId, phone, message, pushName) => void
+    this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageStatus = onMessageStatus; // (sessionId, phone, messageId, status) => void
     this.onPresence = onPresence; // (sessionId, phone, state) => void
@@ -48,7 +48,7 @@ class SessionManager {
       authFolder: path.join(this.baseFolder, id),
     });
     gateway.on('status', (status) => this.onStatus(id, status));
-    gateway.on('message', ({ phone, message, pushName }) => this.onMessage(id, phone, message, pushName));
+    gateway.on('message', ({ phone, message, pushName, isHistory }) => this.onMessage(id, phone, message, pushName, isHistory));
     gateway.on('reaction', ({ phone, targetId, emoji, direction }) => this.onReaction?.(id, phone, targetId, emoji, direction));
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));

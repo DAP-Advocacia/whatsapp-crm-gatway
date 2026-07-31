@@ -290,11 +290,22 @@ const sessions = new SessionManager({
     console.log(`[whatsapp:${sessionId}] status:`, status);
     broadcastStatus(sessionId, status);
   },
-  onMessage: async (sessionId, phone, message, pushName) => {
+  onMessage: async (sessionId, phone, message, pushName, isHistory) => {
     try {
       const dealId = await store.getDealForPhone(sessionId, phone);
       const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName);
       if (!isNew) return; // já tínhamos essa mensagem (ex: eco da que nós mesmos enviamos)
+
+      // Mensagem de histórico (backfill via messaging-history.set, ver
+      // src/whatsapp.js) só precisa ser SALVA — ela já aconteceu há tempo,
+      // então não é uma "mensagem nova" de verdade. Sem este corte, um
+      // import de histórico (centenas/milhares de mensagens de uma vez)
+      // dispara broadcast em tempo real (parece mensagem chegando agora na
+      // tela de quem estiver com o Chat aberto), loga na timeline do
+      // Bitrix retroativamente e cria uma notificação por mensagem — já
+      // aconteceu isso na prática: uma instância só gerou 2325 notificações
+      // falsas num import de histórico antes desta correção.
+      if (isHistory) return;
 
       broadcast(sessionId, phone, { type: 'message', message });
 
