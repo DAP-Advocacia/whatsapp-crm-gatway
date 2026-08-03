@@ -363,6 +363,8 @@
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 22px; width: 100%; max-width: 340px; text-align: center;
   }
+  #delegatesModal .modal{ max-width: 460px; text-align: left; }
+  #delegatesModal .modal h3{ text-align: center; }
   .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
   .modal input[type="text"]{
     width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
@@ -1100,11 +1102,21 @@
   let delegateSearchTimer = null;
   let delegateCandidate = null; // { bitrixUserId, name, position, email, photo } escolhido na etapa 1
 
+  // O Bitrix ajusta a altura do iframe (BX24.fitWindow) só com base no
+  // conteúdo da página no momento em que o SDK inicializa — como este modal
+  // é bem mais alto que o resto da tela, sem chamar fitWindow() de novo ele
+  // abre "fora" da área que o iframe reservou (o CSS centraliza certo, só
+  // que dentro de uma altura que o Bitrix nunca deixou visível).
+  function refitWindow() {
+    if (window.BX24 && typeof BX24.fitWindow === 'function') BX24.fitWindow();
+  }
+
   function goToDelegateStep(step) {
     delegatesModal.querySelectorAll('.modal-step-panel').forEach((p) => { p.hidden = p.dataset.panel !== step; });
     delegatesModal.querySelectorAll('.modal-step').forEach((s) => {
       s.classList.toggle('active', s.dataset.step === step);
     });
+    setTimeout(refitWindow, 0);
   }
 
   // Busca por usuário do Bitrix pelo nome — resolvido direto no navegador
@@ -1127,9 +1139,11 @@
     delegateCandidate = null;
     goToDelegateStep('search');
     delegatesModal.classList.add('open');
+    refitWindow();
     await loadDelegatesList(instanceId);
+    refitWindow();
   }
-  function closeDelegatesModal() { delegatesModal.classList.remove('open'); }
+  function closeDelegatesModal() { delegatesModal.classList.remove('open'); refitWindow(); }
   document.getElementById('delegatesClose').addEventListener('click', closeDelegatesModal);
   document.getElementById('delegateDoneClose').addEventListener('click', closeDelegatesModal);
   document.getElementById('delegateConfirmBack').addEventListener('click', () => goToDelegateStep('search'));
@@ -1214,6 +1228,8 @@
         });
       } catch (err) {
         delegateSearchResults.innerHTML = `<p class="empty">Falha na busca: ${escapeHtml(err.message)}</p>`;
+      } finally {
+        refitWindow();
       }
     }, 350);
   });
