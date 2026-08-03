@@ -4084,6 +4084,11 @@ seletor de instância pra quem é delegado.
   sessão, só ficou mais visível agora que instância delegada aparece na
   mesma tela; mitigado escondendo os botões pra quem é delegado
   (`instances.html`), não corrigido na origem.
+- [x] ~~Bug: `listAccessible` (`src/instances.js`) quebrava com "column
+  created_at does not exist"~~ — corrigido antes do usuário chegar a testar:
+  `UNION` exige `ORDER BY` pelo nome de saída da coluna (`"createdAt"`), não
+  pelo nome original (`created_at`). Encontrado testando a query direto
+  contra produção logo depois do deploy, não por relato do usuário.
 
 ---
 
