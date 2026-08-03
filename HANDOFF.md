@@ -4089,6 +4089,39 @@ seletor de instância pra quem é delegado.
   `UNION` exige `ORDER BY` pelo nome de saída da coluna (`"createdAt"`), não
   pelo nome original (`created_at`). Encontrado testando a query direto
   contra produção logo depois do deploy, não por relato do usuário.
+- [x] ~~Modal de "Compartilhar acesso" aparecia pequeno e fora da área
+  visível do iframe do Bitrix~~ — corrigido: `BX24.fitWindow()` só ajusta a
+  altura do iframe uma vez, no carregamento da página; um modal mais alto
+  que o resto do conteúdo abria centralizado numa região que o iframe nunca
+  tinha deixado visível. Chama `fitWindow()` de novo ao abrir o modal e a
+  cada troca de etapa; modal também ficou mais largo (460px).
+- [x] ~~Modal reorganizado em 3 etapas (Buscar → Confirmar pessoa →
+  Concluído)~~ — etapa de confirmação mostra foto/cargo/e-mail (o que
+  `user.search` devolver) antes de conceder o acesso de verdade.
+- [x] ~~Selecionar a si mesmo na busca não avisava nada de imediato~~ — o
+  backend já recusava (`addDelegate`, "não é possível delegar pra si
+  mesmo"), só que sem feedback visível na hora certa; agora bloqueia e
+  avisa já na seleção, antes de ir pra etapa de confirmar.
+- [ ] **Commit pendente, NÃO publicado de propósito**
+  (`704d65e — Bloqueia autodelegação na seleção + ajusta paleta`) — pausado
+  a pedido do usuário depois de descobrir que os vários deploys de hoje
+  (cada um reconecta as ~44 instâncias de uma vez) parecem estar
+  derrubando sessões reais de WhatsApp (ver item abaixo). Publicar na
+  próxima janela de baixo uso, não antes.
+
+**Achado importante nesta sessão — deploys reconectando instâncias em
+massa derrubando sessões reais**: usuário reportou instância `183168`
+("Principal", `5521965628397`) só mostrando conversas de hoje, nada
+antigo. Investigado: a pasta de sessão dela na VPS estava **vazia** (sem
+`creds.json`) — ou seja, ela não estava com problema de importar
+histórico, estava **desconectada de verdade**, precisando de QR novo. Uma
+contagem rápida achou **55 instâncias sem sessão ativa** no total (mistura
+de gente nova ainda não pareada com possíveis quedas de verdade — não dá
+pra separar as duas sem mais investigação). Reforça a pendência já
+registrada antes (Revisão de Prontidão, item 03: escalonar reconexão em
+massa no boot) — hoje já tem evidência concreta de dano, não só risco
+teórico. **Decisão**: pausar novos deploys por enquanto, só retomar numa
+janela de baixo uso.
 
 ---
 
