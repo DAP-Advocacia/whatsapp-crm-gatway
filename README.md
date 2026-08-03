@@ -893,6 +893,16 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
   o registro e as credenciais locais.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
+- **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
+  delega a instância pra outro usuário do Bitrix (busca por nome via
+  `BX24.callMethod('user.search')`) — quem recebe passa a ver/responder as
+  conversas dela em `chat.html` (aparece com sufixo "(compartilhada)" no
+  seletor), sem contar contra o próprio limite de 3. Só o dono concede/revoga
+  (tabela `instance_delegates`, ver `src/instances.js`). Cada conversa fica
+  **atribuída** a um atendente por vez (dono ou delegado) — "Atender esta
+  conversa"/"Transferir pra mim" no cabeçalho do Chat; notificação de mensagem
+  nova vai só pra quem está atendendo, ou pra todo mundo com acesso (dono +
+  delegados) enquanto ninguém pegou ainda.
 - **Layout em cards** (grid, não lista/tabela): cada instância é um card com nome,
   badge de status colorido (verde "Conectada" / dourado "Aguardando QR" / vermelho
   "Desconectada"), número conectado e duas estatísticas — contagem de **contatos**
@@ -1198,15 +1208,16 @@ auth_session/
 - `ownerIdFor(bitrixUserId)`: `` `${BITRIX_MEMBER_ID}_${bitrixUserId}` `` — sempre construído com config do servidor, nunca com dado do cliente.
 
 ### `src/authz.js`
-- `assertOwnsSession(sessionIdOuCsv, ownerId)`: confere posse via `instancesStore.get()` (trata o caso comum de dono com uma instância só, `id === ownerId`, sem ir ao banco).
-- `requireSession(extractor)`: middleware factory pras rotas que recebem `session` (query/body, uma ou várias) — 400 se faltando, 403 se não pertence ao `req.ownerId`.
+- `assertOwnsSession(sessionIdOuCsv, ownerId)`: confere posse **ou acesso delegado** via `instancesStore.get()` + `listDelegates()` (trata o caso comum de dono com uma instância só, `id === ownerId`, sem ir ao banco). Dono OU quem está em `instance_delegates` pra essa instância (ver §"Delegação de acesso" abaixo) passa; qualquer outro, nega. Como `requireSession` (linha abaixo) é usado por praticamente toda rota de conversa/mensagem/QR/status, essa única função é o que propaga acesso de delegado pro app inteiro.
+- `requireSession(extractor)`: middleware factory pras rotas que recebem `session` (query/body, uma ou várias) — 400 se faltando, 403 se não pertence (nem posse nem delegação) ao `req.ownerId`.
 - `requireResourceSession(lookupFn)`: pras rotas por `:id` de recurso (campanha, agendamento) — descobre o dono do recurso primeiro, então confere posse; 404 (não 403) pra não revelar que o recurso existe.
-- `requireOwnerMatch(extractor)`: pras rotas de CRUD de instância, onde o `owner` recebido precisa ser exatamente o próprio usuário autenticado.
+- `requireOwnerMatch(extractor)`: pras rotas de CRUD de instância, onde o `owner` recebido precisa ser exatamente o próprio usuário autenticado. **Não conhece delegação** — de propósito: renomear/remover/gerenciar delegados continua exigindo o dono de verdade, conferido explicitamente dentro do handler (`instancesStore.get(id).ownerId`).
 - `requireResourceOwner(lookupOwnerId)`: espelha `requireResourceSession`, mas pra recursos donos diretos de um `owner_id` (não de um `session_id`) — hoje só `notifications`; compara `owner_id` do registro direto contra `req.ownerId`, sem a indireção de `assertOwnsSession`.
 
 ### `src/instances.js`
 - `get(id)` / `listByOwner(ownerId)` / `ensureDefault(ownerId)` / `create` / `rename` / `remove`: CRUD de instâncias (tabela `instances`, `id` = `session_id` usado no resto do app).
 - `ownerOf(sessionId)`: resolve o dono de uma sessão — mesmo fallback que `assertOwnsSession` usa (`id === ownerId` quando não há linha em `instances`, caso do dono com uma instância só). Usado em `src/server.js` pra saber de quem é uma notificação nova.
+- **Delegação de acesso** (tabela `instance_delegates`, ver §14 "Instâncias"): `listDelegates(instanceId)` / `addDelegate(instanceId, ownerId, delegateOwnerId, delegateName)` / `removeDelegate(instanceId, ownerId, delegateOwnerId)` — sempre conferem `ownerId` contra o dono real antes de mexer (mesmo padrão de `rename`/`remove`). `listAccessible(ownerId)`: instâncias próprias + delegadas (com `delegated: true/false`) — usado em `GET /instances`; `MAX_INSTANCES_PER_OWNER` continua checando só `listByOwner`, então instância delegada não ocupa vaga de quem recebeu o acesso.
 
 ### `src/sessions.js` — `SessionManager`
 - `get(sessionId)`: cria (lazy) e inicia o `WhatsAppGateway` da instância; sanitiza o

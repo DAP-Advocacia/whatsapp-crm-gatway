@@ -176,7 +176,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
   router.get('/instances', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
     const owner = req.query.owner;
     try {
-      const list = await instancesStore.ensureDefault(owner);
+      await instancesStore.ensureDefault(owner); // garante que o próprio dono tem ao menos 1
+      const list = await instancesStore.listAccessible(owner); // próprias + delegadas (ver instance_delegates)
       const ownNumbers = getOwnNumbersBySession();
       const withStatus = await Promise.all(list.map(async (i) => {
         let gateway = null;
@@ -254,6 +255,49 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[instances] erro:', err.message);
       res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Delegação de acesso (ver db/schema.sql, instance_delegates) — um
+  // gerente compartilha a própria instância com outros usuários do Bitrix
+  // (ex: funcionários), sem contar contra o limite de 3 de quem recebe. Só
+  // o dono de verdade concede/revoga/lista (conferido dentro de
+  // instancesStore, não só por requireOwnerMatch — mesmo cuidado de
+  // DELETE /instances/:id acima).
+  // ---------------------------------------------------------------
+  router.get('/instances/:id/delegates', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    try {
+      const inst = await instancesStore.get(req.params.id);
+      if (!inst || inst.ownerId !== req.query.owner) {
+        return res.status(404).json({ error: 'instância não encontrada' });
+      }
+      res.json({ delegates: await instancesStore.listDelegates(req.params.id) });
+    } catch (err) {
+      console.error('[instances:delegates] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  router.post('/instances/:id/delegates', requireOwnerMatch((req) => req.body?.owner), async (req, res) => {
+    const { owner, delegateOwnerId, delegateName } = req.body || {};
+    if (!delegateOwnerId) return res.status(400).json({ error: 'delegateOwnerId é obrigatório' });
+    try {
+      await instancesStore.addDelegate(req.params.id, owner, delegateOwnerId, delegateName);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[instances:delegates] erro:', err.message);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.delete('/instances/:id/delegates/:delegateOwnerId', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    try {
+      await instancesStore.removeDelegate(req.params.id, req.query.owner, req.params.delegateOwnerId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[instances:delegates] erro:', err.message);
+      res.status(400).json({ error: err.message });
     }
   });
 
@@ -739,6 +783,37 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ ok: true });
     } catch (err) {
       console.error('[conversations:mark-read] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /conversations/assign  { session, phone, assignedTo, assignedToName }
+  // Atribui (ou desatribui, com assignedTo: null) uma conversa a um
+  // atendente — dono da instância ou um dos delegados dela (ver
+  // instance_delegates). "Pegar conversa"/"transferir" no Chat, ver
+  // public/chat.html. `assignedToName` vem do próprio client (nome do
+  // usuário atual, já disponível via BX24) — evita precisar resolver nome
+  // de usuário do Bitrix no backend.
+  // ---------------------------------------------------------------
+  router.post('/conversations/assign', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone, assignedTo, assignedToName } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    try {
+      if (assignedTo) {
+        const inst = await instancesStore.get(session);
+        const ownerId = inst ? inst.ownerId : session;
+        if (assignedTo !== ownerId) {
+          const delegates = await instancesStore.listDelegates(session);
+          if (!delegates.some((d) => d.delegateOwnerId === assignedTo)) {
+            return res.status(400).json({ error: 'assignedTo precisa ser o dono ou um delegado desta instância' });
+          }
+        }
+      }
+      await store.assignConversation(session, phone, assignedTo || null, assignedTo ? assignedToName || null : null);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[conversations:assign] erro:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

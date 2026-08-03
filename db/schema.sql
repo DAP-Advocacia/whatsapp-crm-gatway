@@ -28,6 +28,13 @@ alter table conversations add column if not exists archived boolean not null def
 -- silenciar é exceção manual, como no próprio WhatsApp.
 alter table conversations add column if not exists notifications_enabled boolean not null default true;
 
+-- Atribuição de atendimento (ver instance_delegates acima) — null significa
+-- não atribuída (visível/atendível por qualquer um com acesso à instância:
+-- dono + delegados). `assigned_to_name` evita ter que resolver o nome do
+-- usuário do Bitrix de novo toda vez que a lista de conversas é montada.
+alter table conversations add column if not exists assigned_to text;
+alter table conversations add column if not exists assigned_to_name text;
+
 -- Resumo da conversa gerado sob demanda por IA (botão no painel de detalhes
 -- do contato, tela Chat) — persistido pra não precisar gerar de novo toda
 -- vez que o painel é aberto; `ai_summary_updated_at` mostra quando foi
@@ -202,6 +209,23 @@ create table if not exists instances (
 );
 
 create index if not exists idx_instances_owner on instances (owner_id);
+
+-- Delegação de acesso: o dono de uma instância compartilha ela com outros
+-- usuários do Bitrix (ex: gerente delegando pros próprios funcionários),
+-- sem contar contra o limite de instâncias de quem recebe (ver
+-- MAX_INSTANCES_PER_OWNER em src/routes/whatsapp.js — só usa listByOwner,
+-- não listAccessible). `delegate_name` é capturado na hora de conceder (via
+-- BX24.callMethod('user.search') no frontend) pra exibir sem precisar de um
+-- diretório de usuários próprio no banco.
+create table if not exists instance_delegates (
+  instance_id text not null references instances(id) on delete cascade,
+  delegate_owner_id text not null,
+  delegate_name text,
+  created_at timestamptz not null default now(),
+  unique (instance_id, delegate_owner_id)
+);
+
+create index if not exists idx_instance_delegates_delegate on instance_delegates (delegate_owner_id);
 
 -- Contatos e listas passam a ser do DONO (owner_id), não da instância —
 -- assim, se uma instância cai e o usuário conecta outra (novo session_id),

@@ -56,4 +56,71 @@ async function ownerOf(sessionId) {
   return inst ? inst.ownerId : sessionId;
 }
 
-module.exports = { listByOwner, get, ensureDefault, create, rename, remove, ownerOf };
+// --- Delegação de acesso (ver db/schema.sql, tabela instance_delegates) ---
+// Só o dono de verdade pode conceder/revogar — por isso toda função abaixo
+// recebe `ownerId` e confere contra o dono real antes de mexer, mesmo
+// padrão de rename/remove acima.
+
+async function listDelegates(instanceId) {
+  const { rows } = await pool.query(
+    `select delegate_owner_id as "delegateOwnerId", delegate_name as "delegateName", created_at as "createdAt"
+     from instance_delegates where instance_id = $1 order by created_at asc`,
+    [instanceId]
+  );
+  return rows;
+}
+
+async function addDelegate(instanceId, ownerId, delegateOwnerId, delegateName) {
+  const inst = await get(instanceId);
+  if (!inst || inst.ownerId !== ownerId) throw new Error('instância não encontrada');
+  if (delegateOwnerId === ownerId) throw new Error('não é possível delegar pra si mesmo');
+  await pool.query(
+    `insert into instance_delegates (instance_id, delegate_owner_id, delegate_name)
+     values ($1, $2, $3)
+     on conflict (instance_id, delegate_owner_id) do update set delegate_name = excluded.delegate_name`,
+    [instanceId, delegateOwnerId, delegateName || null]
+  );
+}
+
+async function removeDelegate(instanceId, ownerId, delegateOwnerId) {
+  const inst = await get(instanceId);
+  if (!inst || inst.ownerId !== ownerId) throw new Error('instância não encontrada');
+  await pool.query(
+    `delete from instance_delegates where instance_id = $1 and delegate_owner_id = $2`,
+    [instanceId, delegateOwnerId]
+  );
+}
+
+// Instâncias que `ownerId` pode acessar: as próprias + as delegadas a ele
+// por outro dono. Usado em GET /instances (Chat/Instâncias) — diferente de
+// listByOwner (usado só pra contar contra MAX_INSTANCES_PER_OWNER, esse
+// limite não vale pra instância delegada).
+async function listAccessible(ownerId) {
+  const { rows } = await pool.query(
+    `select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", false as delegated
+     from instances i
+     where i.owner_id = $1
+     union all
+     select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", true as delegated
+     from instances i
+     join instance_delegates d on d.instance_id = i.id
+     where d.delegate_owner_id = $1
+     order by created_at asc`,
+    [ownerId]
+  );
+  return rows;
+}
+
+module.exports = {
+  listByOwner,
+  get,
+  ensureDefault,
+  create,
+  rename,
+  remove,
+  ownerOf,
+  listDelegates,
+  addDelegate,
+  removeDelegate,
+  listAccessible,
+};

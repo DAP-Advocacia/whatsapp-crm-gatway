@@ -1,9 +1,10 @@
 const instancesStore = require('./instances');
 
 /**
- * Checagem de posse: confirma que a(s) instância(s) de WhatsApp que a
- * requisição quer usar realmente pertence(m) ao dono autenticado
- * (req.ownerId, já verificado pelo middleware requireAuth em src/auth.js).
+ * Checagem de posse/acesso: confirma que a(s) instância(s) de WhatsApp que a
+ * requisição quer usar realmente pertence(m) — ou foram delegadas (ver
+ * db/schema.sql, instance_delegates) — ao dono autenticado (req.ownerId, já
+ * verificado pelo middleware requireAuth em src/auth.js).
  */
 
 function normalizeSessionIds(raw) {
@@ -12,16 +13,20 @@ function normalizeSessionIds(raw) {
   return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-// Cobre tanto o dono com uma instância só (id === ownerId, ver
-// instances.ensureDefault) quanto múltiplas instâncias — nesse caso consulta
-// o dono real de cada id no banco.
+// Cobre dono com uma instância só (id === ownerId, ver
+// instances.ensureDefault), dono com várias instâncias, e delegado (não é o
+// dono, mas está em instance_delegates pra essa instância) — nesses dois
+// últimos casos consulta o dono/delegados reais de cada id no banco.
 async function assertOwnsSession(sessionIdOrCsv, ownerId) {
   const ids = normalizeSessionIds(sessionIdOrCsv);
   if (!ids.length || !ownerId) return false;
   for (const id of ids) {
     if (id === ownerId) continue;
     const inst = await instancesStore.get(id);
-    if (!inst || inst.ownerId !== ownerId) return false;
+    if (!inst) return false;
+    if (inst.ownerId === ownerId) continue;
+    const delegates = await instancesStore.listDelegates(id);
+    if (!delegates.some((d) => d.delegateOwnerId === ownerId)) return false;
   }
   return true;
 }

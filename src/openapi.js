@@ -108,6 +108,29 @@ module.exports = {
         responses: { 200: jsonResponse('Removida') },
       },
     },
+    '/api/whatsapp/instances/{id}/delegates': {
+      get: {
+        tags: ['WhatsApp — instâncias e conexão'],
+        summary: 'Lista quem tem acesso delegado a esta instância (só o dono vê)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, ownerParam],
+        responses: { 200: jsonResponse('{ delegates: [{delegateOwnerId, delegateName, createdAt}] }') },
+      },
+      post: {
+        tags: ['WhatsApp — instâncias e conexão'],
+        summary: 'Concede acesso à instância pra outro usuário do Bitrix (só o dono pode)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['owner', 'delegateOwnerId'], properties: { owner: { type: 'string' }, delegateOwnerId: { type: 'string' }, delegateName: { type: 'string' } } } } } },
+        responses: { 200: jsonResponse('ok'), 400: jsonResponse('Erro de validação', errorResponse) },
+      },
+    },
+    '/api/whatsapp/instances/{id}/delegates/{delegateOwnerId}': {
+      delete: {
+        tags: ['WhatsApp — instâncias e conexão'],
+        summary: 'Revoga o acesso delegado (só o dono pode)',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }, { name: 'delegateOwnerId', in: 'path', required: true, schema: { type: 'string' } }, ownerParam],
+        responses: { 200: jsonResponse('ok') },
+      },
+    },
     '/api/whatsapp/qr': {
       get: {
         tags: ['WhatsApp — instâncias e conexão'],
@@ -154,6 +177,14 @@ module.exports = {
         summary: 'Arquiva/desarquiva uma conversa',
         requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { session: { type: 'string' }, phone: { type: 'string' }, archived: { type: 'boolean' } } } } } },
         responses: { 200: jsonResponse('ok') },
+      },
+    },
+    '/api/whatsapp/conversations/assign': {
+      post: {
+        tags: ['WhatsApp — chat e conversas'],
+        summary: 'Atribui (ou desatribui, com assignedTo null) o atendimento de uma conversa',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['session', 'phone'], properties: { session: { type: 'string' }, phone: { type: 'string' }, assignedTo: { type: 'string', nullable: true }, assignedToName: { type: 'string' } } } } } },
+        responses: { 200: jsonResponse('ok'), 400: jsonResponse('assignedTo inválido', errorResponse) },
       },
     },
     '/api/whatsapp/conversations/mark-read': {

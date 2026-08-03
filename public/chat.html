@@ -434,6 +434,11 @@
   }
 
   .tags-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .assignment-row{ display:flex; align-items:center; gap:10px; padding:8px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
+  .assignment-row:empty{ display:none; }
+  .assignment-label{ font-size:12px; color:var(--text-muted); }
+  .assignment-btn{ background:rgba(var(--gold-rgb),.12); border:1px solid transparent; color:var(--gold); font-size:11px; padding:4px 10px; border-radius:100px; cursor:pointer; }
+  .assignment-btn.secondary{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); }
   .tag-chips{ display:flex; gap:6px; flex-wrap:wrap; }
   .tag-add-btn{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); font-size:11px; padding:4px 10px; border-radius:100px; cursor:pointer; }
   .tag-add-btn:hover{ border-color:var(--gold-dim); color:var(--gold); }
@@ -1606,6 +1611,7 @@
   // =========================================================
   async function initInstances() {
     state.ownerId = await resolveOwner();
+    fetchMyBitrixName();
     const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(state.ownerId)}`);
     const data = await res.json();
     const list = data.instances || [];
@@ -1617,10 +1623,23 @@
     }
     const options = [];
     if (list.length > 1) options.push(`<option value="${list.map((i) => i.id).join(',')}">Todas as minhas instâncias</option>`);
-    options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`));
+    options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}${i.delegated ? ' (compartilhada)' : ''}</option>`));
     instanceSelect.innerHTML = options.join('');
     list.forEach((i) => { state.instanceStatus[i.id] = i.status; });
     await onFilterChange();
+  }
+
+  // Nome do usuário atual — usado só como rótulo ao "pegar" uma conversa
+  // (POST /conversations/assign), pra quem mais tiver acesso à instância
+  // ver de quem é sem precisar de um diretório de usuários no backend.
+  let myBitrixName = null;
+  function fetchMyBitrixName() {
+    if (!window.BX24) return;
+    BX24.callMethod('user.current', {}, (result) => {
+      if (result.error()) return;
+      const u = result.data();
+      myBitrixName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || null;
+    });
   }
 
   instanceSelect.addEventListener('change', onFilterChange);
@@ -2114,6 +2133,57 @@
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
   }
 
+  // Atribuição de atendimento (POST /conversations/assign) — quem tem
+  // acesso à instância (dono ou delegado, ver instances.html "Compartilhar
+  // acesso") pode "pegar" uma conversa não atribuída, ou transferir pra si
+  // uma que já está com outro atendente. Não atribuída = qualquer um vê e
+  // pode atender; atribuída = só quem pegou (ou o próprio dono/delegados,
+  // que continuam vendo a conversa, só não ficam sendo notificados dela
+  // até ela ficar livre de novo, ver src/server.js onMessage).
+  function renderAssignmentRow() {
+    const el = document.getElementById('assignmentRow');
+    if (!el) return;
+    const a = state.active;
+    if (!a.assignedTo) {
+      el.innerHTML = `
+        <span class="assignment-label">Conversa sem atendente definido</span>
+        <button class="assignment-btn" id="assignToMeBtn" type="button">Atender esta conversa</button>
+      `;
+      document.getElementById('assignToMeBtn').addEventListener('click', () => setConversationAssignee(state.ownerId, myBitrixName));
+    } else if (a.assignedTo === state.ownerId) {
+      el.innerHTML = `
+        <span class="assignment-label">Atribuída a você</span>
+        <button class="assignment-btn secondary" id="unassignBtn" type="button">Liberar</button>
+      `;
+      document.getElementById('unassignBtn').addEventListener('click', () => setConversationAssignee(null, null));
+    } else {
+      el.innerHTML = `
+        <span class="assignment-label">Atribuída a ${escapeHtml(a.assignedToName || 'outro atendente')}</span>
+        <button class="assignment-btn" id="reassignToMeBtn" type="button">Transferir pra mim</button>
+      `;
+      document.getElementById('reassignToMeBtn').addEventListener('click', () => setConversationAssignee(state.ownerId, myBitrixName));
+    }
+  }
+
+  async function setConversationAssignee(assignedTo, assignedToName) {
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/assign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, assignedTo, assignedToName }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao atualizar atendimento');
+      a.assignedTo = assignedTo;
+      a.assignedToName = assignedToName;
+      const conv = state.conversations.find((c) => c.sessionId === a.sessionId && c.phone === a.phone);
+      if (conv) { conv.assignedTo = assignedTo; conv.assignedToName = assignedToName; }
+      renderAssignmentRow();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
   async function addTag(name) {
     const a = state.active;
     try {
@@ -2199,6 +2269,8 @@
       avatarUrl: conv.avatarUrl || null,
       dealId: conv.dealId,
       tags: conv.tags || [],
+      assignedTo: conv.assignedTo || null,
+      assignedToName: conv.assignedToName || null,
     };
     state.messages = [];
     state.connectionStatus = 'unknown';
@@ -2299,6 +2371,7 @@
       </div>
 
       <div class="tags-row" id="tagsRow"></div>
+      <div class="assignment-row" id="assignmentRow"></div>
 
       <div class="messages" id="messagesEl"></div>
 
@@ -2334,6 +2407,7 @@
     `;
 
     renderTagsRow();
+    renderAssignmentRow();
     renderMessages();
     bindComposer();
     bindMessagesInteractions();

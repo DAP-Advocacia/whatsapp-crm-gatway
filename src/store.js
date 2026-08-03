@@ -152,6 +152,17 @@ async function setConversationArchived(sessionId, phone, archived) {
   );
 }
 
+// Atribui (assignedTo preenchido) ou desatribui (null) o atendimento de uma
+// conversa — ver POST /conversations/assign. `assignedToName` só faz
+// sentido junto de um assignedTo; desatribuir sempre limpa os dois.
+async function assignConversation(sessionId, phone, assignedTo, assignedToName) {
+  await pool.query(
+    `update conversations set assigned_to = $1, assigned_to_name = $2, updated_at = now()
+     where session_id = $3 and phone = $4`,
+    [assignedTo, assignedTo ? assignedToName : null, sessionId, phone]
+  );
+}
+
 // "Resgata" uma conversa presa numa instância que caiu/desconectou (comum
 // aqui — Baileys não é a API oficial, a sessão pode cair a qualquer
 // momento) — troca o session_id da conversa pra outra instância do MESMO
@@ -189,11 +200,12 @@ async function setConversationNotifications(sessionId, phone, enabled) {
 // sem nome) se a conversa ainda nem existe.
 async function getConversationNotifPrefs(sessionId, phone) {
   const { rows } = await pool.query(
-    `select notifications_enabled as "notificationsEnabled", push_name as "pushName"
+    `select notifications_enabled as "notificationsEnabled", push_name as "pushName",
+            assigned_to as "assignedTo"
      from conversations where session_id = $1 and phone = $2`,
     [sessionId, phone]
   );
-  return rows[0] || { notificationsEnabled: true, pushName: null };
+  return rows[0] || { notificationsEnabled: true, pushName: null, assignedTo: null };
 }
 
 // Resumo da conversa gerado por IA (painel de detalhes do contato, tela
@@ -376,7 +388,9 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        lm.direction as "lastDirection",
        coalesce(lm.created_at, c.updated_at) as "lastAt",
        coalesce(tg.tags, '[]'::json) as tags,
-       coalesce(un.count, 0)::int as "unreadCount"
+       coalesce(un.count, 0)::int as "unreadCount",
+       c.assigned_to as "assignedTo",
+       c.assigned_to_name as "assignedToName"
      from conversations c
      left join instances i on i.id = c.session_id
      left join contacts ct on ct.owner_id = coalesce(i.owner_id, c.session_id) and ct.phone = c.phone
@@ -529,6 +543,7 @@ module.exports = {
   setDealForPhone,
   getDealForPhone,
   setConversationArchived,
+  assignConversation,
   moveConversationToInstance,
   setConversationNotifications,
   getConversationNotifPrefs,

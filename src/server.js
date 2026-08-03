@@ -328,14 +328,25 @@ const sessions = new SessionManager({
       if (message.direction === 'in') {
         const prefs = await store.getConversationNotifPrefs(sessionId, phone);
         if (prefs.notificationsEnabled !== false) {
-          const ownerId = await instancesStore.ownerOf(sessionId);
           const contactName = pushName || prefs.pushName || phone;
-          await store.addNotification({
+          // Conversa atribuída (ver POST /conversations/assign) notifica só
+          // quem está atendendo — sem atribuição (inclusive contato novo),
+          // notifica o dono da instância E todos os delegados dela (ver
+          // instance_delegates), já que ninguém "pegou" ainda.
+          let recipients;
+          if (prefs.assignedTo) {
+            recipients = [prefs.assignedTo];
+          } else {
+            const ownerId = await instancesStore.ownerOf(sessionId);
+            const delegates = await instancesStore.listDelegates(sessionId);
+            recipients = [ownerId, ...delegates.map((d) => d.delegateOwnerId)];
+          }
+          await Promise.all(recipients.map((ownerId) => store.addNotification({
             ownerId,
             title: `Nova mensagem de ${contactName}`,
             body: label || null,
             target: { sessionId, phone, contactName },
-          });
+          })));
         }
       }
     } catch (err) {

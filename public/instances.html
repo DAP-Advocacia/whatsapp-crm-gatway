@@ -322,6 +322,14 @@
   .status-badge.offline{ background: rgba(var(--red-rgb),.15); color: var(--red); }
   .status-badge.offline .status-dot{ background: var(--red); }
   .instance-phone{ font-size: 13px; color: var(--text-muted); }
+  .instance-delegated-tag{ color: var(--gold); }
+  .modal-hint{ font-size: 12.5px; color: var(--text-muted); margin: -4px 0 10px; line-height: 1.5; }
+  .delegate-search-results{ display:flex; flex-direction:column; gap:4px; margin-top:6px; max-height:160px; overflow-y:auto; }
+  .delegate-search-result{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; background:var(--surface-2); font-size:13px; }
+  .delegate-search-result button{ flex-shrink:0; }
+  .delegates-current-list{ display:flex; flex-direction:column; gap:6px; margin-top:16px; }
+  .delegates-current-list-title{ font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.03em; }
+  .delegate-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); font-size:13px; }
   .instance-stats{ display:flex; gap: 18px; flex-wrap: wrap; }
   .instance-stat{ display:flex; align-items:center; gap: 6px; font-size: 12.5px; color: var(--text-muted); }
   .instance-stat svg{ width: 15px; height: 15px; color: var(--text-faint); flex-shrink: 0; }
@@ -561,6 +569,20 @@
     <div class="modal-actions">
       <button class="btn secondary" id="renameCancel">Cancelar</button>
       <button class="btn" id="renameSave">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="delegatesModal">
+  <div class="modal">
+    <h3>Compartilhar acesso — <span id="delegatesInstanceLabel"></span></h3>
+    <p class="modal-hint">Quem tiver acesso passa a ver e responder as conversas desta instância. Não conta contra o limite de instâncias da pessoa.</p>
+    <input type="hidden" id="delegatesInstanceId">
+    <input type="text" id="delegateSearchInput" placeholder="Buscar usuário do Bitrix pelo nome…">
+    <div id="delegateSearchResults" class="delegate-search-results"></div>
+    <div id="delegatesCurrentList" class="delegates-current-list"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="delegatesClose">Fechar</button>
     </div>
   </div>
 </div>
@@ -846,11 +868,15 @@
   const STATUS_LABEL = { online: 'Conectada', connecting: 'Aguardando QR', offline: 'Desconectada' };
 
   function renderInstances(list, limit) {
+    // O limite (MAX_INSTANCES_PER_OWNER) só conta as PRÓPRIAS instâncias —
+    // uma instância delegada (compartilhada por outro dono, i.delegated)
+    // não ocupa vaga nenhuma de quem recebeu o acesso.
+    const ownCount = list.filter((i) => !i.delegated).length;
     if (limit) {
-      const atLimit = list.length >= limit;
+      const atLimit = ownCount >= limit;
       newInstanceBtn.disabled = atLimit;
       newInstanceBtn.title = atLimit ? `Limite de ${limit} instâncias por usuário atingido — remova uma existente antes de criar outra.` : '';
-      instanceCountEl.textContent = `${list.length}/${limit}`;
+      instanceCountEl.textContent = `${ownCount}/${limit}`;
     }
     if (!list.length) {
       instancesWrap.innerHTML = '<p class="empty">Nenhuma instância ainda.</p>';
@@ -865,15 +891,18 @@
           </div>
           <span class="status-badge ${i.status}"><span class="status-dot"></span>${STATUS_LABEL[i.status] || i.status}</span>
         </div>
-        <div class="instance-phone">${i.phone ? 'Número: ' + escapeHtml(i.phone) : 'ainda não pareado'}</div>
+        <div class="instance-phone">${i.phone ? 'Número: ' + escapeHtml(i.phone) : 'ainda não pareado'}${i.delegated ? ' · <span class="instance-delegated-tag">compartilhada com você</span>' : ''}</div>
         <div class="instance-stats">
           <span class="instance-stat">${ICON_CONTACTS} ${i.contactCount != null ? i.contactCount : '—'} contatos</span>
           <span class="instance-stat">${ICON_GROUPS} ${i.groupCount != null ? i.groupCount : '—'} grupos</span>
         </div>
         <div class="instance-actions">
           ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Ver QR</button>` : ''}
-          <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
-          <button type="button" class="danger" data-remove="${i.id}">Remover</button>
+          ${i.delegated ? '' : `
+            <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
+            <button type="button" data-share="${i.id}" data-label="${escapeHtml(i.label)}">Compartilhar acesso</button>
+            <button type="button" class="danger" data-remove="${i.id}">Remover</button>
+          `}
         </div>
       </div>
     `).join('')}</div>`;
@@ -886,6 +915,9 @@
     });
     instancesWrap.querySelectorAll('[data-remove]').forEach((btn) => {
       btn.addEventListener('click', () => removeInstance(btn.dataset.remove));
+    });
+    instancesWrap.querySelectorAll('[data-share]').forEach((btn) => {
+      btn.addEventListener('click', () => openDelegatesModal(btn.dataset.share, btn.dataset.label));
     });
   }
 
@@ -1008,6 +1040,124 @@
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }
+  });
+
+  // ---------------- Compartilhar acesso (delegação) ----------------
+
+  const delegatesModal = document.getElementById('delegatesModal');
+  const delegatesInstanceId = document.getElementById('delegatesInstanceId');
+  const delegatesInstanceLabel = document.getElementById('delegatesInstanceLabel');
+  const delegateSearchInput = document.getElementById('delegateSearchInput');
+  const delegateSearchResults = document.getElementById('delegateSearchResults');
+  const delegatesCurrentList = document.getElementById('delegatesCurrentList');
+  let delegateSearchTimer = null;
+
+  // Busca por usuário do Bitrix pelo nome — resolvido direto no navegador
+  // via BX24 (mesmo SDK já carregado nesta página), não precisa de rota
+  // nova no backend só pra isso.
+  function bxSearchUsers(term) {
+    return new Promise((resolve, reject) => {
+      BX24.callMethod('user.search', { FILTER: { NAME: term, ACTIVE: true } }, (result) => {
+        if (result.error()) reject(result.error());
+        else resolve(result.data() || []);
+      });
+    });
+  }
+
+  async function openDelegatesModal(instanceId, label) {
+    delegatesInstanceId.value = instanceId;
+    delegatesInstanceLabel.textContent = label;
+    delegateSearchInput.value = '';
+    delegateSearchResults.innerHTML = '';
+    delegatesModal.classList.add('open');
+    await loadDelegatesList(instanceId);
+  }
+  document.getElementById('delegatesClose').addEventListener('click', () => delegatesModal.classList.remove('open'));
+
+  async function loadDelegatesList(instanceId) {
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/${instanceId}/delegates?owner=${encodeURIComponent(myOwnerId)}`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      renderDelegatesList(instanceId, data.delegates || []);
+    } catch (err) {
+      delegatesCurrentList.innerHTML = `<p class="empty">Falha ao carregar: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  function renderDelegatesList(instanceId, delegates) {
+    if (!delegates.length) {
+      delegatesCurrentList.innerHTML = '<p class="empty">Ninguém tem acesso compartilhado ainda.</p>';
+      return;
+    }
+    delegatesCurrentList.innerHTML =
+      '<div class="delegates-current-list-title">Com acesso</div>' +
+      delegates.map((d) => `
+        <div class="delegate-row">
+          <span>${escapeHtml(d.delegateName || d.delegateOwnerId)}</span>
+          <button type="button" class="danger" data-remove-delegate="${escapeHtml(d.delegateOwnerId)}">Remover</button>
+        </div>
+      `).join('');
+    delegatesCurrentList.querySelectorAll('[data-remove-delegate]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        try {
+          const res = await apiFetch(`${API_BASE}/instances/${instanceId}/delegates/${encodeURIComponent(btn.dataset.removeDelegate)}?owner=${encodeURIComponent(myOwnerId)}`, { method: 'DELETE' });
+          if (!res.ok) throw new Error((await res.json()).error);
+          await loadDelegatesList(instanceId);
+          if (window.showToast) window.showToast('Acesso removido.', 'success');
+        } catch (err) {
+          if (window.showToast) window.showToast(err.message, 'error');
+        }
+      });
+    });
+  }
+
+  delegateSearchInput.addEventListener('input', () => {
+    clearTimeout(delegateSearchTimer);
+    const term = delegateSearchInput.value.trim();
+    if (!term) { delegateSearchResults.innerHTML = ''; return; }
+    delegateSearchTimer = setTimeout(async () => {
+      try {
+        const users = await bxSearchUsers(term);
+        if (!users.length) {
+          delegateSearchResults.innerHTML = '<p class="empty">Ninguém encontrado.</p>';
+          return;
+        }
+        delegateSearchResults.innerHTML = users.slice(0, 8).map((u) => {
+          const name = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || ('Usuário ' + u.ID);
+          return `
+            <div class="delegate-search-result">
+              <span>${escapeHtml(name)}</span>
+              <button type="button" data-add-delegate="${u.ID}" data-add-name="${escapeHtml(name)}">Dar acesso</button>
+            </div>
+          `;
+        }).join('');
+        delegateSearchResults.querySelectorAll('[data-add-delegate]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const bitrixUserId = btn.dataset.addDelegate;
+            const memberId = myOwnerId.slice(0, myOwnerId.lastIndexOf('_'));
+            const delegateOwnerId = `${memberId}_${bitrixUserId}`;
+            const instanceId = delegatesInstanceId.value;
+            try {
+              const res = await apiFetch(`${API_BASE}/instances/${instanceId}/delegates`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ owner: myOwnerId, delegateOwnerId, delegateName: btn.dataset.addName }),
+              });
+              if (!res.ok) throw new Error((await res.json()).error);
+              delegateSearchInput.value = '';
+              delegateSearchResults.innerHTML = '';
+              await loadDelegatesList(instanceId);
+              if (window.showToast) window.showToast('Acesso concedido.', 'success');
+            } catch (err) {
+              if (window.showToast) window.showToast(err.message, 'error');
+            }
+          });
+        });
+      } catch (err) {
+        delegateSearchResults.innerHTML = `<p class="empty">Falha na busca: ${escapeHtml(err.message)}</p>`;
+      }
+    }, 350);
   });
 
   // ---------------- Remover ----------------

@@ -4023,6 +4023,68 @@ de Notificações).
   consciente do usuário (só queria a marca visual por agora); revisitar se
   pedir depois.
 
+### Parte CD — Delegação de acesso a instância + atribuição de conversa (2026-08-03)
+
+Pedido do usuário (com exemplo): um gerente quer disponibilizar o próprio
+número de WhatsApp pra funcionários atenderem também, continuando ele
+mesmo podendo atender. Decisões fechadas antes de implementar: atribuição
+**por conversa** (evita dois atendentes na mesma conversa ao mesmo tempo,
+precisa de ação de "pegar"/"transferir"), limite de 3 instâncias por dono
+**não conta** pra quem recebe acesso delegado, e **só o próprio dono**
+concede/revoga delegação (sem admin aprovando).
+
+**Banco** (`db/schema.sql`, migrado em produção): tabela `instance_delegates`
+(`instance_id`, `delegate_owner_id`, `delegate_name` — nome capturado na
+hora de conceder via `BX24.callMethod('user.search')` no frontend, evita
+precisar de um diretório de usuários no banco). `conversations` ganha
+`assigned_to`/`assigned_to_name` (null = não atribuída, qualquer um com
+acesso pode atender).
+
+**Acesso propagado numa mudança só**: `assertOwnsSession`
+(`src/authz.js`) passou a aceitar também quem está em
+`instance_delegates`, não só o dono — como toda rota de conversa/mensagem/
+QR/status já passa por `requireSession` (que chama essa função), o
+delegado ganha acesso ao app inteiro sem precisar tocar rota por rota.
+CRUD da própria instância (renomear/remover) e as rotas novas de
+delegação continuam exigindo dono de verdade (conferência explícita contra
+`instancesStore.get(id).ownerId`, mesmo padrão já usado em
+`DELETE /instances/:id`).
+
+**Rotas novas**: `GET/POST /instances/:id/delegates`,
+`DELETE /instances/:id/delegates/:delegateOwnerId`,
+`POST /conversations/assign` — documentadas no `src/openapi.js`.
+`GET /instances` passou a usar `instancesStore.listAccessible` (próprias +
+delegadas, com `delegated: true/false`) em vez de só `listByOwner` — o
+limite de 3 continua checando só `listByOwner` em `POST /instances`, e o
+contador "X/3" no frontend (`instances.html`) também filtra
+`!i.delegated` antes de contar, pra não inflar o limite de quem recebeu
+acesso.
+
+**Notificação**: `src/server.js` (`onMessage`) agora notifica só quem
+está atribuído à conversa (`assigned_to`), ou — se ninguém pegou ainda,
+inclusive contato novo — o dono da instância E todos os delegados dela.
+
+**Frontend**: `instances.html` ganhou botão "Compartilhar acesso" (busca
+usuário do Bitrix por nome, concede/revoga); `chat.html` ganhou uma linha
+de atribuição no cabeçalho da conversa ("Atender esta conversa"/"Atribuída
+a você"/"Atribuída a X, Transferir pra mim") e sufixo "(compartilhada)" no
+seletor de instância pra quem é delegado.
+
+- [ ] Não testado dentro do Bitrix ainda — só revisão de código e checagem
+  de sintaxe nesta sessão, sem servidor local pra validar o fluxo completo
+  (delegar, funcionário enxergar a instância, pegar conversa, notificação
+  chegando só pra quem deveria).
+- [ ] `user.search` (busca de usuário do Bitrix em `instances.html`) não
+  foi validado contra um portal de verdade nesta sessão — se o método ou o
+  formato de retorno (`ID`/`NAME`/`LAST_NAME`) divergir do esperado, a
+  busca falha silenciosamente pro usuário (mensagem genérica de erro).
+- [ ] `PUT /instances/:id` (renomear) e `DELETE /instances/:id` continuam
+  fazendo *no-op silencioso* (retornam `{ok:true}` mesmo sem alterar nada)
+  se alguém que não é dono tentar usar — comportamento de antes desta
+  sessão, só ficou mais visível agora que instância delegada aparece na
+  mesma tela; mitigado escondendo os botões pra quem é delegado
+  (`instances.html`), não corrigido na origem.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
