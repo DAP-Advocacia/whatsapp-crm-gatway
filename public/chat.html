@@ -436,6 +436,7 @@
   }
 
   .assignee-filter{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .assignee-filter[hidden]{ display:none; }
   .assignee-filter-btn{
     display:flex; align-items:center; justify-content:center;
     background:none; border:2px solid transparent; border-radius:50%; padding:0;
@@ -1991,6 +1992,7 @@
     });
     if (!seen.size) {
       assigneeFilterEl.hidden = true;
+      assigneeFilterEl.innerHTML = ''; // sem isso, [hidden] podia perder de uma regra CSS de classe e deixar o conteúdo da renderização anterior visível
       if (state.assigneeFilter) { state.assigneeFilter = ''; }
       return;
     }

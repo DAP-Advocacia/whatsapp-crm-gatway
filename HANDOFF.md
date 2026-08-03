@@ -4285,10 +4285,28 @@ Fix nos dois lados:
   re-renderiza lista + linha de atribuição quando o evento chega de outra
   aba/usuário.
 
-- [ ] Não testado dentro do Bitrix ainda — só revisão de código e checagem
-  de sintaxe (`node -c` no backend, extração+`new Function` nos 4 scripts
-  inline do `chat.html`), sem servidor local pra validar visualmente o
-  tempo real com duas abas/usuários simultâneos.
+**Segundo bug encontrado testando dentro do Bitrix (2026-08-03, depois
+do deploy acima)**: usuário liberou a única conversa atribuída (Daniel
+Costa) — a linha de atribuição da conversa aberta atualizou certo ("sem
+atendente definido"), confirmado direto no banco (`assigned_to = null`
+nas duas conversas da sessão), **mas o botão "DC" continuou visível no
+filtro de atendentes**. Causa: `renderAssigneeFilter()`, quando
+`seen.size === 0`, setava `assigneeFilterEl.hidden = true` e dava
+`return` **sem limpar `assigneeFilterEl.innerHTML`** — e a regra CSS
+`.assignee-filter{ display:flex; ... }` (especificidade de classe) tinha
+prioridade sobre a regra padrão `[hidden]{ display:none }` do próprio
+navegador (especificidade de atributo, mais fraca), então o elemento
+continuava visível mostrando o HTML da renderização anterior (o botão
+"DC" de quando a conversa ainda estava atribuída). Fix: adicionado
+`.assignee-filter[hidden]{ display:none; }` (mais específico que a regra
+sem `[hidden]`, garante esconder de verdade) e `assigneeFilterEl.innerHTML
+= ''` no early-return, como segunda camada de proteção mesmo se outro CSS
+futuro voltar a conflitar com `[hidden]`.
+
+- [ ] Não testado dentro do Bitrix o fluxo completo depois deste segundo
+  fix (só o primeiro round de testes do usuário, que achou o bug do
+  parágrafo acima) — falta confirmar que o filtro some de verdade agora
+  ao liberar a última conversa atribuída.
 - [ ] Se um atendente mudar de nome no Bitrix depois de já ter atendido
   conversas, o nome antigo fica congelado em `assigned_to_name` (mesma
   limitação já documentada na Parte CD para a linha de atribuição da
