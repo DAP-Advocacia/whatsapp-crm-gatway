@@ -810,7 +810,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
           }
         }
       }
-      await store.assignConversation(session, phone, assignedTo || null, assignedTo ? assignedToName || null : null);
+      const finalAssignedToName = assignedTo ? assignedToName || null : null;
+      await store.assignConversation(session, phone, assignedTo || null, finalAssignedToName);
+      // replica pra qualquer outra aba olhando esta conversa ou a lista de
+      // conversas (mesmo hub de WebSocket usado por mensagem/reação) — sem
+      // isso a tag/linha de atribuição só atualizava ao trocar de tela.
+      broadcast(session, phone, { type: 'assignment', assignedTo: assignedTo || null, assignedToName: finalAssignedToName });
       res.json({ ok: true });
     } catch (err) {
       console.error('[conversations:assign] erro:', err.message);

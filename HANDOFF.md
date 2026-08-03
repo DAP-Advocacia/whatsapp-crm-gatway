@@ -4225,7 +4225,7 @@ sessão que o WhatsApp já invalidou do lado dele.
   *novo* conjunto de sessões (diferente destas 5) cair em um próximo
   deploy — aí sim seria sinal de que o timing ainda importa.
 
-### Parte CF — Chat: tag de atendente na lista + filtro por atendente (2026-08-03)
+### Parte CF — Chat: tag de atendente, filtro por atendente, tag Pendente e atualização em tempo real (2026-08-03)
 
 Pedido do usuário: mostrar na lista de conversas quem está atendendo cada
 uma, e poder filtrar a lista por atendente. Reaproveita o campo
@@ -4254,9 +4254,41 @@ via `BX24.callMethod('user.search')` no fluxo de delegação); usar `.avatar
 xs` (22px, classe nova) mantém consistência visual com o avatar de contato
 em vez de inventar um estilo diferente.
 
+**Tag Pendente**: card ganha uma tag vermelha "Pendente" quando
+`unreadCount > 0` (mesmo dado já usado pra bolinha `.conv-item-unread-dot`
+no topo do card). De propósito **não** existe uma tag "Lida" complementar
+— manter a lista limpa; ausência da tag já significa "em dia" (decisão do
+usuário, via pergunta direta).
+
+**Bug corrigido no mesmo pedido — atribuição não atualizava em tempo
+real**: `POST /conversations/assign` (`src/routes/whatsapp.js`) gravava no
+banco mas nunca chamava `broadcast()` (padrão já usado por `/react`,
+`/send`, etc.) — por isso a tag/linha de atribuição só refletia depois de
+trocar de conversa ou dar F5 (o que dispara um novo `GET /conversations`).
+Também faltava, no próprio client que clicava o botão
+(`setConversationAssignee`), chamar `renderConvList()`/
+`renderAssigneeFilter()` depois de atualizar `state.conversations` — só
+`renderAssignmentRow()` (a linha dentro da conversa aberta) era chamada,
+então nem quem tinha acabado de clicar via a tag mudar na lista sem trocar
+de tela.
+
+Fix nos dois lados:
+- Backend: `broadcast(session, phone, { type: 'assignment', assignedTo,
+  assignedToName })` depois de `store.assignConversation` — mesmo hub de
+  WebSocket que já propaga mensagem/reação/status, então chega em tempo
+  real pra qualquer aba/usuário com acesso àquela instância (dono e todos
+  os delegados), não só pra quem fez a ação.
+- Frontend (`public/chat.html`): `setConversationAssignee` agora chama
+  `renderConvList()`/`renderAssigneeFilter()` também (efeito imediato pra
+  quem clicou); novo handler `payload.type === 'assignment'` em
+  `openSingleInboxSocket` atualiza `state.conversations`/`state.active` e
+  re-renderiza lista + linha de atribuição quando o evento chega de outra
+  aba/usuário.
+
 - [ ] Não testado dentro do Bitrix ainda — só revisão de código e checagem
-  de sintaxe dos 4 scripts inline do `chat.html`, sem servidor local pra
-  validar visualmente o filtro/tag com uma conversa de verdade atribuída.
+  de sintaxe (`node -c` no backend, extração+`new Function` nos 4 scripts
+  inline do `chat.html`), sem servidor local pra validar visualmente o
+  tempo real com duas abas/usuários simultâneos.
 - [ ] Se um atendente mudar de nome no Bitrix depois de já ter atendido
   conversas, o nome antigo fica congelado em `assigned_to_name` (mesma
   limitação já documentada na Parte CD para a linha de atribuição da

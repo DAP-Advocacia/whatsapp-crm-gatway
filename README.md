@@ -412,7 +412,13 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
 - **Tag de atendente**: quando uma conversa está atribuída (`assignedToName`,
   ver §14), o card na lista mostra uma tag com iniciais + nome de quem está
   atendendo, ao lado das tags normais do contato — mesmo dado usado na linha
-  de atribuição dentro da conversa aberta ("Atribuída a X").
+  de atribuição dentro da conversa aberta ("Atribuída a X"). Atualiza em
+  tempo real (evento `assignment` no mesmo WebSocket de mensagens) pra
+  qualquer aba/usuário olhando a lista, não só depois de recarregar.
+- **Tag Pendente**: card ganha uma tag vermelha quando a conversa tem
+  mensagem não lida (`unreadCount`, mesmo dado da bolinha de não lida) —
+  de propósito não existe uma tag "Lida" complementar, ausência de tag já
+  significa "em dia".
 - **Foto de perfil real do contato**: o avatar mostra a foto de perfil do
   WhatsApp (`sock.profilePictureUrl`, `WhatsAppGateway.getProfilePicture`)
   em vez de só as iniciais do nome, quando disponível — cai pras iniciais

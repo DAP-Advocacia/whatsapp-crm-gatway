@@ -428,6 +428,13 @@
   }
   .conv-item-assignee .avatar{ width:16px; height:16px; font-size:8px; border:none; }
 
+  .conv-item-pending{
+    display:inline-flex; align-items:center;
+    font-size:10.5px; padding:2px 8px; border-radius:100px;
+    border:1px solid var(--red); color:var(--red); background:rgba(var(--red-rgb),.1);
+    white-space:nowrap;
+  }
+
   .assignee-filter{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
   .assignee-filter-btn{
     display:flex; align-items:center; justify-content:center;
@@ -2045,7 +2052,8 @@
               </span>
             </div>
             <div class="conv-item-snippet">${mine ? 'Você: ' : ''}${escapeHtml(snippet)}</div>
-            ${(c.tags && c.tags.length) || c.assignedToName ? `<div class="conv-item-tags">
+            ${(c.tags && c.tags.length) || c.assignedToName || c.unreadCount > 0 ? `<div class="conv-item-tags">
+              ${c.unreadCount > 0 ? `<span class="conv-item-pending" title="${c.unreadCount} mensagem(ns) não lida(s)">Pendente</span>` : ''}
               ${c.assignedToName ? `<span class="conv-item-assignee" title="Atendida por ${escapeHtml(c.assignedToName)}"><span class="avatar xs">${escapeHtml(initials(c.assignedToName))}</span>${escapeHtml(c.assignedToName)}</span>` : ''}
               ${(c.tags || []).map((t) => tagChip(t, false)).join('')}
             </div>` : ''}
@@ -2248,6 +2256,10 @@
       const conv = state.conversations.find((c) => c.sessionId === a.sessionId && c.phone === a.phone);
       if (conv) { conv.assignedTo = assignedTo; conv.assignedToName = assignedToName; }
       renderAssignmentRow();
+      // reflete na tag/filtro da lista na hora, sem esperar trocar de tela —
+      // o broadcast (abaixo) cuida de propagar pra outras abas/usuários.
+      renderAssigneeFilter();
+      renderConvList();
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }
@@ -3165,6 +3177,25 @@
         if (state.active && state.active.sessionId === id) {
           state.connectionStatus = payload.status;
           updateStatusUI();
+        }
+      }
+
+      // Atendente mudou (pegou/liberou/transferiu) em QUALQUER aba/usuário
+      // vendo esta conversa — atualiza tag na lista e a linha de atribuição
+      // da conversa aberta em tempo real, sem esperar trocar de tela.
+      if (payload.type === 'assignment') {
+        const phone = payload.phone;
+        const conv = state.conversations.find((c) => c.sessionId === id && c.phone === phone);
+        if (conv) {
+          conv.assignedTo = payload.assignedTo;
+          conv.assignedToName = payload.assignedToName;
+          renderAssigneeFilter();
+          renderConvList();
+        }
+        if (state.active && state.active.sessionId === id && state.active.phone === phone) {
+          state.active.assignedTo = payload.assignedTo;
+          state.active.assignedToName = payload.assignedToName;
+          renderAssignmentRow();
         }
       }
 
