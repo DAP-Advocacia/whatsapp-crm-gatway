@@ -324,6 +324,17 @@
   .instance-phone{ font-size: 13px; color: var(--text-muted); }
   .instance-delegated-tag{ color: var(--gold); }
   .modal-hint{ font-size: 12.5px; color: var(--text-muted); margin: -4px 0 10px; line-height: 1.5; }
+  .modal-steps{ display:flex; gap:14px; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+  .modal-step{ font-size:11.5px; color:var(--text-faint); }
+  .modal-step.active{ color:var(--gold); font-weight:600; }
+  .modal-step.done{ color:var(--text-muted); }
+  .delegate-confirm-card{ display:flex; align-items:center; gap:12px; padding:12px; border:1px solid var(--border); border-radius:8px; margin-bottom:14px; }
+  .delegate-confirm-card .avatar{ width:44px; height:44px; border-radius:50%; flex-shrink:0; overflow:hidden; display:flex; align-items:center; justify-content:center; background:var(--surface-2); color:var(--gold); font-weight:600; font-size:15px; }
+  .delegate-confirm-card .avatar img{ width:100%; height:100%; object-fit:cover; }
+  .delegate-confirm-body{ min-width:0; }
+  .delegate-confirm-name{ font-size:14px; font-weight:600; color:var(--text); }
+  .delegate-confirm-position{ font-size:12px; color:var(--text-muted); margin-top:2px; }
+  .delegate-confirm-email{ font-size:12px; color:var(--text-faint); margin-top:1px; }
   .delegate-search-results{ display:flex; flex-direction:column; gap:4px; margin-top:6px; max-height:160px; overflow-y:auto; }
   .delegate-search-result{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; background:var(--surface-2); font-size:13px; }
   .delegate-search-result button{ flex-shrink:0; }
@@ -576,13 +587,46 @@
 <div class="overlay" id="delegatesModal">
   <div class="modal">
     <h3>Compartilhar acesso — <span id="delegatesInstanceLabel"></span></h3>
-    <p class="modal-hint">Quem tiver acesso passa a ver e responder as conversas desta instância. Não conta contra o limite de instâncias da pessoa.</p>
     <input type="hidden" id="delegatesInstanceId">
-    <input type="text" id="delegateSearchInput" placeholder="Buscar usuário do Bitrix pelo nome…">
-    <div id="delegateSearchResults" class="delegate-search-results"></div>
-    <div id="delegatesCurrentList" class="delegates-current-list"></div>
-    <div class="modal-actions">
-      <button class="btn secondary" id="delegatesClose">Fechar</button>
+
+    <div class="modal-steps" id="delegatesSteps">
+      <span class="modal-step active" data-step="search">1. Buscar</span>
+      <span class="modal-step" data-step="confirm">2. Confirmar</span>
+      <span class="modal-step" data-step="done">3. Concluído</span>
+    </div>
+
+    <div class="modal-step-panel" data-panel="search">
+      <p class="modal-hint">Quem tiver acesso passa a ver e responder as conversas desta instância. Não conta contra o limite de instâncias da pessoa.</p>
+      <input type="text" id="delegateSearchInput" placeholder="Buscar usuário do Bitrix pelo nome…">
+      <div id="delegateSearchResults" class="delegate-search-results"></div>
+      <div id="delegatesCurrentList" class="delegates-current-list"></div>
+      <div class="modal-actions">
+        <button class="btn secondary" id="delegatesClose">Fechar</button>
+      </div>
+    </div>
+
+    <div class="modal-step-panel" data-panel="confirm" hidden>
+      <div class="delegate-confirm-card">
+        <div class="avatar" id="delegateConfirmAvatar"></div>
+        <div class="delegate-confirm-body">
+          <div class="delegate-confirm-name" id="delegateConfirmName"></div>
+          <div class="delegate-confirm-position" id="delegateConfirmPosition"></div>
+          <div class="delegate-confirm-email" id="delegateConfirmEmail"></div>
+        </div>
+      </div>
+      <p class="modal-hint">Confirma dar acesso à instância <b id="delegateConfirmInstance"></b> pra esta pessoa?</p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="delegateConfirmBack">Voltar</button>
+        <button class="btn" id="delegateConfirmSave">Confirmar acesso</button>
+      </div>
+    </div>
+
+    <div class="modal-step-panel" data-panel="done" hidden>
+      <p class="modal-hint" id="delegateDoneMessage"></p>
+      <div class="modal-actions">
+        <button class="btn secondary" id="delegateDoneClose">Fechar</button>
+        <button class="btn" id="delegateDoneAnother">Compartilhar com mais alguém</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1042,7 +1086,10 @@
     }
   });
 
-  // ---------------- Compartilhar acesso (delegação) ----------------
+  // ---------------- Compartilhar acesso (delegação) — modal em 3 etapas ----------------
+  // 1. Buscar (usuário do Bitrix por nome) -> 2. Confirmar (foto/cargo/e-mail
+  // de quem foi escolhido) -> 3. Concluído. A lista de quem já tem acesso
+  // fica na etapa 1, junto da busca.
 
   const delegatesModal = document.getElementById('delegatesModal');
   const delegatesInstanceId = document.getElementById('delegatesInstanceId');
@@ -1051,6 +1098,14 @@
   const delegateSearchResults = document.getElementById('delegateSearchResults');
   const delegatesCurrentList = document.getElementById('delegatesCurrentList');
   let delegateSearchTimer = null;
+  let delegateCandidate = null; // { bitrixUserId, name, position, email, photo } escolhido na etapa 1
+
+  function goToDelegateStep(step) {
+    delegatesModal.querySelectorAll('.modal-step-panel').forEach((p) => { p.hidden = p.dataset.panel !== step; });
+    delegatesModal.querySelectorAll('.modal-step').forEach((s) => {
+      s.classList.toggle('active', s.dataset.step === step);
+    });
+  }
 
   // Busca por usuário do Bitrix pelo nome — resolvido direto no navegador
   // via BX24 (mesmo SDK já carregado nesta página), não precisa de rota
@@ -1069,10 +1124,21 @@
     delegatesInstanceLabel.textContent = label;
     delegateSearchInput.value = '';
     delegateSearchResults.innerHTML = '';
+    delegateCandidate = null;
+    goToDelegateStep('search');
     delegatesModal.classList.add('open');
     await loadDelegatesList(instanceId);
   }
-  document.getElementById('delegatesClose').addEventListener('click', () => delegatesModal.classList.remove('open'));
+  function closeDelegatesModal() { delegatesModal.classList.remove('open'); }
+  document.getElementById('delegatesClose').addEventListener('click', closeDelegatesModal);
+  document.getElementById('delegateDoneClose').addEventListener('click', closeDelegatesModal);
+  document.getElementById('delegateConfirmBack').addEventListener('click', () => goToDelegateStep('search'));
+  document.getElementById('delegateDoneAnother').addEventListener('click', () => {
+    delegateSearchInput.value = '';
+    delegateSearchResults.innerHTML = '';
+    goToDelegateStep('search');
+    delegateSearchInput.focus();
+  });
 
   async function loadDelegatesList(instanceId) {
     try {
@@ -1128,36 +1194,63 @@
           return `
             <div class="delegate-search-result">
               <span>${escapeHtml(name)}</span>
-              <button type="button" data-add-delegate="${u.ID}" data-add-name="${escapeHtml(name)}">Dar acesso</button>
+              <button type="button" data-pick-delegate="${u.ID}">Selecionar</button>
             </div>
           `;
         }).join('');
-        delegateSearchResults.querySelectorAll('[data-add-delegate]').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const bitrixUserId = btn.dataset.addDelegate;
-            const memberId = myOwnerId.slice(0, myOwnerId.lastIndexOf('_'));
-            const delegateOwnerId = `${memberId}_${bitrixUserId}`;
-            const instanceId = delegatesInstanceId.value;
-            try {
-              const res = await apiFetch(`${API_BASE}/instances/${instanceId}/delegates`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ owner: myOwnerId, delegateOwnerId, delegateName: btn.dataset.addName }),
-              });
-              if (!res.ok) throw new Error((await res.json()).error);
-              delegateSearchInput.value = '';
-              delegateSearchResults.innerHTML = '';
-              await loadDelegatesList(instanceId);
-              if (window.showToast) window.showToast('Acesso concedido.', 'success');
-            } catch (err) {
-              if (window.showToast) window.showToast(err.message, 'error');
-            }
+        delegateSearchResults.querySelectorAll('[data-pick-delegate]').forEach((btn, idx) => {
+          btn.addEventListener('click', () => {
+            const u = users[idx];
+            delegateCandidate = {
+              bitrixUserId: u.ID,
+              name: [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || ('Usuário ' + u.ID),
+              position: u.WORK_POSITION || '',
+              email: u.EMAIL || '',
+              photo: u.PERSONAL_PHOTO || '',
+            };
+            renderDelegateConfirmStep();
+            goToDelegateStep('confirm');
           });
         });
       } catch (err) {
         delegateSearchResults.innerHTML = `<p class="empty">Falha na busca: ${escapeHtml(err.message)}</p>`;
       }
     }, 350);
+  });
+
+  // Etapa 2: mostra quem foi escolhido (foto/cargo/e-mail, o que a API do
+  // Bitrix devolver) antes de conceder o acesso de verdade.
+  function renderDelegateConfirmStep() {
+    const c = delegateCandidate;
+    const initials = c.name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0].toUpperCase()).join('') || '?';
+    document.getElementById('delegateConfirmAvatar').innerHTML = c.photo
+      ? `<img src="${c.photo}" alt="">`
+      : escapeHtml(initials);
+    document.getElementById('delegateConfirmName').textContent = c.name;
+    document.getElementById('delegateConfirmPosition').textContent = c.position || 'Cargo não informado';
+    document.getElementById('delegateConfirmEmail').textContent = c.email || '';
+    document.getElementById('delegateConfirmInstance').textContent = delegatesInstanceLabel.textContent;
+  }
+
+  document.getElementById('delegateConfirmSave').addEventListener('click', async () => {
+    const c = delegateCandidate;
+    if (!c) return;
+    const memberId = myOwnerId.slice(0, myOwnerId.lastIndexOf('_'));
+    const delegateOwnerId = `${memberId}_${c.bitrixUserId}`;
+    const instanceId = delegatesInstanceId.value;
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/${instanceId}/delegates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ owner: myOwnerId, delegateOwnerId, delegateName: c.name }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      document.getElementById('delegateDoneMessage').textContent = `Pronto — ${c.name} já pode ver e responder as conversas desta instância.`;
+      goToDelegateStep('done');
+      await loadDelegatesList(instanceId);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
   });
 
   // ---------------- Remover ----------------
