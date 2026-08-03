@@ -4102,12 +4102,11 @@ seletor de instância pra quem é delegado.
   backend já recusava (`addDelegate`, "não é possível delegar pra si
   mesmo"), só que sem feedback visível na hora certa; agora bloqueia e
   avisa já na seleção, antes de ir pra etapa de confirmar.
-- [ ] **Commit pendente, NÃO publicado de propósito**
-  (`704d65e — Bloqueia autodelegação na seleção + ajusta paleta`) — pausado
-  a pedido do usuário depois de descobrir que os vários deploys de hoje
-  (cada um reconecta as ~44 instâncias de uma vez) parecem estar
-  derrubando sessões reais de WhatsApp (ver item abaixo). Publicar na
-  próxima janela de baixo uso, não antes.
+- [x] ~~Commit pendente, NÃO publicado de propósito
+  (`704d65e — Bloqueia autodelegação na seleção + ajusta paleta`)~~ —
+  publicado em 2026-08-03 junto com o fix de escalonamento (Parte CE),
+  depois de confirmado que o merge com o commit de Bruno Durão em
+  `DEPLOY.md` não tinha conflito.
 
 **Achado importante nesta sessão — deploys reconectando instâncias em
 massa derrubando sessões reais**: usuário reportou instância `183168`
@@ -4150,18 +4149,48 @@ já em memória, via `SessionManager.get()`) — ela só reconecta se
 `gateway.loggedOut === true` (sessão já morta por outro motivo), então não
 participa do pico de boot; é comportamento por-request, não por-deploy.
 
-- [ ] `SESSION_STAGGER_MS=4000` é um chute inicial, não calibrado contra
-  nenhum limite documentado do WhatsApp — se ainda cair sessão em redeploy
-  com esse valor, considerar aumentar (ex: 8000-10000ms) ou adotar batches
-  pequenos (N por vez) em vez de 1 por vez.
+**Publicado e testado em produção em 2026-08-03** (commit `64f6fe1`, junto
+com `704d65e`/`4c25bee` pendentes e um merge do commit `2d6cd9c` de Bruno
+Durão em `DEPLOY.md`, sem conflito). Resultado do deploy real com
+`SESSION_STAGGER_MS=4000` (valor inicial): das 11 sessões com `creds.json`
+retomadas no boot, **6 reconectaram normalmente** (`169094`, `185164`,
+`185166`, `75974`, `8465__ms6fzwlsri25`, `153452` — essa última teve um
+"conflict/replaced" no meio mas se recuperou sozinha), mas **5 caíram com
+logout real** (`401 loggedOut=true`: `153064`, `161452`, `178810`, `9129`,
+`9129__ms8ujgfydiup`). A `183168` (a que motivou a investigação original)
+continuou num loop de retry (`connecting`/`408 timedOut`) sem nunca logar
+nem conectar — consistente com já estar sem `creds.json` desde antes, não
+é dano novo deste boot.
+
+**Conclusão**: escalonar sozinho, com 4s de intervalo, **não foi
+suficiente** — ainda houve queda de quase metade das sessões neste boot.
+Não dá pra saber com certeza se essas 5 já estavam fragilizadas de
+deploys anteriores (de antes deste fix existir) ou se 4s ainda é rajada
+demais pro WhatsApp — não havia como isolar as duas causas sem outro teste
+real. **Decisão do usuário**: aumentar bastante o intervalo em vez de
+investigar mais a fundo agora. `SESSION_STAGGER_MS` subiu de `4000` pra
+`15000` (arquivo `.env` da VPS **ainda precisa ser atualizado
+manualmente** — a env var só é lida em `src/sessions.js:95`, não há
+migração automática; o `.env.example` já reflete o novo padrão). Com 11
+sessões, o boot completo (última reconexão) passa a levar ~2,75min em vez
+de ~40s — o servidor HTTP responde bem antes disso, então não afeta
+disponibilidade da API/painel, só o tempo até a última instância voltar a
+receber mensagens.
+
+- [ ] **Ainda não teve um segundo deploy real pra validar o valor novo
+  (15s)** — só o merge/push que subiu o próprio aumento do valor ainda não
+  rodou em produção até o fechamento desta entrada. Próximo deploy real é
+  o teste de verdade.
+- [ ] As 5 sessões que caíram neste boot (`153064`, `161452`, `178810`,
+  `9129`, `9129__ms8ujgfydiup`) precisam de QR novo — usuários donos ainda
+  não foram avisados.
 - [ ] Ainda não valida se a defesa do WhatsApp olha "conexões novas por
   minuto" (o que o escalonamento resolve) ou algo mais amplo tipo "IP de
   origem" (o que só um pool de IPs/proxies resolveria) — o fix parte da
-  hipótese mais provável (padrão de rajada), mas só uma janela real de
-  redeploy com todas as instâncias vai confirmar se resolveu de fato.
-- [ ] Não publicado ainda — segue a mesma pausa de deploys decidida na
-  Parte CD; este fix deve subir junto com o commit `704d65e` já pendente,
-  na próxima janela de baixo uso.
+  hipótese mais provável (padrão de rajada), mas só mais deploys reais vão
+  confirmar se 15s resolve de fato ou se precisa subir ainda mais /
+  trocar de estratégia (ex: lotes pequenos, ou não reconectar tudo no
+  boot e sim sob demanda quando alguém abrir a aba daquele usuário).
 
 ---
 

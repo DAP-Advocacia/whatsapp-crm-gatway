@@ -92,7 +92,7 @@ class SessionManager {
    */
   async startAllExisting() {
     if (!fs.existsSync(this.baseFolder)) return;
-    const STAGGER_MS = Number(process.env.SESSION_STAGGER_MS || 4000);
+    const STAGGER_MS = Number(process.env.SESSION_STAGGER_MS || 15000);
     const entries = fs.readdirSync(this.baseFolder, { withFileTypes: true });
     const pending = entries.filter((entry) => {
       if (!entry.isDirectory()) return false;
