@@ -397,15 +397,22 @@ Diferente da aba `public/index.html` (embutida no card de um Negócio, uma conve
 por vez), esta é a visão de **inbox**: lista todas as conversas do usuário lado a
 lado com a conversa aberta, acessada pela sidebar como as demais páginas.
 
-- **Lista de conversas**: busca por contato, filtro por tag, seletor de instância
-  (quando o usuário tem mais de uma) — aceita "todas as minhas instâncias" numa
-  lista só. Atualiza em tempo real via WebSocket (`/api/whatsapp/stream`). Cada
+- **Lista de conversas**: busca por contato, filtro por tag, filtro por
+  atendente (avatares com iniciais, ao lado do filtro de tags — só aparece
+  quando existe pelo menos uma conversa atribuída na lista atual; ver
+  delegação de instância, §14), seletor de instância (quando o usuário tem
+  mais de uma) — aceita "todas as minhas instâncias" numa lista só.
+  Atualiza em tempo real via WebSocket (`/api/whatsapp/stream`). Cada
   avatar tem uma bolinha de status (verde/vermelho/cinza) mostrando se a
   **instância** dona daquela conversa está conectada ao WhatsApp agora —
   `state.instanceStatus`, populado por `GET /instances` e mantido em tempo real
   pelo mesmo evento `status` do WebSocket. Não é presença do contato (o
   WhatsApp não expõe isso pra uma lista inteira, só pra uma conversa aberta por
   vez, e depende da privacidade de cada pessoa).
+- **Tag de atendente**: quando uma conversa está atribuída (`assignedToName`,
+  ver §14), o card na lista mostra uma tag com iniciais + nome de quem está
+  atendendo, ao lado das tags normais do contato — mesmo dado usado na linha
+  de atribuição dentro da conversa aberta ("Atribuída a X").
 - **Foto de perfil real do contato**: o avatar mostra a foto de perfil do
   WhatsApp (`sock.profilePictureUrl`, `WhatsAppGateway.getProfilePicture`)
   em vez de só as iniciais do nome, quando disponível — cai pras iniciais

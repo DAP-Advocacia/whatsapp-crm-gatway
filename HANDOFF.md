@@ -4225,6 +4225,43 @@ sessão que o WhatsApp já invalidou do lado dele.
   *novo* conjunto de sessões (diferente destas 5) cair em um próximo
   deploy — aí sim seria sinal de que o timing ainda importa.
 
+### Parte CF — Chat: tag de atendente na lista + filtro por atendente (2026-08-03)
+
+Pedido do usuário: mostrar na lista de conversas quem está atendendo cada
+uma, e poder filtrar a lista por atendente. Reaproveita o campo
+`assignedTo`/`assignedToName` já existente da feature de delegação
+(Parte CD) — não precisou de mudança nenhuma no backend.
+
+**Tag de atendente** (`public/chat.html`): cada card de conversa que tem
+`assignedToName` preenchido ganha uma tag com iniciais + nome, ao lado das
+tags normais de contato (mesmo espaço, `.conv-item-tags`) — mesmo texto já
+usado na linha de atribuição dentro da conversa aberta ("Atribuída a X").
+
+**Filtro por atendente**: linha nova de avatares (iniciais, 22px) ao lado
+do filtro de tags — `renderAssigneeFilter()`, chamada toda vez que
+`loadConversations()` recarrega a lista. **Não é uma lista fixa de
+usuários do Bitrix** — só aparece quem já tem pelo menos 1 conversa
+atribuída na lista atual (`Map` construído a partir de
+`state.conversations`, chave = `assignedTo`/ownerId, valor = nome). Fica
+`hidden` (todo o bloco some) quando nenhuma conversa está atribuída ainda.
+Botão "todos os atendentes" (ícone de pessoas) sempre presente quando o
+bloco aparece, pra limpar o filtro. Segue o mesmo padrão de fonte/borda
+dourada do resto do app (`--gold`), sem cor nova inventada.
+
+Sem foto real do atendente (só iniciais, `avatarInner`/`initials` já
+existentes) — o app não guarda avatar de usuário Bitrix, só nome (captado
+via `BX24.callMethod('user.search')` no fluxo de delegação); usar `.avatar
+xs` (22px, classe nova) mantém consistência visual com o avatar de contato
+em vez de inventar um estilo diferente.
+
+- [ ] Não testado dentro do Bitrix ainda — só revisão de código e checagem
+  de sintaxe dos 4 scripts inline do `chat.html`, sem servidor local pra
+  validar visualmente o filtro/tag com uma conversa de verdade atribuída.
+- [ ] Se um atendente mudar de nome no Bitrix depois de já ter atendido
+  conversas, o nome antigo fica congelado em `assigned_to_name` (mesma
+  limitação já documentada na Parte CD para a linha de atribuição da
+  conversa aberta) — a tag na lista herda essa mesma limitação.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

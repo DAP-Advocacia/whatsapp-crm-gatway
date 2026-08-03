@@ -420,6 +420,25 @@
   .tag-chip .tag-remove{ background:none; border:none; color:inherit; cursor:pointer; font-size:12px; line-height:1; padding:0; margin-left:1px; }
   .tag-chip .tag-remove:hover{ opacity:.7; }
 
+  .conv-item-assignee{
+    display:inline-flex; align-items:center; gap:4px;
+    font-size:10.5px; padding:2px 8px 2px 4px; border-radius:100px;
+    border:1px solid var(--gold-dim); color:var(--gold); background:rgba(var(--gold-rgb),.1);
+    white-space:nowrap;
+  }
+  .conv-item-assignee .avatar{ width:16px; height:16px; font-size:8px; border:none; }
+
+  .assignee-filter{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .assignee-filter-btn{
+    display:flex; align-items:center; justify-content:center;
+    background:none; border:2px solid transparent; border-radius:50%; padding:0;
+    cursor:pointer; line-height:0; opacity:.55; transition:opacity .15s, border-color .15s;
+  }
+  .assignee-filter-btn:hover{ opacity:1; }
+  .assignee-filter-btn.active{ opacity:1; border-color:var(--gold); }
+  .assignee-filter-btn .avatar{ color:var(--text-muted); }
+  .assignee-filter-btn.active .avatar{ color:var(--gold); }
+
   .conv-view{ flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
   .back-btn{ display:none; }
 
@@ -460,6 +479,7 @@
     font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px;
     color: var(--gold); flex-shrink: 0; position: relative;
   }
+  .avatar.xs{ width:22px; height:22px; font-size:9px; }
   .avatar.sm{ width:34px; height:34px; font-size:13px; }
   .avatar.lg{ width:64px; height:64px; font-size:22px; }
   .avatar img{ width:100%; height:100%; border-radius:50%; object-fit:cover; }
@@ -875,6 +895,11 @@
     <div class="conv-filters">
       <input type="search" id="convSearch" placeholder="Buscar contato…" />
       <select id="tagFilterSelect"><option value="">Todas as tags</option></select>
+      <div class="assignee-filter" id="assigneeFilter" hidden>
+        <button type="button" class="assignee-filter-btn active" data-assignee="" title="Todos os atendentes">
+          <span class="avatar xs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+        </button>
+      </div>
       <div class="conv-filters-row">
         <div class="archive-filter" id="archiveFilter">
           <button type="button" data-archived="false" class="active">Ativas</button>
@@ -1562,6 +1587,7 @@
   const instanceSelect = document.getElementById('instanceSelect');
   const convSearch = document.getElementById('convSearch');
   const tagFilterSelect = document.getElementById('tagFilterSelect');
+  const assigneeFilterEl = document.getElementById('assigneeFilter');
   const convList = document.getElementById('convList');
   const convView = document.getElementById('convView');
   const contactPanel = document.getElementById('contactPanel');
@@ -1573,6 +1599,7 @@
     conversations: [],
     tags: [],
     tagFilter: '',
+    assigneeFilter: '', // '' = todos; caso contrário, ownerId de quem está atendendo
     search: '',
     archivedView: false, // false = "Ativas", true = "Arquivadas"
     active: null,       // { sessionId, phone, contactName, dealId, tags }
@@ -1928,6 +1955,7 @@
       if (!res.ok) throw new Error('falha ao carregar conversas');
       const data = await res.json();
       state.conversations = data.conversations || [];
+      renderAssigneeFilter();
       renderConvList();
       fetchMissingAvatars();
     } catch (err) {
@@ -1941,8 +1969,46 @@
     return (conv.tags || []).some((t) => t.name === state.tagFilter);
   }
 
+  function passesAssigneeFilter(conv) {
+    if (!state.assigneeFilter) return true;
+    return conv.assignedTo === state.assigneeFilter;
+  }
+
+  // Reconstrói os botões do filtro de atendente a partir de quem já está
+  // atendendo alguma conversa da lista atual (não é uma lista fixa de
+  // usuários — só aparece quem tem pelo menos 1 conversa atribuída).
+  function renderAssigneeFilter() {
+    const seen = new Map(); // ownerId -> nome
+    state.conversations.forEach((c) => {
+      if (c.assignedTo) seen.set(c.assignedTo, c.assignedToName || 'Atendente');
+    });
+    if (!seen.size) {
+      assigneeFilterEl.hidden = true;
+      if (state.assigneeFilter) { state.assigneeFilter = ''; }
+      return;
+    }
+    assigneeFilterEl.hidden = false;
+    if (state.assigneeFilter && !seen.has(state.assigneeFilter)) state.assigneeFilter = '';
+    const allBtn = `
+      <button type="button" class="assignee-filter-btn ${!state.assigneeFilter ? 'active' : ''}" data-assignee="" title="Todos os atendentes">
+        <span class="avatar xs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      </button>`;
+    const ownerBtns = [...seen.entries()].map(([ownerId, name]) => `
+      <button type="button" class="assignee-filter-btn ${state.assigneeFilter === ownerId ? 'active' : ''}" data-assignee="${escapeHtml(ownerId)}" title="${escapeHtml(name)}">
+        <span class="avatar xs">${escapeHtml(initials(name))}</span>
+      </button>`).join('');
+    assigneeFilterEl.innerHTML = allBtn + ownerBtns;
+    assigneeFilterEl.querySelectorAll('.assignee-filter-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.assigneeFilter = btn.dataset.assignee;
+        renderAssigneeFilter();
+        renderConvList();
+      });
+    });
+  }
+
   function renderConvList() {
-    const list = state.conversations.filter(passesTagFilter);
+    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c));
     if (!list.length) {
       convList.innerHTML = `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
       return;
@@ -1979,7 +2045,10 @@
               </span>
             </div>
             <div class="conv-item-snippet">${mine ? 'Você: ' : ''}${escapeHtml(snippet)}</div>
-            ${(c.tags && c.tags.length) ? `<div class="conv-item-tags">${c.tags.map((t) => tagChip(t, false)).join('')}</div>` : ''}
+            ${(c.tags && c.tags.length) || c.assignedToName ? `<div class="conv-item-tags">
+              ${c.assignedToName ? `<span class="conv-item-assignee" title="Atendida por ${escapeHtml(c.assignedToName)}"><span class="avatar xs">${escapeHtml(initials(c.assignedToName))}</span>${escapeHtml(c.assignedToName)}</span>` : ''}
+              ${(c.tags || []).map((t) => tagChip(t, false)).join('')}
+            </div>` : ''}
           </div>
         </div>
       `;
