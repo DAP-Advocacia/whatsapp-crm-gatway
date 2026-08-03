@@ -105,7 +105,7 @@ async function listAccessible(ownerId) {
      from instances i
      join instance_delegates d on d.instance_id = i.id
      where d.delegate_owner_id = $1
-     order by created_at asc`,
+     order by "createdAt" asc`,
     [ownerId]
   );
   return rows;
