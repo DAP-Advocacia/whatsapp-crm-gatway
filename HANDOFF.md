@@ -4177,20 +4177,53 @@ de ~40s — o servidor HTTP responde bem antes disso, então não afeta
 disponibilidade da API/painel, só o tempo até a última instância voltar a
 receber mensagens.
 
-- [ ] **Ainda não teve um segundo deploy real pra validar o valor novo
-  (15s)** — só o merge/push que subiu o próprio aumento do valor ainda não
-  rodou em produção até o fechamento desta entrada. Próximo deploy real é
-  o teste de verdade.
-- [ ] As 5 sessões que caíram neste boot (`153064`, `161452`, `178810`,
-  `9129`, `9129__ms8ujgfydiup`) precisam de QR novo — usuários donos ainda
-  não foram avisados.
-- [ ] Ainda não valida se a defesa do WhatsApp olha "conexões novas por
-  minuto" (o que o escalonamento resolve) ou algo mais amplo tipo "IP de
-  origem" (o que só um pool de IPs/proxies resolveria) — o fix parte da
-  hipótese mais provável (padrão de rajada), mas só mais deploys reais vão
-  confirmar se 15s resolve de fato ou se precisa subir ainda mais /
-  trocar de estratégia (ex: lotes pequenos, ou não reconectar tudo no
-  boot e sim sob demanda quando alguém abrir a aba daquele usuário).
+**Segundo teste real (15s), causa raiz isolada**: o deploy do commit
+`93d0c6f` (aumento pra `SESSION_STAGGER_MS=15000`) subiu e derrubou
+**exatamente as mesmas 5 sessões** do teste anterior (`153064`, `161452`,
+`178810`, `9129`, `9129__ms8ujgfydiup`) — nem uma a mais, nem uma a menos
+— e as mesmas 6 continuaram online. Triplicar o intervalo (4s → 15s) não
+mudou o resultado em nada, o que descarta a hipótese de "rajada de boot"
+como causa dessas 5 quedas.
+
+Confirmado via `stat` no `creds.json` de cada uma dentro do container:
+as 3 conferidas (`153064`, `161452`, `178810`) têm `creds.json` **parado
+desde 29/07 ou 31/07** — dias antes destes dois testes — enquanto uma das
+que sobreviveu (`169094`) tem `creds.json` **atualizado no próprio boot de
+hoje** (rotação de chave de sessão Signal acontecendo normalmente). Ou
+seja: essas 5 sessões já estavam mortas/invalidadas de deploys anteriores
+a todo este trabalho de escalonamento — não caíram por causa do boot de
+hoje, só *pareciam* estar vivas (o processo achava que tinha uma sessão
+salva pra retomar) e o WhatsApp já tinha invalidado do lado dele havia
+dias.
+
+**Conclusão final**: o fix de escalonamento (`64f6fe1`/`93d0c6f`) está
+correto e deve continuar — protege contra o processo *causar* novas
+quedas futuras ao abrir dezenas de conexões simultâneas. Mas ele **não
+cura, e nunca curaria, sessões que já morreram antes dele existir**. As 5
+sessões + a `183168` (6 no total) só voltam escaneando QR novo em
+`/instances.html` — não há correção de código possível pra "reviver" uma
+sessão que o WhatsApp já invalidou do lado dele.
+
+- [x] ~~Ainda não teve um segundo deploy real pra validar o valor novo
+  (15s)~~ — testado, resultado idêntico ao de 4s (mesmas 5 caíram, mesmas
+  6 sobreviveram), confirmando que o intervalo não é a variável relevante
+  pra essas 5.
+- [ ] As 5 sessões (`153064`, `161452`, `178810`, `9129`,
+  `9129__ms8ujgfydiup`) + a `183168` precisam de QR novo — usuários donos
+  ainda não foram avisados. Usuário optou por não identificar os donos
+  agora ("não precisa, siga com a questão que mencionei acima").
+- [ ] Causa raiz de *por que* essas sessões foram invalidadas pelo
+  WhatsApp em primeiro lugar (antes de qualquer teste desta sessão)
+  continua desconhecida — pode ter sido rajada de boot de deploys
+  anteriores (de antes do fix existir), ou outro motivo (ex: dispositivo
+  removido manualmente, expiração natural do WhatsApp Web). Sem logs de
+  época pra confirmar; não investigável retroativamente com o que está
+  disponível hoje.
+- [ ] `SESSION_STAGGER_MS=15000` fica como valor definitivo por ora — não
+  há evidência de que subir mais ajudaria, já que o teste mostrou que o
+  intervalo não influencia essas quedas específicas. Reavaliar só se um
+  *novo* conjunto de sessões (diferente destas 5) cair em um próximo
+  deploy — aí sim seria sinal de que o timing ainda importa.
 
 ---
 
