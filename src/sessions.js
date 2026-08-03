@@ -82,17 +82,29 @@ class SessionManager {
    * No boot do servidor, reinicia todas as sessões que já têm credenciais
    * salvas em disco — assim usuários já pareados voltam a receber mensagens
    * mesmo sem ninguém ter aberto a aba ainda.
+   *
+   * Escalonado (um a cada STAGGER_MS, não tudo de uma vez): abrir dezenas de
+   * conexões WebSocket pro WhatsApp no mesmo instante parece pro WhatsApp um
+   * padrão de login em massa a partir do mesmo processo/IP, e a defesa
+   * anti-abuso deles reage derrubando (deslogando) sessões — foi o que
+   * causou o incidente de 31/07/2026 (instância 183168 e outras deslogadas
+   * após um deploy). Um delay entre cada reconexão evita esse pico.
    */
-  startAllExisting() {
+  async startAllExisting() {
     if (!fs.existsSync(this.baseFolder)) return;
+    const STAGGER_MS = Number(process.env.SESSION_STAGGER_MS || 4000);
     const entries = fs.readdirSync(this.baseFolder, { withFileTypes: true });
-    for (const entry of entries) {
-      // cada sessão pareada é uma subpasta com um creds.json dentro
-      if (!entry.isDirectory()) continue;
+    const pending = entries.filter((entry) => {
+      if (!entry.isDirectory()) return false;
       const credsPath = path.join(this.baseFolder, entry.name, 'creds.json');
-      if (fs.existsSync(credsPath)) {
-        console.log(`[sessions] retomando sessão salva: ${entry.name}`);
-        this.get(entry.name);
+      return fs.existsSync(credsPath);
+    });
+    console.log(`[sessions] retomando ${pending.length} sessão(ões) salva(s), escalonado a cada ${STAGGER_MS}ms`);
+    for (const entry of pending) {
+      console.log(`[sessions] retomando sessão salva: ${entry.name}`);
+      this.get(entry.name);
+      if (entry !== pending[pending.length - 1]) {
+        await new Promise((resolve) => setTimeout(resolve, STAGGER_MS));
       }
     }
   }

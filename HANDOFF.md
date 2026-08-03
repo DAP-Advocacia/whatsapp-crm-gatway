@@ -4123,6 +4123,46 @@ massa no boot) — hoje já tem evidência concreta de dano, não só risco
 teórico. **Decisão**: pausar novos deploys por enquanto, só retomar numa
 janela de baixo uso.
 
+### Parte CE — Correção: reconexão em massa no boot escalonada (2026-08-03)
+
+Causa raiz do achado da Parte CD confirmada e corrigida.
+`SessionManager.startAllExisting()` (`src/sessions.js`), chamado uma vez no
+boot do servidor, percorria todas as subpastas de `auth_session` com
+`creds.json` e chamava `this.get(entry.name)` — e portanto
+`gateway.start()` — pra cada uma, em sequência **síncrona no mesmo tick**,
+sem nenhum intervalo. Resultado: todo redeploy abre dezenas de conexões
+WebSocket pro WhatsApp praticamente no mesmo instante, o que parece pro
+WhatsApp um padrão de login em massa a partir do mesmo processo/IP — a
+defesa anti-abuso deles reage derrubando (deslogando) sessões. Foi
+exatamente isso que derrubou a instância `183168` e outras no incidente
+documentado na Parte CD.
+
+**Fix**: `startAllExisting()` virou `async` e agora inicia uma sessão por
+vez, com um `await` de `SESSION_STAGGER_MS` (padrão 4000ms, configurável via
+`.env`) entre cada uma — não espera antes da primeira nem depois da
+última. Chamada em `src/server.js` continua sem `await` (fire-and-forget)
+de propósito: o boot HTTP não pode ficar bloqueado esperando ~44 sessões ×
+4s (quase 3 minutos) pra responder na porta; o escalonamento roda em
+segundo plano enquanto o servidor já está no ar.
+
+Não mexe em `requestFreshQr()` (chamado a cada acesso de rota numa sessão
+já em memória, via `SessionManager.get()`) — ela só reconecta se
+`gateway.loggedOut === true` (sessão já morta por outro motivo), então não
+participa do pico de boot; é comportamento por-request, não por-deploy.
+
+- [ ] `SESSION_STAGGER_MS=4000` é um chute inicial, não calibrado contra
+  nenhum limite documentado do WhatsApp — se ainda cair sessão em redeploy
+  com esse valor, considerar aumentar (ex: 8000-10000ms) ou adotar batches
+  pequenos (N por vez) em vez de 1 por vez.
+- [ ] Ainda não valida se a defesa do WhatsApp olha "conexões novas por
+  minuto" (o que o escalonamento resolve) ou algo mais amplo tipo "IP de
+  origem" (o que só um pool de IPs/proxies resolveria) — o fix parte da
+  hipótese mais provável (padrão de rajada), mas só uma janela real de
+  redeploy com todas as instâncias vai confirmar se resolveu de fato.
+- [ ] Não publicado ainda — segue a mesma pausa de deploys decidida na
+  Parte CD; este fix deve subir junto com o commit `704d65e` já pendente,
+  na próxima janela de baixo uso.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
