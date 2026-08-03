@@ -142,8 +142,47 @@ Pontos de atenção:
 - `DATABASE_URL` / `DIRECT_URL` — a senha do Postgres precisa vir
   **URL-encoded** (`@` → `%40`), senão a conexão falha
 - `AUTH_TOKEN_SECRET` — trocar desloga todos os usuários do app de uma vez
+- `BITRIX_PORTAL_DOMAIN` / `BITRIX_MEMBER_ID` — ver seção 5.1
 - A opção **Create env file** grava um `.env` dentro do container, redundante com
   as env vars do Swarm. Pode ficar desligada.
+
+### 5.1 Trocar de portal Bitrix (nuvem → on-premise, ou outro portal)
+
+**Quatro** variáveis apontam para o Bitrix, e é fácil trocar só as óbvias:
+
+| Variável | Observação |
+|---|---|
+| `BITRIX_PORTAL_DOMAIN` | só o host — sem `https://`, sem barra final |
+| `BITRIX_MEMBER_ID` | **muda junto com o portal** |
+| `BITRIX_WEBHOOK_URL` | webhook novo, gerado no portal novo |
+| `PUBLIC_URL` | só muda se o domínio do app mudar |
+
+`BITRIX_PORTAL_DOMAIN` é a que passa despercebido: [`src/auth.js`](src/auth.js) monta
+`https://${BITRIX_PORTAL_DOMAIN}/rest/user.current.json?auth=…` para validar o
+token do usuário. Apontando para o portal antigo, o token do portal novo é
+rejeitado e **toda** tela mostra `Falha ao carregar: falha ao autenticar com o
+Bitrix` (o `POST /api/auth/verify` responde `401`).
+
+O `member_id` novo sai do log da instalação do app:
+
+```bash
+docker service logs whatsapp-gateway_gateway --tail 200 | grep bitrix
+```
+
+> ⚠️ **Trocar `BITRIX_MEMBER_ID` órfã os dados existentes.** O `ownerId` é
+> `${BITRIX_MEMBER_ID}_${userId}`, então instâncias, conversas e mensagens do
+> portal antigo deixam de ser visíveis — é preciso reconectar as instâncias
+> (QR Code novo). Para preservar, um `UPDATE` trocando o prefixo do `ownerId`
+> nas tabelas resolve.
+
+Se o erro de autenticação persistir mesmo com o domínio certo, as duas causas
+seguintes são específicas de on-premise:
+
+1. **Módulo REST inacessível externamente** — testar de dentro do container:
+   `curl "https://<portal>/rest/user.current.json?auth=<token>"`
+2. **Certificado autoassinado ou cadeia incompleta** — o `fetch()` do Node falha
+   e o `catch` devolve `null`, dando o mesmo erro na tela. Distinguir pelo log:
+   `[auth] falha ao verificar token com o Bitrix: <mensagem TLS>`
 
 > 🔒 `docker inspect` imprime **todas** as env vars em claro. Ao inspecionar em
 > troubleshooting, filtre o que for colar em qualquer lugar:
@@ -232,6 +271,8 @@ curl -I https://whatsapp.bmdholding.com.br
 | `Service is not reachable` (página do EasyPanel) | idem |
 | `native WebSocket not found` | build com Node < 22 (seção 2) |
 | pede QR para todas as instâncias | `AUTH_FOLDER` relativo ou bind mount ausente (seção 3) |
+| `falha ao autenticar com o Bitrix` em todas as telas | `BITRIX_PORTAL_DOMAIN` aponta para o portal errado (seção 5.1) |
+| instâncias antigas desaparecem da lista | `BITRIX_MEMBER_ID` mudou — `ownerId` órfão (seção 5.1) |
 | `last-modified` antigo | o deploy não rodou (seção 2) |
 | `something is already running on port 80` no instalador | o EasyPanel **já está instalado** — não reinstalar |
 
