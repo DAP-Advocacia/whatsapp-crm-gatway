@@ -4312,6 +4312,101 @@ futuro voltar a conflitar com `[hidden]`.
   limitação já documentada na Parte CD para a linha de atribuição da
   conversa aberta) — a tag na lista herda essa mesma limitação.
 
+### Parte CG — Delegação AUTOMÁTICA de acesso via hierarquia do Bitrix (2026-08-03)
+
+Pedido do usuário: "os acessos dos funcionários de um supervisor sempre
+será compartilhado com o supervisor" — automático, sem o gestor precisar
+usar o "Compartilhar acesso" manual (Parte CD) um a um. Confirmado via
+perguntas: fonte é a estrutura de departamentos do próprio Bitrix (não uma
+tela nova pra configurar hierarquia à mão), acesso equivalente à delegação
+manual de hoje (instância inteira, não só leitura), e cascateando
+sub-departamentos (gestor de área também vê subordinados dos gestores
+abaixo dele, não só quem está direto no departamento dele).
+
+**Webhook dedicado, de propósito separado do de CRM**: usuário pediu
+explicitamente pra não reaproveitar `BITRIX_WEBHOOK_URL` — nova variável
+`BITRIX_HR_WEBHOOK_URL` (escopo "Usuários"), pra poder revogar/trocar um
+sem afetar o outro. Opcional: sem ela configurada, a feature fica
+inativa (mesmo padrão de degradação graciosa do webhook de CRM).
+
+**`src/bitrixHierarchy.js` (novo)**: `refreshHierarchyCache()` busca TODOS
+os departamentos (`department.get`, paginado de 50 em 50 via
+`callBitrixHRAll`) e usuários ativos (`user.get`), monta dois mapas —
+`headByDept` (`UF_HEAD` de cada departamento = quem é o gestor) e
+`childrenByDept` (pra cascatear) — daí, pra cada gestor, calcula a árvore
+de sub-departamentos (`collectDeptSubtree`, BFS/DFS simples com `Set`) e
+lista todo mundo que está em algum departamento dessa árvore
+(`UF_DEPARTMENT` de cada `user.get`, que é array — usuário pode estar em
+mais de um). Resultado gravado (substituindo tudo, dentro de uma
+transação) na tabela nova `hierarchy_subordinates`
+(`manager_owner_id`, `subordinate_owner_id`) — os ids já convertidos pro
+formato `ownerId` do app (`member_id_userId`) via `ownerIdFor()`
+(`src/auth.js`, já existia, só reaproveitado).
+
+**Cache, não tempo real** (decisão do usuário): `HIERARCHY_CACHE_TTL_HOURS`
+(padrão 6h). Dois modos de acesso ao cache, cada um pro seu uso:
+- `getSubordinates(managerOwnerId)` — **espera** o recálculo terminar se o
+  cache estiver vencido, antes de responder. Usado em `assertOwnsSession`
+  (`src/authz.js`), onde uma decisão de acesso/segurança não pode se basear
+  em dado propositalmente desatualizado.
+- `ensureHierarchyCacheFresh()` — dispara o recálculo em segundo plano
+  (fire-and-forget) SE estiver vencido, sem esperar. Usado em
+  `listAccessible` (`src/instances.js`), onde a resposta de `GET
+  /instances` não pode ficar lenta esperando o Bitrix; a request atual usa
+  o cache como está (mesmo que desatualizado por alguns segundos a mais),
+  a próxima já vê o resultado novo.
+
+**Integração nos dois pontos que já existiam pra delegação manual** (só
+mais uma fonte, não uma feature paralela):
+- `assertOwnsSession` (`src/authz.js`): depois de checar dono e delegado
+  manual, cai em `getSubordinates(ownerId)` como último recurso — só
+  resolvido no máximo 1x por chamada (não por id na lista), mesmo com
+  vários `session` na URL.
+- `listAccessible` (`src/instances.js`): terceira cláusula `UNION` (a
+  segunda, delegação manual, já existia) direto contra
+  `hierarchy_subordinates` — trocado `UNION ALL` por `UNION` puro, já que
+  agora a mesma instância teoricamente poderia bater em mais de uma fonte
+  (delegada manual E hierárquica ao mesmo tempo); `UNION` deduplica pela
+  linha inteira. Testado contra produção antes de assumir que funcionaria
+  igual ao `UNION ALL` já usado (`ORDER BY "createdAt"` pelo alias, mesmo
+  padrão do bug já corrigido na Parte CD) — confirmado sem erro de sintaxe.
+
+**Frontend**: nenhuma mudança — `instances.html`/`chat.html` já tratam
+`delegated: true/false` genericamente (mesmo texto "compartilhada" pros
+dois casos), sem distinguir manual de automático. Decisão consciente: a
+ação (ver/atender conversa) é idêntica nos dois casos, não valeria a
+complexidade de diferenciar visualmente por enquanto.
+
+**Migração já rodada em produção** (`node db/migrate.js`, tabela
+`hierarchy_subordinates` criada) — mas a feature em si fica **inerte**
+até `BITRIX_HR_WEBHOOK_URL` ser configurada no `.env` da VPS (não feito
+nesta sessão — falta o usuário criar o webhook no Bitrix e configurar a
+variável no EasyPanel).
+
+- [ ] **Webhook ainda não criado no Bitrix nem configurado na VPS** — sem
+  isso, `BITRIX_HR_WEBHOOK_URL` fica vazia e toda a feature (`getSubordinates`/
+  `ensureHierarchyCacheFresh`) roda em no-op silencioso (mesmo
+  comportamento de antes desta parte existir). Passo a passo: Bitrix →
+  Recursos para desenvolvedores → Outros → Webhook de entrada → marcar
+  escopo "Usuários" → copiar URL → configurar `BITRIX_HR_WEBHOOK_URL` no
+  `.env` do serviço no EasyPanel → reiniciar o serviço.
+- [ ] Não testado dentro do Bitrix ainda (nem local, nem produção) — sem
+  o webhook configurado, não dá pra validar contra departamentos reais.
+  Só revisão de código + checagem de sintaxe (`node -c`) + teste da query
+  SQL final direto contra produção (sem erro de sintaxe, mas sem dado
+  ainda pra validar o resultado).
+- [ ] Se um usuário está em MAIS de um departamento (`UF_DEPARTMENT` é
+  array no Bitrix), ele conta como subordinado de TODOS os gestores
+  desses departamentos — comportamento intencional (segue a estrutura
+  real do Bitrix), mas vale confirmar que é isso mesmo que a empresa
+  espera se algum dia isso gerar confusão ("por que meu gestor de RH
+  também vê minhas conversas de Vendas").
+- [ ] Sem endpoint/rota pra forçar um refresh manual do cache (ex: depois
+  de reorganizar o organograma no Bitrix e não querer esperar até 6h) —
+  só existe o recálculo automático sob demanda quando o cache vence. Se
+  isso virar um incômodo recorrente, considerar um botão "Sincronizar
+  hierarquia agora" em alguma tela administrativa.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

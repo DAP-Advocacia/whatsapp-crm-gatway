@@ -1,4 +1,5 @@
 const { pool } = require('./db');
+const { getSubordinates, ensureHierarchyCacheFresh } = require('./bitrixHierarchy');
 
 /**
  * Registro de instâncias de WhatsApp por "dono" (owner_id = member_id + id
@@ -94,17 +95,29 @@ async function removeDelegate(instanceId, ownerId, delegateOwnerId) {
 // Instâncias que `ownerId` pode acessar: as próprias + as delegadas a ele
 // por outro dono. Usado em GET /instances (Chat/Instâncias) — diferente de
 // listByOwner (usado só pra contar contra MAX_INSTANCES_PER_OWNER, esse
-// limite não vale pra instância delegada).
+// limite não vale pra instância delegada nem pra hierárquica).
+//
+// Terceira fonte (além de própria/delegada manual): hierarquia automática
+// via Bitrix (gestor de departamento vê instâncias de todo subordinado,
+// cascateando sub-departamentos — ver src/bitrixHierarchy.js). Lê do cache
+// já resolvido (rápido, sem chamar o Bitrix nesta request) e dispara um
+// refresh em segundo plano se estiver vencido, sem atrasar a resposta.
 async function listAccessible(ownerId) {
+  ensureHierarchyCacheFresh();
   const { rows } = await pool.query(
     `select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", false as delegated
      from instances i
      where i.owner_id = $1
-     union all
+     union
      select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", true as delegated
      from instances i
      join instance_delegates d on d.instance_id = i.id
      where d.delegate_owner_id = $1
+     union
+     select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", true as delegated
+     from instances i
+     join hierarchy_subordinates h on h.subordinate_owner_id = i.owner_id
+     where h.manager_owner_id = $1
      order by "createdAt" asc`,
     [ownerId]
   );

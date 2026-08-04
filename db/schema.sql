@@ -227,6 +227,27 @@ create table if not exists instance_delegates (
 
 create index if not exists idx_instance_delegates_delegate on instance_delegates (delegate_owner_id);
 
+-- Delegação AUTOMÁTICA via hierarquia do Bitrix (departamento/gestor) — em
+-- vez de um gerente precisar compartilhar manualmente cada instância com
+-- cada funcionário (instance_delegates acima), o gestor de um departamento
+-- já enxerga automaticamente as instâncias de todo mundo abaixo dele na
+-- árvore (cascateando sub-departamentos). Resolvido via department.get +
+-- user.get (webhook dedicado BITRIX_HR_WEBHOOK_URL, ver src/bitrixHierarchy.js)
+-- e cacheado aqui — consultar o Bitrix a cada request seria lento e
+-- arriscaria rate limit. `manager_owner_id` é sempre o gestor (member_id_userId
+-- do dono do departamento), `subordinate_owner_id` cada pessoa abaixo dele na
+-- árvore (direta ou por sub-departamento). `refreshed_at` marca quando esta
+-- linha foi calculada — ver HIERARCHY_CACHE_TTL_MS em src/bitrixHierarchy.js
+-- pra quanto tempo até recalcular.
+create table if not exists hierarchy_subordinates (
+  manager_owner_id text not null,
+  subordinate_owner_id text not null,
+  refreshed_at timestamptz not null default now(),
+  primary key (manager_owner_id, subordinate_owner_id)
+);
+
+create index if not exists idx_hierarchy_subordinates_manager on hierarchy_subordinates (manager_owner_id);
+
 -- Contatos e listas passam a ser do DONO (owner_id), não da instância —
 -- assim, se uma instância cai e o usuário conecta outra (novo session_id),
 -- os mesmos contatos/listas continuam aparecendo, em vez de ficar tudo

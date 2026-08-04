@@ -1,9 +1,12 @@
 const instancesStore = require('./instances');
+const { getSubordinates } = require('./bitrixHierarchy');
 
 /**
  * Checagem de posse/acesso: confirma que a(s) instância(s) de WhatsApp que a
- * requisição quer usar realmente pertence(m) — ou foram delegadas (ver
- * db/schema.sql, instance_delegates) — ao dono autenticado (req.ownerId, já
+ * requisição quer usar realmente pertence(m) — ou foram delegadas, manual
+ * (ver db/schema.sql, instance_delegates) ou automaticamente via hierarquia
+ * do Bitrix (ver src/bitrixHierarchy.js — gestor de departamento acessa
+ * instâncias de todo subordinado) — ao dono autenticado (req.ownerId, já
  * verificado pelo middleware requireAuth em src/auth.js).
  */
 
@@ -20,13 +23,19 @@ function normalizeSessionIds(raw) {
 async function assertOwnsSession(sessionIdOrCsv, ownerId) {
   const ids = normalizeSessionIds(sessionIdOrCsv);
   if (!ids.length || !ownerId) return false;
+  // resolvido no máximo uma vez por chamada (não por id), só quando algum
+  // id precisar cair no caminho de hierarquia — a maioria das chamadas
+  // (dono direto ou delegado manual) nem chega a consultar isso.
+  let subordinates = null;
   for (const id of ids) {
     if (id === ownerId) continue;
     const inst = await instancesStore.get(id);
     if (!inst) return false;
     if (inst.ownerId === ownerId) continue;
     const delegates = await instancesStore.listDelegates(id);
-    if (!delegates.some((d) => d.delegateOwnerId === ownerId)) return false;
+    if (delegates.some((d) => d.delegateOwnerId === ownerId)) continue;
+    if (subordinates === null) subordinates = await getSubordinates(ownerId);
+    if (!subordinates.includes(inst.ownerId)) return false;
   }
   return true;
 }

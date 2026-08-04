@@ -148,6 +148,8 @@ Edite o `.env`:
 | `AUTH_FOLDER` | Pasta-base das instâncias Baileys; cada uma vira uma subpasta | **faça backup**; persista em disco durável (não em containers efêmeros) |
 | `SESSION_STAGGER_MS` | *(opcional)* Intervalo entre reconexões de sessões salvas no boot (`SessionManager.startAllExisting`, `src/sessions.js`) | padrão `15000`ms; existe pra evitar reconectar dezenas de instâncias no mesmo instante a cada redeploy — pico que já derrubou sessões reais mesmo com 4s de intervalo (ver HANDOFF.md, Parte CE) |
 | `BITRIX_WEBHOOK_URL` | *(opcional)* Webhook de entrada do Bitrix — timeline do negócio (`crm.timeline.comment.add`) e contato/negócio por lead (`crm.contact.add`/`crm.deal.add`), ver §11.5 | formato `https://SEU-DOMINIO.bitrix24.com.br/rest/USER_ID/WEBHOOK_CODE/`. Precisa de escopo CRM. Como criar: Recursos para desenvolvedores → Outros → Webhook de entrada → marcar CRM → copiar a URL |
+| `BITRIX_HR_WEBHOOK_URL` | *(opcional)* Webhook de entrada DEDICADO (separado do de cima) — resolve hierarquia de departamentos pra delegação automática de acesso (gestor vê instâncias de todo subordinado, ver §14) | precisa de escopo "Usuários". Sem esta variável, a feature fica inativa; continua funcionando só a delegação manual |
+| `HIERARCHY_CACHE_TTL_HOURS` | *(opcional)* Validade do cache da hierarquia (tabela `hierarchy_subordinates`) antes de recalcular contra o Bitrix | padrão `6` horas |
 | `BITRIX_LEADS_CATEGORY_ID` | *(opcional)* Pipeline ÚNICO e compartilhado onde TODAS as LPs lançam negócio | é o número depois de `/category/` na URL do kanban: `.../crm/deal/kanban/category/<NUMERO>/`. Visibilidade por SDR é permissão nativa do Bitrix (config manual), não código |
 | `OPENAI_API_KEY` | *(opcional)* Chave da OpenAI (`platform.openai.com`) usada pelo botão "Gerar com IA" ao encerrar um teste A/B (ver §11.5) | sem ela, o botão mostra erro mas o encerramento continua funcionando com análise manual |
 | `ALLOWED_ORIGINS` | Domínio(s) do seu Bitrix24 autorizados no CORS | separe múltiplos por vírgula |
@@ -917,6 +919,21 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
   conversa"/"Transferir pra mim" no cabeçalho do Chat; notificação de mensagem
   nova vai só pra quem está atendendo, ou pra todo mundo com acesso (dono +
   delegados) enquanto ninguém pegou ainda.
+- **Delegação AUTOMÁTICA via hierarquia do Bitrix** (`src/bitrixHierarchy.js`,
+  opcional — precisa de `BITRIX_HR_WEBHOOK_URL`): diferente do
+  "Compartilhar acesso" acima (manual, instância por instância), o gestor
+  de um departamento passa a enxergar automaticamente as instâncias de
+  **todo** subordinado — cascateando sub-departamentos, não só quem está
+  direto abaixo dele. Resolvido via `department.get` (acha o gestor —
+  `UF_HEAD` — e a árvore de departamentos) + `user.get` (`UF_DEPARTMENT`,
+  quem está em cada um), cacheado na tabela `hierarchy_subordinates` por
+  `HIERARCHY_CACHE_TTL_HOURS` (padrão 6h — recalcular a cada request seria
+  lento e arriscaria rate limit do Bitrix). O gestor não precisa fazer
+  nada — nem o subordinado — pra esse acesso existir; aparece sozinho no
+  seletor de instância do Chat com o mesmo sufixo "(compartilhada)" da
+  delegação manual. Sem a env var configurada, a feature fica
+  silenciosamente inativa (mesmo padrão de degradação graciosa do
+  `BITRIX_WEBHOOK_URL` de CRM).
 - **Layout em cards** (grid, não lista/tabela): cada instância é um card com nome,
   badge de status colorido (verde "Conectada" / dourado "Aguardando QR" / vermelho
   "Desconectada"), número conectado e duas estatísticas — contagem de **contatos**
@@ -1222,7 +1239,7 @@ auth_session/
 - `ownerIdFor(bitrixUserId)`: `` `${BITRIX_MEMBER_ID}_${bitrixUserId}` `` — sempre construído com config do servidor, nunca com dado do cliente.
 
 ### `src/authz.js`
-- `assertOwnsSession(sessionIdOuCsv, ownerId)`: confere posse **ou acesso delegado** via `instancesStore.get()` + `listDelegates()` (trata o caso comum de dono com uma instância só, `id === ownerId`, sem ir ao banco). Dono OU quem está em `instance_delegates` pra essa instância (ver §"Delegação de acesso" abaixo) passa; qualquer outro, nega. Como `requireSession` (linha abaixo) é usado por praticamente toda rota de conversa/mensagem/QR/status, essa única função é o que propaga acesso de delegado pro app inteiro.
+- `assertOwnsSession(sessionIdOuCsv, ownerId)`: confere posse **ou acesso delegado** — manual (`instancesStore.listDelegates()`) OU automático via hierarquia do Bitrix (`bitrixHierarchy.getSubordinates()`, só consultado se não bater dono nem delegado manual, e no máximo uma vez por chamada mesmo com vários ids) — via `instancesStore.get()` (trata o caso comum de dono com uma instância só, `id === ownerId`, sem ir ao banco). Dono, delegado manual, ou subordinado (na hierarquia) do dono passa; qualquer outro, nega. Como `requireSession` (linha abaixo) é usado por praticamente toda rota de conversa/mensagem/QR/status, essa única função é o que propaga os dois tipos de acesso pro app inteiro.
 - `requireSession(extractor)`: middleware factory pras rotas que recebem `session` (query/body, uma ou várias) — 400 se faltando, 403 se não pertence (nem posse nem delegação) ao `req.ownerId`.
 - `requireResourceSession(lookupFn)`: pras rotas por `:id` de recurso (campanha, agendamento) — descobre o dono do recurso primeiro, então confere posse; 404 (não 403) pra não revelar que o recurso existe.
 - `requireOwnerMatch(extractor)`: pras rotas de CRUD de instância, onde o `owner` recebido precisa ser exatamente o próprio usuário autenticado. **Não conhece delegação** — de propósito: renomear/remover/gerenciar delegados continua exigindo o dono de verdade, conferido explicitamente dentro do handler (`instancesStore.get(id).ownerId`).
@@ -1231,7 +1248,7 @@ auth_session/
 ### `src/instances.js`
 - `get(id)` / `listByOwner(ownerId)` / `ensureDefault(ownerId)` / `create` / `rename` / `remove`: CRUD de instâncias (tabela `instances`, `id` = `session_id` usado no resto do app).
 - `ownerOf(sessionId)`: resolve o dono de uma sessão — mesmo fallback que `assertOwnsSession` usa (`id === ownerId` quando não há linha em `instances`, caso do dono com uma instância só). Usado em `src/server.js` pra saber de quem é uma notificação nova.
-- **Delegação de acesso** (tabela `instance_delegates`, ver §14 "Instâncias"): `listDelegates(instanceId)` / `addDelegate(instanceId, ownerId, delegateOwnerId, delegateName)` / `removeDelegate(instanceId, ownerId, delegateOwnerId)` — sempre conferem `ownerId` contra o dono real antes de mexer (mesmo padrão de `rename`/`remove`). `listAccessible(ownerId)`: instâncias próprias + delegadas (com `delegated: true/false`) — usado em `GET /instances`; `MAX_INSTANCES_PER_OWNER` continua checando só `listByOwner`, então instância delegada não ocupa vaga de quem recebeu o acesso.
+- **Delegação de acesso** (tabela `instance_delegates`, ver §14 "Instâncias"): `listDelegates(instanceId)` / `addDelegate(instanceId, ownerId, delegateOwnerId, delegateName)` / `removeDelegate(instanceId, ownerId, delegateOwnerId)` — sempre conferem `ownerId` contra o dono real antes de mexer (mesmo padrão de `rename`/`remove`). `listAccessible(ownerId)`: instâncias próprias + delegadas manualmente + delegadas via hierarquia do Bitrix (`hierarchy_subordinates`, ver `src/bitrixHierarchy.js`), todas com `delegated: true/false` — usado em `GET /instances`; `MAX_INSTANCES_PER_OWNER` continua checando só `listByOwner`, então nenhuma das duas formas de delegação ocupa vaga de quem recebeu o acesso. Dispara `ensureHierarchyCacheFresh()` (fire-and-forget, não atrasa a resposta) toda vez que é chamada, pra manter o cache de hierarquia quente sem custar latência desta request.
 
 ### `src/sessions.js` — `SessionManager`
 - `get(sessionId)`: cria (lazy) e inicia o `WhatsAppGateway` da instância; sanitiza o
