@@ -4510,6 +4510,63 @@ expansíveis, item ativo) — só reagrupamento visual.
   mesma estrutura de duas `nav-section` — não há mecanismo automático que
   sincronize as 13 cópias entre si.
 
+**Ajuste no mesmo dia — Configurações e Instâncias viram abas soltas**:
+usuário achou (com screenshot de outro app, "Negócios Fechados", como
+referência visual) que "Configurações" e "Instâncias" não deveriam ter
+relação pai/filho (clicar numa seta pra expandir/colapsar) — devem ser
+duas abas independentes dentro da seção "Configuração", lado a lado com
+"Apresentação". Também pediu pra renomear o link "Configurações" pra
+"Aparência" (confirmado explicitamente via pergunta — a página
+`/settings.html` edita a paleta de cores do app, então o nome descreve
+melhor o que ela faz).
+
+Removido o wrapper `<div class="nav-group" id="navGroupSettings">` +
+`<button class="nav-caret-btn">` + `<div class="nav-subitems">` nos 13
+arquivos — "Aparência" (ex-"Configurações") e "Instâncias" agora são dois
+`<a class="nav-item">` soltos, mesmo nível de "Apresentação". Removido
+também o bloco JS órfão que controlava abrir/fechar esse grupo
+(`navGroupSettingsOpen` no `localStorage` não é mais lido/escrito em
+lugar nenhum — decisão consciente de não limpar a chave já gravada no
+`localStorage` de quem já usava o app, é inofensiva ficar lá sem uso).
+Aplicado via script Node ad-hoc (regex sobre o bloco inteiro, capturando
+se `active`/`open` estavam presentes em cada arquivo pra preservar o
+item ativo certo) — `settings.html` e `instances.html` têm a variação
+onde um dos dois links já vem com `class="nav-item active"` (página
+atual), tratada corretamente.
+
+- [ ] Mesma ressalva da entrada anterior: não validado visualmente dentro
+  do Bitrix, só checagem estrutural (sintaxe JS + balanceamento de tags).
+
+**Apresentação executiva atualizada no mesmo dia** (`apresentacao.html`,
+pedido separado do usuário: "Atualize a apresentação"):
+- Seção "03 · A solução": card novo (13º) "Atendimento em equipe" —
+  resume delegação manual + automática via hierarquia (Parte CG) e
+  atribuição de conversa por atendente (Parte CD/CF) num só card, título
+  da seção atualizado de "Doze módulos" pra "Treze módulos".
+- Sumário executivo (seção 01): "onze telas e doze módulos" → "treze
+  telas e treze módulos" (a contagem de telas já estava desatualizada
+  antes desta sessão — 13 páginas com sidebar já existiam, não é uma
+  mudança desta sessão, só uma correção de número que estava errado).
+- Seção "07 · Riscos e transparência": dois riscos que já tinham sido
+  resolvidos em sessões anteriores (túnel ngrok → VPS com domínio fixo;
+  processo sem supervisor → Docker/EasyPanel reinicia sozinho) foram
+  atualizados — o texto ainda mencionava ngrok e "sem reinício
+  automático" mesmo já não sendo mais verdade. **Risco novo adicionado**:
+  reconexão em massa derrubando sessões em deploy (achado real desta
+  sessão, Parte CE) — severidade média, "mitigado parcialmente" (o
+  escalonamento ajudou a não causar dano NOVO, mas não resolveu as
+  sessões que já caem por outro motivo ainda não identificado).
+- Roadmap (seção 08): removidos "Supervisor de processo" e "Domínio
+  fixo" (já entregues, não fazem mais sentido como "próximos passos");
+  adicionado "Investigar a causa raiz da queda de sessões em deploy"
+  (pendência real e ainda em aberto desta sessão).
+
+- [ ] Igual às outras mudanças de hoje: não validado visualmente — só
+  checagem de sintaxe JS. Recomendado abrir a página e rolar até o fim
+  (ou usar o botão de exportar PDF) pra conferir visualmente o card novo
+  e os textos de risco/roadmap atualizados antes de compartilhar com a
+  diretoria.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

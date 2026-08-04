@@ -279,11 +279,13 @@ seta — estado também em `localStorage`, chave `navGroupLPOpen`) — ver §11.
 Os itens ficam agrupados em duas seções visuais (`.nav-section`, com rótulo
 `.nav-section-label` — some quando a sidebar está recolhida): **Workspace**
 (Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões) e
-**Configuração** (Configurações + Instâncias, Apresentação). A sidebar é
-duplicada em cada um dos 13 arquivos HTML (não há componente/template
-compartilhado — vanilla JS/HTML, sem build step), então qualquer mudança nela
-(item novo, reordenar, mudar seção) precisa ser replicada manualmente nas 13
-cópias.
+**Configuração** (Aparência, Instâncias, Apresentação — três abas soltas,
+sem hierarquia entre elas; "Aparência" é o link antigo "Configurações",
+renomeado porque a página edita a paleta de cores do app, ver §14.5). A
+sidebar é duplicada em cada um dos 13 arquivos HTML (não há componente/
+template compartilhado — vanilla JS/HTML, sem build step), então qualquer
+mudança nela (item novo, reordenar, mudar seção) precisa ser replicada
+manualmente nas 13 cópias.
 
 ### Uso normal (depois de instalado)
 

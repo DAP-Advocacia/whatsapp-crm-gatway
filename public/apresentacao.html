@@ -507,7 +507,7 @@
         <div class="eyebrow">01 · Sumário executivo</div>
         <h2 class="section-title">Um canal que virou dado.</h2>
         <p class="lede">Construímos um gateway próprio que conecta números de WhatsApp diretamente aos negócios do Bitrix24. O que era uma conversa perdida no celular de cada vendedor passou a ser: histórico vinculado ao negócio, disparo de campanhas com controle e rastreio, agendamento de envios, segmentação de contatos, painéis de métricas e uma central de notificações com histórico próprio — tudo dentro do CRM que a equipe já usa todo dia.</p>
-        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com onze telas e doze módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
+        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com treze telas e treze módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
       </div>
     </section>
 
@@ -539,7 +539,7 @@
     <section class="section wide" id="solucao">
       <div class="section-inner reveal">
         <div class="eyebrow">03 · A solução</div>
-        <h2 class="section-title">Doze módulos, um só lugar de trabalho.</h2>
+        <h2 class="section-title">Treze módulos, um só lugar de trabalho.</h2>
         <p class="lede">Tudo acessível de dentro do Bitrix24, sem precisar aprender uma ferramenta nova.</p>
         <div class="grid">
           <div class="card">
@@ -613,6 +613,12 @@
             <h3>Vídeo em Campanhas</h3>
             <p>Um link de vídeo do YouTube colado na campanha viaja junto da mensagem — o próprio WhatsApp gera a prévia com miniatura para quem recebe.</p>
             <div class="card-tag">Marketing &amp; Vendas</div>
+          </div>
+          <div class="card">
+            <div class="card-num">13</div>
+            <h3>Atendimento em equipe</h3>
+            <p>Um gestor pode compartilhar o próprio número com a equipe (sem contar contra o limite de instâncias de quem recebe) e, se a estrutura de departamentos já existe no Bitrix, isso acontece sozinho — todo gestor já enxerga automaticamente as instâncias de quem está abaixo dele na hierarquia, sem nenhuma configuração manual. Cada conversa fica atribuída a um atendente por vez ("Atender esta conversa"/"Transferir pra mim"), com tag mostrando quem está no atendimento e indicador de pendência direto na lista — evita duas pessoas respondendo o mesmo cliente ao mesmo tempo.</p>
+            <div class="card-tag">Operação</div>
           </div>
         </div>
       </div>
@@ -697,7 +703,7 @@
       <div class="section-inner reveal">
         <div class="eyebrow">07 · Riscos e transparência</div>
         <h2 class="section-title">O que a diretoria precisa saber antes de escalar.</h2>
-        <p class="lede">Transparência sobre limitações técnicas é parte do trabalho — nenhuma delas é motivo pra não usar o sistema hoje, mas devem orientar a velocidade de expansão. Desde o último relatório, dois pontos já foram fechados: <b>autenticação de ponta a ponta</b> (cada usuário só acessa os próprios dados, verificado contra o Bitrix a cada requisição) e <b>privacidade da mídia</b> das conversas, que deixou de ser pública na internet.</p>
+        <p class="lede">Transparência sobre limitações técnicas é parte do trabalho — nenhuma delas é motivo pra não usar o sistema hoje, mas devem orientar a velocidade de expansão. Desde o último relatório, vários pontos já foram fechados: <b>autenticação de ponta a ponta</b> (cada usuário só acessa os próprios dados, verificado contra o Bitrix a cada requisição), <b>privacidade da mídia</b> das conversas (deixou de ser pública na internet), <b>migração pra VPS própria com domínio fixo</b> (saiu do ambiente de testes) e <b>reinício automático</b> do serviço (Docker gerenciado, reinicia sozinho numa falha).</p>
         <div class="risk-list">
           <div class="risk">
             <div class="risk-flag high"></div>
@@ -710,16 +716,16 @@
           <div class="risk">
             <div class="risk-flag med"></div>
             <div>
-              <h3>Sem reinício automático em falha grave</h3>
-              <p>O servidor roda hoje como um processo simples, sem um supervisor (PM2/systemd/serviço do Windows) que o reinicie sozinho numa queda séria — depende de alguém notar e reiniciar manualmente. Falhas de rede transitórias já são amortecidas, mas não um crash mais sério do processo.</p>
-              <div class="risk-severity">Severidade média · item operacional, não bloqueia uso interno atual</div>
+              <h3>Reconexão em massa pode derrubar sessões num deploy</h3>
+              <p>Cada atualização do sistema reinicia o servidor, que reconecta todas as instâncias de WhatsApp já pareadas. Fazer isso tudo de uma vez se parece, pro WhatsApp, com um padrão de login em massa — e algumas sessões já foram deslogadas por causa disso. A reconexão já foi escalonada (uma instância por vez, com intervalo) pra reduzir o problema, mas um teste real mostrou que isso sozinho não eliminou todas as quedas — a causa exata do lado do WhatsApp ainda não está confirmada.</p>
+              <div class="risk-severity">Severidade média · mitigado parcialmente, monitorando antes de reduzir o intervalo entre deploys</div>
             </div>
           </div>
           <div class="risk">
             <div class="risk-flag low"></div>
             <div>
               <h3>Dependência de infraestrutura própria</h3>
-              <p>O servidor e o banco de dados são geridos internamente, e o endereço público hoje é um túnel temporário (ngrok), não um domínio fixo. Recomenda-se domínio próprio e rotina de backup das credenciais de conexão antes de tratar o sistema como crítico para a operação.</p>
+              <p>O servidor (VPS com domínio fixo) e o banco de dados são geridos internamente, sem um provedor de nuvem gerenciado. Recomenda-se rotina de backup das credenciais de conexão e do banco antes de tratar o sistema como crítico para a operação.</p>
               <div class="risk-severity">Severidade baixa · ajuste operacional</div>
             </div>
           </div>
@@ -734,11 +740,7 @@
         <div class="roadmap">
           <div class="road">
             <div class="road-when">Curto prazo</div>
-            <div><h3>Supervisor de processo</h3><p>Rodar o servidor sob PM2/systemd/serviço do Windows, com reinício automático numa falha grave — fecha o risco operacional citado acima.</p></div>
-          </div>
-          <div class="road">
-            <div class="road-when">Curto prazo</div>
-            <div><h3>Domínio fixo</h3><p>Sair do ambiente de testes (túnel temporário) para um endereço permanente, eliminando reconfigurações manuais.</p></div>
+            <div><h3>Investigar a causa raiz da queda de sessões em deploy</h3><p>Escalonar a reconexão (uma instância por vez) reduziu, mas não eliminou quedas de sessão durante um deploy — falta confirmar se o WhatsApp reage ao ritmo de novas conexões ou a outro fator (ex: IP de origem), pra fechar o risco descrito acima de vez.</p></div>
           </div>
           <div class="road">
             <div class="road-when">Curto prazo</div>
