@@ -4459,6 +4459,57 @@ mesma infra de `getSubordinates` desta parte:
   isso virar um incômodo recorrente, considerar um botão "Sincronizar
   hierarquia agora" em alguma tela administrativa.
 
+### Parte CH — Sidebar reorganizada em seções: Workspace + Configuração (2026-08-04)
+
+Pedido do usuário: agrupar as abas da sidebar em seções visuais, com
+"Workspace" contendo tudo e "Configuração" isolando só Configurações
+(+ Instâncias, já era sub-item) e Apresentação.
+
+**Sem componente de sidebar compartilhado** — cada uma das 13 páginas
+(`chat.html`, `dashboard.html`, `campaign.html`, `campaign-metrics.html`,
+`campaign-schedule.html`, `contacts.html`, `sites.html`,
+`lead-metrics.html`, `onboarding.html`, `suggestions.html`,
+`settings.html`, `instances.html`, `notifications.html`) tem a sidebar
+inteira duplicada no próprio HTML (decisão de arquitetura de antes desta
+sessão — vanilla JS/HTML, sem build step nem templates). `apresentacao.html`
+é a exceção — layout próprio, sem essa sidebar, só um link-alvo dela.
+
+Editado `chat.html` manualmente primeiro (Edit tool), validado (checagem
+de sintaxe dos scripts inline + balanceamento de `<div>` dentro do bloco
+`<nav>` via regex, já que não há Playwright/navegador headless disponível
+no ambiente pra tirar screenshot real). Replicado nos outros 12 arquivos
+via script Node ad-hoc (substituição de string por âncoras fixas, não
+regex frágil) — **achado no meio do caminho**: os arquivos usam quebra de
+linha `\r\n` (CRLF), não `\n`; as âncoras multi-linha do script precisaram
+ser ajustadas ou não batiam. Segundo achado: `instances.html` e
+`settings.html` têm uma variação (`<div class="nav-group open"
+id="navGroupSettings">`, com a classe `open` a mais) porque são as
+páginas onde esse grupo já vem expandido por padrão — script tratado com
+duas variantes de âncora, preservando qual delas cada arquivo já tinha.
+
+**CSS novo** (idêntico nos 13 arquivos): `.nav-section-label` (texto
+pequeno, uppercase, `letter-spacing`, cor `--text-faint` — mesmo tom já
+usado em `.firm-sub` no logo) e `html.sidebar-collapsed
+.nav-section-label{ display:none; }` (esconde o rótulo quando a sidebar
+está recolhida, já que nesse estado só os ícones aparecem).
+
+**Estrutura**: `<nav class="sidebar-nav">` agora tem dois
+`<div class="nav-section">` — o primeiro com rótulo "Workspace" (Dashboard,
+Chat, Campanha+subitens, Contatos, Landing Page+subitens, Onboarding,
+Sugestões), o segundo com rótulo "Configuração" (Configurações+Instâncias,
+Apresentação). Nenhuma mudança de comportamento (links, grupos
+expansíveis, item ativo) — só reagrupamento visual.
+
+- [ ] **Não validado visualmente** — sem Playwright/navegador headless
+  disponível no ambiente desta sessão pra tirar screenshot real; validação
+  feita só por checagem estrutural (sintaxe + balanceamento de tags via
+  script). Recomendado abrir pelo menos uma página dentro do Bitrix pra
+  confirmar que o CSS renderiza como esperado (espaçamento, rótulos
+  aparecendo/sumindo ao colapsar a sidebar).
+- [ ] Se uma 14ª página for adicionada no futuro, replicar manualmente a
+  mesma estrutura de duas `nav-section` — não há mecanismo automático que
+  sincronize as 13 cópias entre si.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

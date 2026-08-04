@@ -276,6 +276,14 @@ retrátil (botão circular dourado na borda, mesmo estilo nas 13 páginas que a 
 (aberta/fechada) fica em `localStorage`. Os itens "Sites" e "Métricas de Sites"
 aparecem como um grupo só ("Landing Page", com "Métricas LP" recolhível por uma
 seta — estado também em `localStorage`, chave `navGroupLPOpen`) — ver §11.5/§11.6.
+Os itens ficam agrupados em duas seções visuais (`.nav-section`, com rótulo
+`.nav-section-label` — some quando a sidebar está recolhida): **Workspace**
+(Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões) e
+**Configuração** (Configurações + Instâncias, Apresentação). A sidebar é
+duplicada em cada um dos 13 arquivos HTML (não há componente/template
+compartilhado — vanilla JS/HTML, sem build step), então qualquer mudança nela
+(item novo, reordenar, mudar seção) precisa ser replicada manualmente nas 13
+cópias.
 
 ### Uso normal (depois de instalado)
 

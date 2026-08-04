@@ -184,6 +184,12 @@
   html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
 
   .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-section-label{
+    font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+    color: var(--text-faint); padding: 14px 12px 6px;
+  }
+  .nav-section:first-child .nav-section-label{ padding-top:2px; }
+  html.sidebar-collapsed .nav-section-label{ display:none; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -389,6 +395,8 @@
   </div>
 
   <nav class="sidebar-nav">
+   <div class="nav-section">
+    <div class="nav-section-label">Workspace</div>
     <a href="/dashboard.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
       <span class="nav-label">Dashboard</span>
@@ -453,6 +461,9 @@
       <span class="nav-label">Sugestões</span>
       <span class="nav-tip">Sugestões</span>
     </a>
+   </div>
+   <div class="nav-section">
+    <div class="nav-section-label">Configuração</div>
     <div class="nav-group open" id="navGroupSettings">
       <a href="/settings.html" class="nav-item active">
         <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
@@ -475,6 +486,7 @@
       <span class="nav-label">Apresentação</span>
       <span class="nav-tip">Apresentação</span>
     </a>
+   </div>
   </nav>
 
   <div class="sidebar-bottom">
