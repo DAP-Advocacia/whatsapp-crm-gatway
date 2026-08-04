@@ -4377,24 +4377,46 @@ dois casos), sem distinguir manual de automático. Decisão consciente: a
 ação (ver/atender conversa) é idêntica nos dois casos, não valeria a
 complexidade de diferenciar visualmente por enquanto.
 
-**Migração já rodada em produção** (`node db/migrate.js`, tabela
-`hierarchy_subordinates` criada) — mas a feature em si fica **inerte**
-até `BITRIX_HR_WEBHOOK_URL` ser configurada no `.env` da VPS (não feito
-nesta sessão — falta o usuário criar o webhook no Bitrix e configurar a
-variável no EasyPanel).
+**Webhook criado e ativado em produção no mesmo dia (2026-08-04)**:
+usuário criou o webhook dedicado no Bitrix ("Usuários - Daniel",
+`/rest/183168/.../`). **Achado durante a configuração**: o escopo
+"Usuários (user)" sozinho NÃO é suficiente pra `department.get` — erro
+`"The request requires higher privileges than provided by the webhook
+token"` mesmo com `user.get` funcionando normalmente. Confirmado via
+documentação oficial do Bitrix24
+([apidocs.bitrix24.com/api-reference/departments/department-get.html](https://apidocs.bitrix24.com/api-reference/departments/department-get.html)):
+`department.get` exige o escopo **"Estrutura da empresa (department)"**,
+separado de "Usuários". Usuário adicionou os dois escopos ao mesmo
+webhook e salvou — resolvido.
 
-- [ ] **Webhook ainda não criado no Bitrix nem configurado na VPS** — sem
-  isso, `BITRIX_HR_WEBHOOK_URL` fica vazia e toda a feature (`getSubordinates`/
-  `ensureHierarchyCacheFresh`) roda em no-op silencioso (mesmo
-  comportamento de antes desta parte existir). Passo a passo: Bitrix →
-  Recursos para desenvolvedores → Outros → Webhook de entrada → marcar
-  escopo "Usuários" → copiar URL → configurar `BITRIX_HR_WEBHOOK_URL` no
-  `.env` do serviço no EasyPanel → reiniciar o serviço.
-- [ ] Não testado dentro do Bitrix ainda (nem local, nem produção) — sem
-  o webhook configurado, não dá pra validar contra departamentos reais.
-  Só revisão de código + checagem de sintaxe (`node -c`) + teste da query
-  SQL final direto contra produção (sem erro de sintaxe, mas sem dado
-  ainda pra validar o resultado).
+`BITRIX_HR_WEBHOOK_URL` configurada no painel do EasyPanel (Environment
+Variables do serviço `whatsapp-gateway/gateway`) e serviço reiniciado.
+Validado end-to-end nesta sessão:
+- `user.get`/`department.get` testados direto contra o webhook real —
+  **838 usuários ativos** e **229 departamentos** no total (confirmando
+  que a paginação de `callBitrixHRAll`, 50 em 50 via `start`, funciona:
+  bem mais que os 50 da primeira página).
+- `refreshHierarchyCache()` rodado manualmente (fora do fluxo normal, só
+  pra popular o cache sem esperar alguém abrir `/instances.html` de
+  verdade primeiro) — resultado: **76 gestores, 1136 vínculos
+  gestor→subordinado** gravados em `hierarchy_subordinates` em produção.
+  Teste pontual: owner do usuário "Bruno" (ID Bitrix 1, gestor da
+  Presidência) tem 41 subordinados calculados — consistente com estar no
+  topo da árvore com cascateamento.
+- Migração do schema (`node db/migrate.js`, tabela `hierarchy_subordinates`)
+  já tinha sido rodada antes, junto do commit original desta feature.
+
+**Estado atual: feature ATIVA e funcionando em produção.** Próximo
+acesso real de qualquer usuário a `/chat.html`/`/instances.html`
+(`GET /instances` → `listAccessible` → `ensureHierarchyCacheFresh`) já
+usa o cache recém-populado, sem precisar de mais nenhuma ação manual.
+
+- [ ] Não validado visualmente dentro do Bitrix ainda — confirmado só via
+  script direto contra o banco/webhook nesta sessão (`refreshHierarchyCache`
+  chamado manualmente, `getSubordinates` retornando dado real). Falta
+  confirmar que um gestor de verdade, logado no app, vê as instâncias dos
+  subordinados aparecerem sozinhas no seletor do Chat (sufixo
+  "(compartilhada)") sem ter feito nenhuma delegação manual.
 - [ ] Se um usuário está em MAIS de um departamento (`UF_DEPARTMENT` é
   array no Bitrix), ele conta como subordinado de TODOS os gestores
   desses departamentos — comportamento intencional (segue a estrutura
