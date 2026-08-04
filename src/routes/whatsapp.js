@@ -11,6 +11,7 @@ const instancesStore = require('../instances');
 const { summarizeConversation, generateDashboardInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
+const { getSubordinates } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
@@ -298,6 +299,29 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[instances:delegates] erro:', err.message);
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /instances/eligible-delegates?owner=
+  // Quem o dono PODE delegar manualmente ("Compartilhar acesso" em
+  // instances.html): só os próprios subordinados na hierarquia do Bitrix
+  // (ver src/bitrixHierarchy.js), não qualquer usuário do portal — pedido
+  // do usuário: "deveria aparecer somente os usuários que estão abaixo de
+  // mim". Devolve só os bitrixUserId (sufixo do ownerId) pra o client
+  // filtrar o próprio BX24.callMethod('user.search'); sem hierarquia
+  // mapeada (feature inativa ou dono sem subordinados), devolve lista
+  // vazia — a busca fica sem resultado, de propósito, não cai pra
+  // "buscar todo mundo".
+  // ---------------------------------------------------------------
+  router.get('/instances/eligible-delegates', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    try {
+      const subordinateOwnerIds = await getSubordinates(req.query.owner);
+      const bitrixUserIds = subordinateOwnerIds.map((id) => id.slice(id.lastIndexOf('_') + 1));
+      res.json({ bitrixUserIds });
+    } catch (err) {
+      console.error('[instances:eligible-delegates] erro:', err.message);
+      res.status(502).json({ error: err.message });
     }
   });
 

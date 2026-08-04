@@ -910,8 +910,12 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
-  delega a instância pra outro usuário do Bitrix (busca por nome via
-  `BX24.callMethod('user.search')`) — quem recebe passa a ver/responder as
+  delega a instância pra outro usuário do Bitrix — busca por nome via
+  `BX24.callMethod('user.search')`, mas **restrita aos próprios subordinados
+  na hierarquia** (`GET /instances/eligible-delegates`, ver "Delegação
+  AUTOMÁTICA" abaixo — mesma fonte, `hierarchy_subordinates`); sem
+  hierarquia mapeada pro dono, a busca fica vazia de propósito, não abre
+  pra todo o portal. Quem recebe passa a ver/responder as
   conversas dela em `chat.html` (aparece com sufixo "(compartilhada)" no
   seletor), sem contar contra o próprio limite de 3. Só o dono concede/revoga
   (tabela `instance_delegates`, ver `src/instances.js`). Cada conversa fica

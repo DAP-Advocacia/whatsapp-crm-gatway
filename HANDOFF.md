@@ -4417,6 +4417,36 @@ usa o cache recém-populado, sem precisar de mais nenhuma ação manual.
   confirmar que um gestor de verdade, logado no app, vê as instâncias dos
   subordinados aparecerem sozinhas no seletor do Chat (sufixo
   "(compartilhada)") sem ter feito nenhuma delegação manual.
+
+**Restrição no "Compartilhar acesso" manual (mesmo dia)**: usuário notou
+que o modal de delegação manual (`instances.html`) buscava em TODO o
+Bitrix (`BX24.callMethod('user.search')` sem filtro) — pediu pra
+restringir só a quem já está abaixo do dono na hierarquia ("deveria
+aparecer somente os usuários que estão abaixo de mim"). Reaproveita a
+mesma infra de `getSubordinates` desta parte:
+
+- Rota nova `GET /instances/eligible-delegates?owner=` (`src/routes/whatsapp.js`)
+  — devolve os `bitrixUserId` (sufixo do ownerId, já que o client só fala
+  BX24 puro por ID do Bitrix) dos subordinados do dono. Sem hierarquia
+  mapeada (feature inativa, ou dono sem subordinados), devolve lista
+  vazia **de propósito** — não cai pra busca livre como fallback (decisão
+  do usuário: restrição pura, não "restrição com fallback").
+- `instances.html`: `loadEligibleDelegateIds()` carrega essa lista uma vez
+  ao abrir o modal (`openDelegatesModal`, em paralelo com
+  `loadDelegatesList`); o listener de busca (`delegateSearchInput`)
+  continua chamando `user.search` (só ele resolve nome→usuário no BX24),
+  mas filtra o resultado pelo `Set` de elegíveis antes de renderizar. Se
+  a lista de elegíveis vier vazia, nem chama `user.search` — mostra
+  direto "Você não tem ninguém abaixo de você na hierarquia do Bitrix pra
+  compartilhar acesso."
+
+- [ ] Não testado dentro do Bitrix ainda — só `node -c`/checagem de
+  sintaxe dos scripts inline e teste de `getSubordinates` direto contra
+  produção (com a env var setada manualmente no script, já que o `.env`
+  local não tem `BITRIX_HR_WEBHOOK_URL` — só a VPS tem, via EasyPanel).
+- [ ] Continua sem afetar a delegação AUTOMÁTICA via hierarquia (parte
+  de cima) nem a lista de quem JÁ tem acesso (`loadDelegatesList`) — só
+  restringe quem pode ser ADICIONADO daqui pra frente pela busca manual.
 - [ ] Se um usuário está em MAIS de um departamento (`UF_DEPARTMENT` é
   array no Bitrix), ele conta como subordinado de TODOS os gestores
   desses departamentos — comportamento intencional (segue a estrutura

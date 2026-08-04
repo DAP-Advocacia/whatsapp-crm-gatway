@@ -1102,6 +1102,7 @@
   const delegatesCurrentList = document.getElementById('delegatesCurrentList');
   let delegateSearchTimer = null;
   let delegateCandidate = null; // { bitrixUserId, name, position, email, photo } escolhido na etapa 1
+  let eligibleDelegateIds = null; // Set de bitrixUserId — só quem está abaixo do dono na hierarquia do Bitrix
 
   // O Bitrix ajusta a altura do iframe (BX24.fitWindow) só com base no
   // conteúdo da página no momento em que o SDK inicializa — como este modal
@@ -1132,6 +1133,23 @@
     });
   }
 
+  // Quem o dono pode delegar manualmente: só os próprios subordinados na
+  // hierarquia do Bitrix (GET /instances/eligible-delegates), não
+  // qualquer usuário do portal — pedido do usuário: "deveria aparecer
+  // somente os usuários que estão abaixo de mim". Carregado uma vez por
+  // abertura do modal (não muda durante a digitação da busca).
+  async function loadEligibleDelegateIds() {
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/eligible-delegates?owner=${encodeURIComponent(myOwnerId)}`);
+      if (!res.ok) throw new Error((await res.json()).error);
+      const data = await res.json();
+      eligibleDelegateIds = new Set((data.bitrixUserIds || []).map(String));
+    } catch (err) {
+      console.error('Falha ao carregar subordinados elegíveis:', err);
+      eligibleDelegateIds = new Set(); // falha = busca fica vazia, não abre pra todo mundo
+    }
+  }
+
   async function openDelegatesModal(instanceId, label) {
     delegatesInstanceId.value = instanceId;
     delegatesInstanceLabel.textContent = label;
@@ -1141,7 +1159,7 @@
     goToDelegateStep('search');
     delegatesModal.classList.add('open');
     refitWindow();
-    await loadDelegatesList(instanceId);
+    await Promise.all([loadDelegatesList(instanceId), loadEligibleDelegateIds()]);
     refitWindow();
   }
   function closeDelegatesModal() { delegatesModal.classList.remove('open'); refitWindow(); }
@@ -1199,9 +1217,17 @@
     if (!term) { delegateSearchResults.innerHTML = ''; return; }
     delegateSearchTimer = setTimeout(async () => {
       try {
-        const users = await bxSearchUsers(term);
+        if (eligibleDelegateIds && !eligibleDelegateIds.size) {
+          delegateSearchResults.innerHTML = '<p class="empty">Você não tem ninguém abaixo de você na hierarquia do Bitrix pra compartilhar acesso.</p>';
+          return;
+        }
+        const allResults = await bxSearchUsers(term);
+        // Filtra pra só quem está na hierarquia abaixo do dono — "Compartilhar
+        // acesso" não é mais busca livre em todo o portal (pedido do usuário:
+        // só os próprios subordinados, ver GET /instances/eligible-delegates).
+        const users = eligibleDelegateIds ? allResults.filter((u) => eligibleDelegateIds.has(String(u.ID))) : [];
         if (!users.length) {
-          delegateSearchResults.innerHTML = '<p class="empty">Ninguém encontrado.</p>';
+          delegateSearchResults.innerHTML = '<p class="empty">Ninguém encontrado abaixo de você na hierarquia com esse nome.</p>';
           return;
         }
         delegateSearchResults.innerHTML = users.slice(0, 8).map((u) => {
