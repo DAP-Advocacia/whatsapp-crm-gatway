@@ -5289,4 +5289,131 @@ módulos com o card 14 renderizando igual aos outros; tira de números
 "13 / 24 / 1 / 0" alinhada sem quebra de layout) — arquivos de teste
 removidos depois.
 
+---
+
+### Parte CL — Painel admin restrito: quem está online agora + cadastro de funcionários do Bitrix (2026-08-10)
+
+Pedido do usuário: uma tela nova, visível e acessível **só para ele**,
+cruzando (1) quem está usando o app agora/offline/última vez visto e (2)
+o cadastro de funcionários vindo do Bitrix (nome, cargo, departamento,
+foto). Não existia até aqui nenhum conceito de "super admin" no sistema
+— toda autorização era por dono de instância (`ownerId`) ou hierarquia de
+departamento/gestor (Parte CG); nenhuma pessoa tinha acesso a tudo, de
+todos. Confirmado com o usuário antes de implementar: admin travado por
+lista configurável de `ownerId` (não uma constante única e inflexível);
+"logado agora" é sessão ativa do próprio app via heartbeat do navegador
+(não presença do Bitrix24 em si); heartbeat dedicado a cada 30s, offline
+depois de 90s sem sinal; cadastro de funcionários é tudo que `user.get`
+do Bitrix já devolve.
+
+**Banco (`db/schema.sql`)** — nova tabela `admin_presence` (`owner_id`
+primary key, `owner_name`, `last_page`, `last_seen_at`): um upsert por
+`ownerId` a cada heartbeat, não histórico, só o estado mais recente.
+`online`/`offline` é calculado **no frontend** a partir de `last_seen_at`
+comparado contra o `Date.now()` do próprio navegador — de propósito, pra
+não repetir o bug de clock skew já documentado na Parte CI (comparar
+timestamp gerado pelo Postgres com o relógio de outro processo).
+
+**`src/adminAuth.js`** (novo) — `requireSuperAdmin` confere `req.ownerId`
+(já resolvido e verificado contra o Bitrix real por `requireAuth`, nunca
+aceito do client) contra `SUPER_ADMIN_OWNER_IDS`, uma lista CSV vinda de
+env (`.env`/`.env.example`) — hoje só
+`2c39349ea593c27fd3092b4fe2c47de7_183168`, mas pensada pra aceitar mais
+de um `ownerId` no futuro sem mudar código. **IMPORTANTE — ação manual
+pendente**: esta variável precisa ser configurada também nas env vars de
+produção do EasyPanel — o `.env` local é gitignored, não vai pro
+repositório que o EasyPanel builda (ver `Dockerfile`, `COPY . .` não
+inclui arquivos fora do git). Sem isso configurado em produção, `/admin.html`
+fica inacessível pra todo mundo (403 sempre) até alguém configurar.
+
+**`src/presence.js`** (novo) — `heartbeat(ownerId, ownerName, page)`
+(upsert, `coalesce` no nome pra um heartbeat sem nome nunca apagar um
+nome já salvo antes) e `listPresence()`.
+
+**`src/bitrixHierarchy.js`** — nova `listEmployees()`, reusa o MESMO
+`callBitrixHRAll('user.get', ...)` já existente (Parte CG, mesmo webhook
+`BITRIX_HR_WEBHOOK_URL`), só que devolvendo o payload inteiro (nome,
+`WORK_POSITION`, `PERSONAL_PHOTO`, `EMAIL`) em vez de só `ID`/`UF_DEPARTMENT`.
+Sem cache próprio (diferente de `getSubordinates`) — só o super admin
+visita a tela, volume baixo de sobra.
+
+**Rotas novas (`src/routes/whatsapp.js`)**: `POST /presence/heartbeat`
+(só `requireAuth` — qualquer usuário autenticado manda heartbeat, não só
+admin; é o próprio uso do app que alimenta o painel), `GET /admin/whoami`
+(`{isSuperAdmin}`, sem expor a lista de admins pro client — usado pra
+revelar/esconder o item "Admin" da sidebar e redirecionar quem tenta
+acessar `/admin.html` sem ser admin), `GET /admin/presence` e `GET
+/admin/employees` (ambas `requireSuperAdmin` — 403 pra qualquer outro
+`ownerId`; `employees` devolve `hrConfigured:false` em vez de erro
+quando o webhook HR não está configurado). Documentadas em `src/openapi.js`
+(tag nova "Admin (restrito)").
+
+**`public/admin.html`** (novo) — esqueleto copiado do padrão de
+`settings.html` (mesmo boot `verifyAuth`/`apiFetch`/`resolveOwner`, mesma
+sidebar, mesmo fetch de `/api/brand`). Duas tabelas: presença (nome,
+página atual, badge Online/Offline, "há Xmin") e funcionários (foto,
+nome, cargo, e-mail, selo "Online agora" quando o `ownerId` da linha de
+presença bate com o `userId` do Bitrix daquela pessoa — casamento via
+`bitrixUserIdFromOwnerId()`, o sufixo depois do último `_` do `ownerId`).
+Guarda de tela: se `GET /admin/whoami` não confirmar admin, redireciona
+pra `/dashboard.html` antes de renderizar qualquer dado — a proteção real
+já está na API, isto é só pra não deixar a tela "piscar" vazia pra quem
+não devia estar ali.
+
+**Item "Admin" na sidebar, em 13 telas** — escondido por padrão
+(`hidden`), revelado por `revealAdminNavItemIfSuperAdmin()` (chama `GET
+/admin/whoami`) logo depois da primeira autenticação bem-sucedida de cada
+tela. **Heartbeat em 12 das 13** — `onboarding.html` é a única tela com
+navegação que não tem NENHUMA autenticação Bitrix hoje (sem
+`BX24.init`/`verifyAuth`/`apiFetch`, tela estática de tutorial); decisão
+confirmada com o usuário: pular heartbeat só nela (item Admin na sidebar
+continua presente, mas nunca revelado, já que não há como resolver
+`whoami` sem autenticação) em vez de adicionar um boot de auth inteiro
+só pra isso.
+
+**Achado durante o teste**: 4 telas (`settings.html`, `suggestions.html`,
+`lead-metrics.html`+`sites.html` parcialmente) usam `API_BASE = .../api`
+**sem** `/whatsapp` — a rota de heartbeat só existe dentro de
+`createWhatsappRouter` (montada em `/api/whatsapp`), então a chamada
+nessas precisou do prefixo `/whatsapp` explícito
+(`${API_BASE}/whatsapp/presence/heartbeat`), diferente de `chat.html`
+(cujo próprio `API_BASE` já termina em `/api/whatsapp`) e das demais 6
+que já tinham `API_BASE` apontando certo. Conferido arquivo por arquivo
+antes de aplicar, não assumido.
+
+**Validação**: `node -c` nos 5 arquivos `.js` novos/editados; `vm.Script`
+sobre os `<script>` das 14 telas HTML tocadas (13 + `admin.html`);
+Playwright com dados simulados pra `admin.html` (grid de presença/
+funcionários, cruzamento "online agora", banner de aviso quando HR não
+configurado). Testado ponta a ponta contra produção: servidor local
+numa porta separada (3399, sem afetar a instância já rodando na 3333 —
+não derrubada, só verificada e evitada), tokens de app gerados via
+`issueAppToken` pra um `ownerId` admin e um não-admin, confirmado 200 +
+dado correto pro admin e 403 exato pro não-admin em `GET
+/admin/presence`/`GET /admin/employees`, heartbeat funcionando pra
+qualquer autenticado. **Achado e descartado**: um teste inicial via
+`curl -d '...'` corrompeu acentos (`ç`→`�`) — isolado como bug do próprio
+comando de teste no shell (Bash tool nesse ambiente Windows), não do
+código: confirmado repetindo o mesmo heartbeat via `fetch()` real do
+Node (equivalente ao que o navegador faz) — acentos chegaram perfeitos
+no banco (`"Ana Cristina Gonçalves"`). Dados de teste removidos do banco
+depois (`delete from admin_presence where owner_id in (...)`, confirmado
+0 linhas restantes).
+
+**Pendências conhecidas**:
+- [ ] `SUPER_ADMIN_OWNER_IDS` precisa ser configurada manualmente nas env
+  vars de produção do EasyPanel — não é copiada automaticamente (ver
+  acima). Sem isso, `/admin.html` fica inacessível em produção até
+  alguém configurar.
+- [ ] `onboarding.html` não manda heartbeat (decisão confirmada, ver
+  acima) — quem só abre essa tela nunca aparece como "online" no painel.
+- [ ] `GET /admin/employees` depende de `BITRIX_HR_WEBHOOK_URL` já estar
+  configurado (mesma variável da Parte CG) — se não estiver, a lista
+  fica sempre vazia com aviso claro na tela, não é um bug, é o
+  comportamento esperado até a variável ser configurada.
+- [ ] Nenhum teste automatizado de longa duração do heartbeat/timeout de
+  90s foi feito (só heartbeat único + leitura imediata) — o cálculo de
+  online/offline no frontend não foi observado num ciclo real de alguém
+  fechando a aba e esperando os 90s passarem.
+
 

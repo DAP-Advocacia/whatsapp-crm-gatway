@@ -1004,6 +1004,44 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
 
 ---
 
+## 14.5. Painel Admin — restrito (`/admin.html`)
+
+Tela visível e acessível **só pra uma lista pequena de `ownerId`**
+(`SUPER_ADMIN_OWNER_IDS`, CSV em `.env`, ver `src/adminAuth.js`) — nada a
+ver com dono de instância ou hierarquia de departamento/gestor (§14
+acima). Item "Admin" na sidebar fica `hidden` por padrão em todas as
+telas e só é revelado por JS depois que `GET /admin/whoami` confirma
+`isSuperAdmin: true` — mas a proteção de verdade está nas próprias rotas
+(`requireSuperAdmin`, 403 pra qualquer outro `ownerId`), não no
+esconder/mostrar do link.
+
+- **Quem está online agora**: sessão ativa do próprio app, não presença
+  do Bitrix24 em si. Toda tela autenticada (exceto `onboarding.html`, que
+  não tem nenhuma autenticação Bitrix hoje) manda um heartbeat pra `POST
+  /presence/heartbeat` a cada 30s enquanto estiver aberta — qualquer
+  usuário autenticado pode mandar, não só admin. Upsert numa tabela só
+  (`admin_presence`, sem histórico) por `ownerId`; "online"/"offline" é
+  calculado **no frontend**, comparando `lastSeenAt` contra o
+  `Date.now()` do próprio navegador (nunca compara timestamp gerado pelo
+  Postgres com o relógio de outro processo — mesmo bug de clock skew já
+  corrigido no Painel de atendimento, §9). Considerado offline sem
+  heartbeat por 90s (3 ciclos perdidos).
+- **Funcionários (Bitrix)**: cadastro puxado de `user.get` via o mesmo
+  webhook `BITRIX_HR_WEBHOOK_URL` já usado pela hierarquia automática
+  (§14) — nome, cargo (`WORK_POSITION`), foto (`PERSONAL_PHOTO`), e-mail.
+  Sem a variável configurada, a lista fica vazia com um aviso explícito
+  na tela (não um erro nem um vazio silencioso). Cruza com a lista de
+  presença pelo `ownerId` (sufixo depois do `_`, que é o `userId` puro do
+  Bitrix) — mostra "Online agora" direto na linha do funcionário quando
+  bate.
+
+**Ação manual pendente em produção**: `SUPER_ADMIN_OWNER_IDS` precisa ser
+configurada nas env vars do EasyPanel — o `.env` local é gitignored, não
+viaja com o código. Sem isso, `/admin.html` fica 403 pra todo mundo até
+alguém configurar.
+
+---
+
 ## 15. Central de Notificações — Kanban e Calendário (`/notifications.html`)
 
 O sino da sidebar (compartilhado pelas 8 páginas) deixou de abrir um dropdown
@@ -1091,6 +1129,7 @@ revelar que o recurso existe).
 | `/campaign-schedule.html` | GET/POST | Agenda de Envios (Kanban/Calendário). |
 | `/instances.html` | GET/POST | Gestão de instâncias. |
 | `/notifications.html` | GET/POST | Central de Notificações (Kanban/Calendário, ver §15). |
+| `/admin.html` | GET/POST | Painel Admin — restrito a `SUPER_ADMIN_OWNER_IDS` (ver §14.5). O arquivo é servido igual a qualquer outro estático; a restrição real está nas rotas `/api/whatsapp/admin/*` abaixo. |
 | `/*` (estático) | GET | Arquivos de `public/`. |
 
 ### `/api/whatsapp/*`
@@ -1135,6 +1174,10 @@ revelar que o recurso existe).
 | `scheduled-campaigns/:id/send-now` | POST | Dispara um agendamento imediatamente, ignorando a data marcada. |
 | `scheduled-campaigns/:id` | PUT | Body `{ scheduledAt }`. Reagenda. |
 | `scheduled-campaigns/:id` | DELETE | Cancela (só enquanto ainda estiver `scheduled`). |
+| `presence/heartbeat` | POST | Body `{ page?, ownerName? }`. Sinal de "app aberto agora" pro Painel Admin (§14.5) — QUALQUER usuário autenticado pode chamar, não só admin. `page` é `window.location.pathname`; `ownerName` é texto solto resolvido no frontend (`BX24 user.current`), nunca tratado como identidade. |
+| `admin/whoami` | GET | `{ isSuperAdmin }` — sem expor a lista de admins. Usado pra revelar/esconder o item "Admin" da sidebar. |
+| `admin/presence` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS` (403 pra qualquer outro `ownerId`). `{ presence:[{ownerId, ownerName, lastPage, lastSeenAt}] }` — quem já mandou heartbeat alguma vez. |
+| `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
@@ -1249,6 +1292,9 @@ src/
   openai.js              # OpenAI (gpt-4o-mini): sugestão de análise de teste A/B, resumo de conversa do Chat e insights do Dashboard, sob demanda
   auth.js               # verifica access_token contra o Bitrix de verdade + emite/valida o token de app (sessão + API)
   authz.js              # confere que session/owner de cada request pertence ao dono autenticado
+  adminAuth.js           # requireSuperAdmin — confere req.ownerId contra SUPER_ADMIN_OWNER_IDS (Painel Admin, §14.5)
+  presence.js            # heartbeat()/listPresence() — "quem está com o app aberto agora" (admin_presence)
+  bitrixHierarchy.js     # hierarquia de departamento/gestor via user.get/department.get + listEmployees() (§14/§14.5)
   openapi.js             # spec OpenAPI da API REST, servido em GET /api-docs (Swagger UI)
   routes/
     whatsapp.js        # rotas REST /api/whatsapp/* (chat, instâncias, campanhas, agendamentos)
@@ -1271,6 +1317,7 @@ public/
   campaign-schedule.html# Agenda de Envios (Kanban/Calendário)
   instances.html        # Gestão de instâncias
   notifications.html    # Central de Notificações (Kanban/Calendário)
+  admin.html             # Painel Admin — restrito a SUPER_ADMIN_OWNER_IDS (§14.5)
   apresentacao.html      # relatório executivo (scrollytelling) pra diretoria/CEO — sem sidebar, exportável em PDF
 db/
   schema.sql            # DDL de todas as tabelas

@@ -202,4 +202,25 @@ async function getSubordinates(managerOwnerId) {
   return rows.map((r) => r.subordinateOwnerId);
 }
 
-module.exports = { getSubordinates, ensureHierarchyCacheFresh, refreshHierarchyCache };
+// Cadastro de funcionários pro painel admin (src/adminAuth.js) — reusa o
+// MESMO webhook/chamada de user.get já usada por refreshHierarchyCache
+// acima, só que devolvendo o payload inteiro (nome, cargo, foto, email),
+// não só ID/UF_DEPARTMENT. Sem cache próprio (diferente de
+// getSubordinates): só o super admin visita a tela que chama isto, volume
+// baixo de sobra pra não justificar a complexidade de um cache de horas.
+// null = BITRIX_HR_WEBHOOK_URL não configurado ou falha ao consultar —
+// quem chama decide como comunicar isso (ver GET /admin/employees).
+async function listEmployees() {
+  const users = await callBitrixHRAll('user.get', { FILTER: { ACTIVE: true } });
+  if (!users) return null;
+  return users.map((u) => ({
+    id: String(u.ID),
+    name: [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
+    workPosition: u.WORK_POSITION || null,
+    email: u.EMAIL || null,
+    photo: u.PERSONAL_PHOTO || null,
+    departmentIds: (u.UF_DEPARTMENT || []).map(String),
+  }));
+}
+
+module.exports = { getSubordinates, ensureHierarchyCacheFresh, refreshHierarchyCache, listEmployees };

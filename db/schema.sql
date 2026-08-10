@@ -606,3 +606,17 @@ create table if not exists ab_tests (
 );
 
 create index if not exists idx_ab_tests_owner on ab_tests (owner_id, created_at desc);
+
+-- Painel admin (restrito, ver SUPER_ADMIN_OWNER_IDS em src/adminAuth.js) —
+-- "quem está com o app aberto agora". Um upsert por owner_id a cada
+-- heartbeat do navegador (POST /presence/heartbeat, a cada 30s enquanto a
+-- aba estiver aberta) — não é histórico, só o estado mais recente; "online"
+-- é calculado no FRONTEND a partir de last_seen_at (evita comparar
+-- timestamp gerado pelo Postgres com Date.now() de outro processo — mesmo
+-- bug de clock skew já documentado no Painel de atendimento, Parte CI).
+create table if not exists admin_presence (
+  owner_id text primary key,
+  owner_name text,
+  last_page text,
+  last_seen_at timestamptz not null default now()
+);

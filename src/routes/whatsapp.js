@@ -11,8 +11,10 @@ const instancesStore = require('../instances');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
-const { getSubordinates } = require('../bitrixHierarchy');
+const { getSubordinates, listEmployees } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
+const presence = require('../presence');
+const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
 // metadados de uma página raramente mudam num intervalo curto, e evita
@@ -1282,6 +1284,83 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ ok: true, message });
     } catch (err) {
       console.error('[send-media] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /presence/heartbeat  { page? }
+  // Sinal periódico de "esta pessoa está com o app aberto agora", pro
+  // painel admin (GET /admin/presence, ver src/adminAuth.js). QUALQUER
+  // usuário autenticado manda heartbeat (não só admin) — é o próprio uso
+  // do app que alimenta o painel; a restrição de QUEM VÊ os dados agregados
+  // fica nas rotas GET /admin/* abaixo. `ownerName` nunca vem do body —
+  // resolvido aqui a partir do próprio req.ownerId autenticado (mesma
+  // regra de sentBy/isManager já usada em /send, nunca aceitar "quem eu
+  // sou" vindo do client) via um nome já resolvido no frontend
+  // (BX24.callMethod('user.current')) e mandado como texto solto, não como
+  // identidade — se vier vazio, listPresence() simplesmente não tem nome
+  // ainda pra essa linha.
+  // ---------------------------------------------------------------
+  router.post('/presence/heartbeat', async (req, res) => {
+    try {
+      const { page, ownerName } = req.body || {};
+      await presence.heartbeat(req.ownerId, ownerName, page);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[presence] falha ao registrar heartbeat:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/whoami
+  // Só confirma se o usuário autenticado é super admin — usado pelo
+  // frontend pra decidir se mostra o item "Admin" na sidebar/redireciona
+  // pra fora de /admin.html. NÃO expõe a lista de admins pro client (só
+  // um booleano); a proteção real está em requireSuperAdmin nas rotas
+  // GET /admin/presence e GET /admin/employees abaixo.
+  // ---------------------------------------------------------------
+  router.get('/admin/whoami', (req, res) => {
+    res.json({ isSuperAdmin: isSuperAdmin(req.ownerId) });
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/presence
+  // Lista de quem já mandou heartbeat alguma vez (ver POST
+  // /presence/heartbeat) — "online"/"offline" é calculado NO FRONTEND a
+  // partir de lastSeenAt (nunca comparar timestamp gerado pelo Postgres
+  // com Date.now() de outro processo, mesmo bug de clock skew do Painel de
+  // atendimento, HANDOFF Parte CI). Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/presence', requireSuperAdmin, async (req, res) => {
+    try {
+      const rows = await presence.listPresence();
+      res.json({ presence: rows });
+    } catch (err) {
+      console.error('[admin] falha ao listar presença:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/employees
+  // Cadastro de funcionários vindo direto do Bitrix (user.get via
+  // BITRIX_HR_WEBHOOK_URL, ver src/bitrixHierarchy.js — mesmo webhook já
+  // usado pela hierarquia de departamento/gestor, sem integração nova).
+  // hrConfigured:false (200, não erro) quando a variável não está
+  // configurada — a tela mostra aviso claro em vez de lista vazia sem
+  // explicação. Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/employees', requireSuperAdmin, async (req, res) => {
+    try {
+      const employees = await listEmployees();
+      if (employees === null) {
+        return res.json({ employees: [], hrConfigured: false });
+      }
+      res.json({ employees, hrConfigured: true });
+    } catch (err) {
+      console.error('[admin] falha ao listar funcionários:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

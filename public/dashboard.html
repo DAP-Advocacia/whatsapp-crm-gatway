@@ -671,6 +671,16 @@
       <span class="nav-label">Apresentação</span>
       <span class="nav-tip">Apresentação</span>
     </a>
+    <!-- Escondido por padrão — só revelado por JS (ver GET /admin/whoami)
+         depois de confirmar que este ownerId está em SUPER_ADMIN_OWNER_IDS.
+         A proteção real está na API (requireSuperAdmin em toda rota
+         /admin/*); isto é só pra não anunciar a existência da tela pra
+         quem não tem acesso. -->
+    <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>
+      <span class="nav-label">Admin</span>
+      <span class="nav-tip">Admin</span>
+    </a>
    </div>
   </nav>
 
@@ -926,6 +936,33 @@
     return res;
   }
 
+  // Sinal de "app aberto agora" pro painel admin (ver POST
+  // /presence/heartbeat, src/routes/whatsapp.js) — idempotente: pode ser
+  // chamada de novo sem duplicar o setInterval (guarda por
+  // heartbeatStarted).
+  let heartbeatStarted = false;
+  function startPresenceHeartbeat() {
+    if (heartbeatStarted) return;
+    heartbeatStarted = true;
+    const send = () => apiFetch(`${window.location.origin}/api/whatsapp/presence/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page: window.location.pathname }),
+    }).catch(() => {});
+    send();
+    setInterval(send, 30000);
+  }
+  function revealAdminNavItemIfSuperAdmin() {
+    apiFetch(`${API_BASE}/whatsapp/admin/whoami`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const item = document.getElementById('navAdminItem');
+        if (item && data?.isSuperAdmin) item.hidden = false;
+      })
+      .catch(() => {});
+  }
+
+
   // Essa página é uma aba dentro do card de Negócio (placement), mas não
   // depende de um negócio específico pra carregar. Diferente de antes, agora
   // EXIGE estar dentro do Bitrix (BX24 de verdade) — as métricas só carregam
@@ -944,6 +981,8 @@
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
           .catch(() => {});
+        startPresenceHeartbeat();
+        revealAdminNavItemIfSuperAdmin();
         load();
         setInterval(load, 30000);
         loadInsights(false); // cacheado no servidor (30min) — não entra no polling de 30s do load()

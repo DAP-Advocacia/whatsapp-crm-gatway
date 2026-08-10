@@ -53,6 +53,7 @@ module.exports = {
     { name: 'Contatos e listas' },
     { name: 'Modelos de mensagem' },
     { name: 'Configurações' },
+    { name: 'Admin (restrito)' },
   ],
   paths: {
     '/api/whatsapp/metrics': {
@@ -382,6 +383,35 @@ module.exports = {
         tags: ['Configurações'],
         summary: 'Gera um novo token de API (validade longa, ver /settings.html)',
         responses: { 200: jsonResponse('{ token, expiresAt }') },
+      },
+    },
+    '/api/whatsapp/presence/heartbeat': {
+      post: {
+        tags: ['Admin (restrito)'],
+        summary: 'Sinal de "app aberto agora" — qualquer usuário autenticado pode chamar (alimenta o painel admin)',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { page: { type: 'string', description: 'window.location.pathname de onde o heartbeat foi disparado' }, ownerName: { type: 'string', description: 'Nome já resolvido no frontend (BX24 user.current) — texto solto, não identidade' } } } } } },
+        responses: { 200: jsonResponse('{ ok: true }') },
+      },
+    },
+    '/api/whatsapp/admin/whoami': {
+      get: {
+        tags: ['Admin (restrito)'],
+        summary: 'Confirma se o usuário autenticado é super admin (sem expor a lista de admins)',
+        responses: { 200: jsonResponse('{ isSuperAdmin: boolean }') },
+      },
+    },
+    '/api/whatsapp/admin/presence': {
+      get: {
+        tags: ['Admin (restrito)'],
+        summary: 'Lista de quem já mandou heartbeat — restrito a super admin (403 pra qualquer outro ownerId)',
+        responses: { 200: jsonResponse('{ presence: [{ownerId, ownerName, lastPage, lastSeenAt}] }'), 403: jsonResponse('Acesso restrito', errorResponse) },
+      },
+    },
+    '/api/whatsapp/admin/employees': {
+      get: {
+        tags: ['Admin (restrito)'],
+        summary: 'Cadastro de funcionários do Bitrix (user.get via BITRIX_HR_WEBHOOK_URL) — restrito a super admin',
+        responses: { 200: jsonResponse('{ employees: [{id, name, workPosition, email, photo, departmentIds}], hrConfigured: boolean }'), 403: jsonResponse('Acesso restrito', errorResponse) },
       },
     },
   },
