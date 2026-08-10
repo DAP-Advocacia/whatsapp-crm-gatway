@@ -28,6 +28,55 @@ async function finishCampaign(campaignId) {
   await pool.query(`update campaigns set status = 'done', finished_at = now() where id = $1`, [campaignId]);
 }
 
+// Corrige retroativamente um resultado que runCampaign já tinha gravado como
+// sucesso (ok:true), na hora do envio — antes de saber que o WhatsApp ia
+// rejeitar a entrega DEPOIS, de forma assíncrona (ver messages.update/status
+// 'failed' em src/whatsapp.js, WAMessageStatus.ERROR/código 463 "account
+// restricted", o caso real mais comum ao mandar campanha pra alguém que
+// nunca conversou com este número). Sem isto, "Falharam"/"Taxa de sucesso"
+// na tela de Métricas de Campanhas mostrava sempre sucesso, mesmo quando a
+// mensagem nunca chegou de verdade — bug real reportado pelo usuário.
+//
+// Casa pela linha de resultado mais recente daquele phone+campaignId ainda
+// marcada ok:true (não há wa_message_id salvo em campaign_results — só
+// phone — então é o jeito possível de achar a linha certa sem mudar o
+// schema). `for update skip locked` + checagem de rowCount evita corrigir
+// duas vezes a mesma linha se o evento de status chegar repetido.
+async function markResultFailedAsync(campaignId, phone, errorText) {
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const { rows } = await client.query(
+      `select id from campaign_results
+       where campaign_id = $1 and phone = $2 and ok = true
+       order by created_at desc
+       limit 1
+       for update skip locked`,
+      [campaignId, phone]
+    );
+    const resultId = rows[0]?.id;
+    if (!resultId) {
+      await client.query('rollback');
+      return false; // já corrigido antes, ou nunca existiu — nada a fazer
+    }
+    await client.query(
+      `update campaign_results set ok = false, error = $1 where id = $2`,
+      [errorText || 'rejeitado pelo WhatsApp após o envio (ex: conta restrita)', resultId]
+    );
+    await client.query(
+      `update campaigns set sent = greatest(sent - 1, 0), failed = failed + 1 where id = $1`,
+      [campaignId]
+    );
+    await client.query('commit');
+    return true;
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 // Métricas agregadas pro dashboard de campanhas: totais gerais, série diária
 // (últimos 30 dias) e a lista das campanhas mais recentes. Cada usuário só
 // dispara campanhas com as próprias instâncias de WhatsApp, então isto é
@@ -85,4 +134,4 @@ async function computeCampaignMetrics(sessionIds) {
   };
 }
 
-module.exports = { insertCampaign, recordResult, updateProgress, finishCampaign, computeCampaignMetrics };
+module.exports = { insertCampaign, recordResult, updateProgress, finishCampaign, computeCampaignMetrics, markResultFailedAsync };

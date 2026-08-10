@@ -637,6 +637,14 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
 > mais chama atenção dos sistemas antispam do WhatsApp — o número pode ser bloqueado.
 > Use só com contatos que já têm relação com você, nunca com listas frias.
 
+> ⚠️ **"Enviada" não é garantia de entrega**: o WhatsApp pode aceitar a mensagem no
+> envio e rejeitá-la DEPOIS, de forma assíncrona, com "error 463: account restricted
+> or missing tctoken" — exige um token de privacidade antes de deixar iniciar
+> conversa NOVA com quem nunca falou com este número (conversas já existentes não
+> são afetadas). O gateway detecta isso e corrige o status real da mensagem (Chat) e
+> as métricas da campanha (§12) alguns instantes depois — mas na hora do disparo em
+> si não há como saber de antemão quem vai ser rejeitado (ver HANDOFF, Parte CM).
+
 - **Instância de envio**: dropdown com as próprias instâncias do usuário (nunca as de
   outra pessoa), com status online/offline.
 - **Destinatários**: seleção por lista de contatos personalizada (ver §11), por
@@ -1436,6 +1444,11 @@ devolver o id, porque outros updates (resultado por destinatário, vínculo de
 agendamento) referenciam esse id via foreign key (ver §19, bug #9).
 `runCampaign(id, {...})` roda o loop de envio (não é aguardada pelo caller — o
 progresso é consultado via `getCampaign(id)`).
+`onCampaignMessageStatus(messageId, status)`: corrige retroativamente `sent`/`failed`
+quando o WhatsApp rejeita a entrega DEPOIS do envio (`status === 'failed'`, ver
+HANDOFF Parte CM) — chamada dentro de `onMessageStatus` em `src/server.js`, não
+faz nada se o `messageId` não for de uma campanha (mapa em memória
+`messageIdToCampaign`, populado a cada envio dentro de `runCampaign`).
 
 ### `src/scheduler.js`
 `sendScheduled(id, sessions)`: transforma um agendamento em uma campanha real

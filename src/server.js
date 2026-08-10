@@ -33,6 +33,7 @@ const { createSettingsRouter } = require('./routes/settings');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
+const { onCampaignMessageStatus } = require('./campaigns');
 const { logMessageToTimeline, logStatusToTimeline } = require('./bitrix');
 const { verifyBitrixToken, ownerIdFor, issueAppToken, verifyAppToken, requireAuth, TOKEN_TTL_MS } = require('./auth');
 const { assertOwnsSession } = require('./authz');
@@ -365,6 +366,16 @@ const sessions = new SessionManager({
     try {
       await store.updateMessageStatus(sessionId, phone, messageId, status);
       broadcast(sessionId, phone, { type: 'message-status', messageId, status });
+
+      // Corrige retroativamente as métricas de campanha (sent/failed) se
+      // esse messageId foi mandado como parte de uma campanha e o WhatsApp
+      // rejeitou a entrega DEPOIS do envio (ver src/campaigns.js e a
+      // explicação em src/whatsapp.js _mapStatus, código 463/"account
+      // restricted"). Não faz nada se não for uma mensagem de campanha, ou
+      // se o status não for 'failed' — checagem já feita dentro da função.
+      onCampaignMessageStatus(messageId, status).catch((err) =>
+        console.error('[server] falha ao corrigir métricas de campanha:', err.message)
+      );
 
       // Registro de entrega/leitura na timeline do negócio — pedido do
       // usuário pra saber se o contato recebeu/visualizou, direto no card

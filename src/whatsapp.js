@@ -219,8 +219,20 @@ class WhatsAppGateway extends EventEmitter {
 
   // proto.WebMessageInfo.Status: ERROR=0, PENDING=1, SERVER_ACK=2 (enviado),
   // DELIVERY_ACK=3 (entregue), READ=4, PLAYED=5 (áudio/vídeo reproduzido).
+  // code === 0 é WAMessageStatus.ERROR — o WhatsApp ACEITA a mensagem no
+  // envio (sock.sendMessage nunca lança erro nesse caso) e só REJEITA depois,
+  // de forma assíncrona, via este mesmo evento messages.update. O caso real
+  // mais comum: "error 463: account restricted or missing tctoken for
+  // contact" — o WhatsApp exige um token de privacidade antes de deixar
+  // iniciar conversa NOVA com alguém que nunca falou com este número; some
+  // sozinho depois que já existe uma conversa. Sem tratar isto, code===0
+  // caía no `return null` (igual a "nenhum status relevante") e a rejeição
+  // ficava invisível pro sistema inteiro — Campanha marcava sucesso mesmo
+  // sem a mensagem nunca chegar de verdade (bug real, achado via log de
+  // produção: msgId+telefone bateram exatos com os do "error 463").
   _mapStatus(code) {
     if (code == null) return null;
+    if (code === 0) return 'failed';
     if (code >= 4) return 'read';
     if (code === 3) return 'delivered';
     if (code === 2) return 'sent';

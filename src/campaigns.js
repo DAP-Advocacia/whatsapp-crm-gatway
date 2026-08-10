@@ -21,6 +21,13 @@ const campaignStore = require('./campaignStore');
 
 const campaigns = new Map();
 
+// wa_message_id -> { campaignId, phone } — só enquanto a campanha ainda
+// pode receber uma correção retroativa de status (ver onCampaignMessageStatus
+// abaixo). Sem TTL: o volume é o mesmo de `campaigns` (que também nunca é
+// limpo em memória hoje — reinicia zerado a cada restart do processo,
+// mesma limitação já aceita pro estado "ao vivo" de campanha).
+const messageIdToCampaign = new Map();
+
 // É async e PRECISA ser aguardada pelo caller: quem chama isto depois usa o
 // id retornado em updates que têm foreign key pra `campaigns` (ver
 // campaignStore.recordResult/updateProgress e scheduledCampaigns.setStatus)
@@ -98,6 +105,14 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, media
         logMessageToTimeline(dealId, label, 'out').catch(() => {});
       }
 
+      // Só marca sucesso AGORA sabendo que o WhatsApp pode rejeitar a
+      // entrega DEPOIS, de forma assíncrona (ver messages.update/status
+      // 'failed' em src/whatsapp.js — código 463 "account restricted",
+      // comum ao mandar campanha pra quem nunca conversou com este número
+      // antes). Guarda a correspondência pra onCampaignMessageStatus poder
+      // corrigir isto retroativamente se essa rejeição chegar.
+      if (message.id) messageIdToCampaign.set(message.id, { campaignId: id, phone });
+
       campaign.sent++;
       campaign.results.push({ phone, ok: true });
       campaignStore.recordResult(id, phone, true).catch((err) => console.error('[campaign] falha ao gravar envio:', err.message));
@@ -118,4 +133,32 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, media
   campaignStore.finishCampaign(id).catch((err) => console.error('[campaign] falha ao finalizar histórico:', err.message));
 }
 
-module.exports = { createCampaign, getCampaign, runCampaign };
+// Chamado por src/server.js (dentro de onMessageStatus) toda vez que uma
+// mensagem qualquer muda de status — não só as de campanha, por isso o
+// primeiro passo é checar se esse messageId é mesmo de uma campanha (a
+// esmagadora maioria não é). Corrige tanto o estado em memória (usado pelo
+// polling de progresso, GET /campaign/:id) quanto o histórico persistido
+// (campaignStore.markResultFailedAsync).
+async function onCampaignMessageStatus(messageId, status) {
+  if (status !== 'failed') return;
+  const entry = messageIdToCampaign.get(messageId);
+  if (!entry) return;
+  messageIdToCampaign.delete(messageId); // consumido — não corrige duas vezes
+
+  const { campaignId, phone } = entry;
+  try {
+    const corrected = await campaignStore.markResultFailedAsync(campaignId, phone, 'rejeitado pelo WhatsApp após o envio (conta restrita/sem token de privacidade com este contato)');
+    if (!corrected) return;
+    const campaign = campaigns.get(campaignId);
+    if (campaign) {
+      const result = campaign.results.find((r) => r.phone === phone && r.ok);
+      if (result) result.ok = false;
+      campaign.sent = Math.max(campaign.sent - 1, 0);
+      campaign.failed++;
+    }
+  } catch (err) {
+    console.error('[campaign] falha ao corrigir resultado após rejeição assíncrona:', err.message);
+  }
+}
+
+module.exports = { createCampaign, getCampaign, runCampaign, onCampaignMessageStatus };

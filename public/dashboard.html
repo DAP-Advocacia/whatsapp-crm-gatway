@@ -953,7 +953,7 @@
     setInterval(send, 30000);
   }
   function revealAdminNavItemIfSuperAdmin() {
-    apiFetch(`${API_BASE}/whatsapp/admin/whoami`)
+    apiFetch(`${window.location.origin}/api/whatsapp/admin/whoami`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navAdminItem');

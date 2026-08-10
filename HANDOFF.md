@@ -5416,4 +5416,118 @@ depois (`delete from admin_presence where owner_id in (...)`, confirmado
   online/offline no frontend não foi observado num ciclo real de alguém
   fechando a aba e esperando os 90s passarem.
 
+---
+
+### Parte CM — Dois bugs corrigidos: Admin não abria + Campanha "sucesso" sem entregar (2026-08-10)
+
+**Bug 1 (regressão da Parte CL, corrigido rápido)**: item "Admin" na
+sidebar não abria — `dashboard.html` quebrava com `ReferenceError:
+API_BASE is not defined` bem no meio do boot de autenticação (linha
+`revealAdminNavItemIfSuperAdmin()`, adicionada na Parte CL). Causa:
+`dashboard.html` é a ÚNICA das 13 telas que não declara uma constante
+`API_BASE` (usa `window.location.origin` direto em cada chamada) — já
+tinha corrigido isso certo na função `startPresenceHeartbeat()` da mesma
+tela, mas esqueci de repetir a mesma cautela ao inserir
+`revealAdminNavItemIfSuperAdmin()` minutos depois. `node -c`/`vm.Script`
+não pegam esse tipo de erro (é `ReferenceError` em runtime, não erro de
+sintaxe) — só apareceu rodando de verdade no navegador. Corrigido
+trocando `${API_BASE}/whatsapp/admin/whoami` por
+`${window.location.origin}/api/whatsapp/admin/whoami`. Conferido
+sistematicamente depois: nenhuma das outras 13 telas tem esse mesmo
+problema (todas declaram `API_BASE` de fato antes de usar).
+
+**Bug 2 (bug real de dados, muito mais grave)**: usuário reportou "as
+mensagens não estão chegando no WhatsApp, só aparecem no app" —
+especificamente em Campanha (disparo em massa); mensagens manuais no
+Chat continuavam chegando normal. Métricas de Campanha mostravam "4
+campanhas, 6 enviadas, 0 falharam, 100% de sucesso", todas "CONCLUÍDA".
+
+**Diagnóstico**: consultado o banco (`campaigns`/`campaign_results`) —
+5 dos 6 telefones enviados tinham formato correto (13 dígitos), 1 tinha
+14 dígitos (erro de digitação/cópia manual) — mas usuário confirmou que
+NENHUMA das 6 chegou de verdade, incluindo as com telefone correto,
+descartando "formato de número" como causa. Acessado a VPS via SSH
+(`root@179.198.96.125`) e puxado `docker logs` do container no horário
+exato dos disparos (10/08, 21:08–21:18 UTC) — achado, pro `msgId` e
+telefone exatos de cada uma das 6 mensagens:
+```
+"msg":"error 463: account restricted or missing tctoken for contact"
+```
+Lido o comentário do próprio código-fonte do Baileys
+(`node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js`,
+função `handleBadAck`): código 463 significa que o WhatsApp exige um
+"privacy token" (tctoken) antes de deixar iniciar uma conversa NOVA com
+alguém que nunca falou com este número — conversas já existentes
+continuam funcionando normal (bate exatamente com "Chat manual funciona,
+Campanha não" — toda campanha manda pra gente que pode nunca ter
+conversado com o número antes). O WhatsApp aceita a mensagem no envio
+(por isso `sock.sendMessage()` nunca lança erro) e só rejeita DEPOIS, de
+forma assíncrona, via um evento `messages.update` com
+`status: WAMessageStatus.ERROR` (valor numérico `0`) que o próprio
+Baileys já emite (linha 1558 do mesmo arquivo) — só que
+`_mapStatus(code)` em `src/whatsapp.js` só tratava `code >= 4` (lido),
+`3` (entregue), `2` (enviado); `code === 0` caía no `return null` final,
+idêntico a "nenhum status relevante", e o evento inteiro era descartado
+silenciosamente — a rejeição nunca se propagava pra lugar nenhum do
+sistema.
+
+**Correção em 2 camadas**:
+1. `_mapStatus` (`src/whatsapp.js`) agora reconhece `code === 0` como
+   `'failed'`. Isso já corrige a mensagem individual: `store.updateMessageStatus`
+   grava `status = 'failed'` na tabela `messages`, e o Chat passa a
+   mostrar o ícone vermelho de falha — que **já existia pronto** no
+   frontend (`tickIcon()`, `public/chat.html`), com um comentário
+   dizendo "antes caía no else e mostrava check duplo, como se tivesse
+   sido entregue" — a funcionalidade visual já estava certa, só nunca
+   recebia o dado real porque o backend nunca emitia esse status.
+2. **Métricas de campanha** (`sent`/`failed` em `campaigns`, tela
+   `campaign-metrics.html`) são gravadas na hora do disparo, sem saber
+   dessa rejeição que chega depois — corrigido conectando os dois:
+   `runCampaign` (`src/campaigns.js`) guarda um `Map` em memória
+   `messageIdToCampaign` (wa_message_id → `{campaignId, phone}`) a cada
+   envio. Nova `onCampaignMessageStatus(messageId, status)`, chamada
+   dentro de `onMessageStatus` em `src/server.js` (mesmo ponto que já
+   grava o status de toda mensagem) — se o `messageId` for de uma
+   campanha E o status vier como `'failed'`, chama
+   `campaignStore.markResultFailedAsync(campaignId, phone, erro)`
+   (novo, `src/campaignStore.js`): corrige a linha mais recente de
+   `campaign_results` daquele telefone (`ok:true → ok:false`, com
+   `for update skip locked` + checagem de linha encontrada pra nunca
+   corrigir duas vezes o mesmo evento) e ajusta `sent`/`failed` em
+   `campaigns` (`sent = greatest(sent-1, 0)`, `failed = failed+1`) —
+   tanto no banco quanto no estado em memória do polling de progresso.
+
+**Validação**: `node -c` em todos os arquivos alterados; teste isolado
+de `_mapStatus` com todos os 6 códigos possíveis do enum
+`WAMessageStatus` do Baileys; teste de `markResultFailedAsync` contra
+produção (cria campanha de teste, corrige, confirma `sent`/`failed`
+certos no banco, confirma que uma SEGUNDA chamada não corrige de novo —
+idempotência —, limpa depois); teste do fluxo completo ponta a ponta
+(`createCampaign` → `runCampaign` com gateway fake → `onCampaignMessageStatus`
+simulando o evento real do Baileys chegando depois → confirma `sent`/`failed`
+corretos tanto no banco quanto no estado em memória, `campaign.results`
+com `ok:false` na linha certa) — limpo depois.
+
+**Pendências conhecidas**:
+- [ ] O erro 463 em si (WhatsApp exigindo token de privacidade pra
+  conversa nova) não tem solução no nosso lado — é uma política do
+  próprio WhatsApp contra iniciar conversas em volume com quem nunca
+  falou com o número. O Baileys já tenta recuperar o token sozinho em
+  segundo plano (`inFlight463Recoveries`/`issuePrivacyTokens`, dentro do
+  próprio pacote) — não investigado se isso reduz a taxa de rejeição em
+  campanhas futuras pro mesmo destinatário, ou só ajuda depois que já
+  existe alguma conversa.
+- [ ] Nenhum aviso visual foi adicionado na TELA de Campanha (ex:
+  "algumas mensagens podem ser rejeitadas pelo WhatsApp minutos depois
+  do envio, mesmo aparecendo como enviadas na hora") — a correção deixa
+  o dado certo depois do fato (Chat + Métricas atualizam), mas não havia
+  pedido explícito de aviso proativo na hora do disparo; considerar se
+  vale adicionar.
+- [ ] `messageIdToCampaign` (Map em memória, `src/campaigns.js`) nunca é
+  limpo por TTL — só é removido quando consumido por
+  `onCampaignMessageStatus`. Mesma limitação já aceita pro Map `campaigns`
+  (estado "ao vivo" também nunca limpo, zera só num restart do
+  processo) — não é uma regressão nova, é o mesmo padrão já existente
+  no arquivo.
+
 
