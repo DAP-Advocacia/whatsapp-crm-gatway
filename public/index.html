@@ -670,12 +670,16 @@
 
   // `.bubble` usa white-space:pre-wrap (preserva quebra de linha digitada
   // pelo usuário) — isso também preserva, como espaço em branco VISÍVEL, a
-  // indentação/quebra de linha "de formatação" entre tags dos templates
-  // multi-linha abaixo. Como todo texto de usuário já passa por escapeHtml
-  // (vira &lt;/&gt;, nunca um "<"/">" cru), qualquer "><" que sobrar no HTML
-  // final é sempre nosso, nunca conteúdo de mensagem — seguro remover.
+  // indentação/quebra de linha "de formatação" dos templates multi-linha
+  // abaixo. `>\s+<` cobre espaço entre DUAS tags, mas não cobre
+  // tag-seguida-de-TEXTO — exatamente o caso de uma mensagem de texto
+  // simples (o `${quotedHtml}` vazio deixa uma linha de espaços entre
+  // `<div class="bubble">` e o texto, que não é tag, é conteúdo puro).
+  // `>\s*\n\s*` cobre tag-seguida-de-quebra-de-linha ANTES de texto, sem
+  // tocar quebra/espaço que esteja DENTRO do texto de verdade (só ocorre
+  // logo após um `>` de fechamento de tag). Mesmo fix de chat.html.
   function compactHtml(html) {
-    return html.replace(/>\s+</g, '><');
+    return html.replace(/>\s+</g, '><').replace(/>[ \t]*\n\s*/g, '>');
   }
 
   function initials(name) {

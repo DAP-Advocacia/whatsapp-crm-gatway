@@ -4811,6 +4811,32 @@ conversa. `index.html` (aba embutida no card do Negócio) não tem esse
 bug — não existe listener de ESC lá, porque não há "lista" pra voltar
 (uma conversa só, sem tela de lista).
 
+**Espaço vazio antes/depois do texto na bolha — bug antigo, não desta
+sessão** (mesmo dia, print real): usuário perguntou por que toda
+mensagem tinha um "parágrafo" ou espaço em branco antes de começar —
+confirmado que já existia antes das mudanças de hoje (largura/borda/
+formatação), reproduzido isoladamente via Playwright pra achar a causa
+exata. Causa: `renderMessages()` monta a bolha num template multi-linha
+onde `${quotedHtml}` (vazio pra mensagem sem citação) fica em linha
+própria — como `.bubble` usa `white-space: pre-wrap`, a indentação/
+quebra de linha "de formatação" do próprio template (não do conteúdo)
+era preservada como espaço em branco VISÍVEL. Já existia uma proteção
+(`compactHtml()`, `html.replace(/>\s+</g, '><')`) mas ela só cobre
+espaço entre DUAS tags — não cobre tag-seguida-de-TEXTO, que é
+exatamente o caso: o texto da mensagem vem cru (`linkify(msg.text)`,
+sem wrapper), não é uma tag.
+
+Corrigido acrescentando `.replace(/>[ \t]*\n\s*/g, '>')` — remove
+quebra de linha (+ indentação) que vem logo depois de um `>` de
+fechamento de tag, sem tocar em quebra/espaço que esteja DENTRO do
+texto de verdade (só age imediatamente após um `>`, nunca no meio de
+uma frase). Testado explicitamente que mensagem multi-linha real (menu
+da Alterdata, com `<br>` entre parágrafos) preserva as quebras
+intencionais — só remove a sobra de formatação do template. Mesmo fix
+aplicado em `chat.html` e `index.html` (`compactHtml` duplicada nos
+dois). Validado visualmente via Playwright: bolha "Alguém?" reproduzida
+bit a bit igual ao print do usuário antes do fix, e compacta depois.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
