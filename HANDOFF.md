@@ -4769,6 +4769,17 @@ sessão — os vários deploys de hoje (Painel, backfill) reiniciaram o
 processo e zeraram esse contador em memória, que só volta a crescer
 conforme o WhatsApp mandar eventos novos de contato pra aquela sessão.
 
+**Bolha de mensagem reduzida (mesmo dia)**: usuário reportou (com
+screenshot real, monitor largo) a bolha do bot ocupando quase metade da
+tela pra uma mensagem de texto comum. `.bubble{ max-width: 68% }`
+(`chat.html`) / `72%` (`index.html`) — porcentagem pura, sem teto em
+pixels, então em telas largas a bolha crescia proporcionalmente sem
+limite. Trocado pra `max-width: min(60%, 480px)` nos dois arquivos —
+nunca passa de 480px mesmo numa janela enorme, mas ainda respeita telas
+estreitas (onde 60% já é menor que 480px). Validado visualmente via
+Playwright com o texto real do print (menu numerado de 10 itens) —
+bolha ficou compacta e legível, sem esticar pela tela.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

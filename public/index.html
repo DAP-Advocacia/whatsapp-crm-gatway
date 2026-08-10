@@ -332,7 +332,10 @@
   .reply-preview-text{ font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .bubble{
-    max-width: 72%;
+    /* reduzido de 72% — ficava enorme em telas largas (mesmo ajuste feito
+       em chat.html); teto em px porque esta página roda embutida num
+       card do Bitrix, com largura variável dependendo do layout do CRM. */
+    max-width: min(60%, 480px);
     padding: 9px 12px 8px;
     font-size: 13.5px;
     line-height: 1.45;
