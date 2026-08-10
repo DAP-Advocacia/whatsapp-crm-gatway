@@ -450,6 +450,15 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   símbolos literais) — `formatWhatsAppText()`, mesmas regras do WhatsApp real
   (marcador só conta se colado à palavra). Comum em mensagens de bot/menu
   (ex: `*1. Opção*`), sem isso ficavam com os asteriscos no meio do texto.
+- **Avatar do atendente por mensagem + aviso de troca**: cada bolha `mine`
+  com `sentByName` preenchido mostra um pequeno avatar (iniciais) de quem
+  a enviou (`messages.sent_by`/`sent_by_name`, ver §14) — e um divisor
+  dourado "{Nome} assumiu o atendimento" aparece quando duas mensagens
+  nossas consecutivas têm remetentes diferentes. `sentBy` é sempre
+  `req.ownerId` (nunca aceito do client); só mensagens enviadas depois
+  desta feature existir têm o dado — sem backfill retroativo, diferente
+  do Painel de atendimento (§9), já que não há como recuperar quem
+  enviou uma mensagem já mandada no passado.
 - **Confirmação de leitura**: mensagem enviada mostra check simples (enviada),
   check duplo (entregue) ou check duplo **azul** (`#53bdeb`, lida — mesma cor
   do WhatsApp), ícones SVG desenhados em `tickIcon()`. Falha de envio tem ícone

@@ -92,6 +92,18 @@ alter table messages add column if not exists reply_to_id text;
 -- src/whatsapp.js e a rota POST /send-media.
 alter table messages add column if not exists file_name text;
 
+-- Quem enviou esta mensagem (só faz sentido pra direction='out') — o
+-- OWNER_ID de quem apertou "enviar", capturado no momento do envio
+-- (POST /send / /send-media), não inferido depois. Sem isso não havia
+-- como mostrar avatar/nome do atendente na bolha nem detectar troca de
+-- atendente entre mensagens consecutivas na mesma conversa (ver Painel
+-- de atendimento, chat.html). `sent_by_name` cacheia o nome pra exibir
+-- sem round-trip ao Bitrix, mesmo padrão de conversations.assigned_to_name.
+-- Mensagens enviadas ANTES desta coluna existir ficam null pra sempre —
+-- não há como recuperar quem enviou no passado, só a partir de agora.
+alter table messages add column if not exists sent_by text;
+alter table messages add column if not exists sent_by_name text;
+
 create index if not exists idx_conversations_session
   on conversations (session_id);
 

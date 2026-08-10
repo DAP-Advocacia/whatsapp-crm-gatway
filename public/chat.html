@@ -692,6 +692,17 @@
     border: 1px solid var(--border); padding: 4px 12px; border-radius: 100px; margin: 14px 0 10px;
     letter-spacing: .03em; text-transform: uppercase;
   }
+  /* Aviso de troca de atendente (ver renderMessages) — mesmo estilo do
+     day-divider, cor dourada pra diferenciar de "mudou o dia" à primeira
+     vista. Só aparece entre duas mensagens NOSSAS (direction='out') com
+     sentBy diferente — não a cada mensagem, senão poluiria a conversa
+     inteira toda vez que o contato responde no meio. */
+  .agent-switch-divider{
+    align-self: center; font-size: 11px; color: var(--gold); background: rgba(var(--gold-rgb),.1);
+    border: 1px solid var(--gold-dim); padding: 4px 12px; border-radius: 100px; margin: 10px 0;
+  }
+  .bubble-sender{ flex-shrink:0; margin-bottom:2px; }
+  .bubble-sender .avatar{ width:20px; height:20px; font-size:8.5px; border:none; }
   .bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
   .bubble-row.mine{ justify-content: flex-end; }
   .bubble-row.theirs{ justify-content: flex-start; }
@@ -2771,17 +2782,35 @@
 
     let html = '';
     let lastDay = null;
+    // Rastreia o último atendente (sentBy) visto numa mensagem NOSSA, pra
+    // avisar quando a pessoa que está respondendo muda no meio da conversa
+    // (pedido do usuário: "1 atendente fez o primeiro contato mas outro
+    // atendente continuou, eu quero essa métrica e histórico"). Mensagens
+    // sem sentBy (enviadas antes desta feature existir, ou otimistas que
+    // ainda não voltaram do servidor) não disparam o aviso — só compara
+    // quando os dois lados têm o dado.
+    let lastSentBy = null;
     state.messages.forEach((msg) => {
       const dayLabel = formatDayLabel(msg.createdAt);
       if (dayLabel !== lastDay) {
         html += `<div class="day-divider">${dayLabel}</div>`;
         lastDay = dayLabel;
+        lastSentBy = null; // dia novo também reseta — não teria como saber quem respondeu por último "ontem" nesse resumo visual
       }
       const mine = msg.direction === 'out';
+      if (mine && msg.sentBy) {
+        if (lastSentBy && lastSentBy !== msg.sentBy) {
+          html += `<div class="agent-switch-divider">${escapeHtml(msg.sentByName || 'Outro atendente')} assumiu o atendimento</div>`;
+        }
+        lastSentBy = msg.sentBy;
+      }
       const isMedia = (msg.type === 'image' || msg.type === 'video') && msg.mediaUrl;
       const bubbleClass = isMedia ? 'bubble--media' : '';
       const quotedHtml = msg.replyToId ? renderQuotedBlock(msg.replyToId) : '';
       const reactionMine = msg.reactionBy === 'out';
+      const senderHtml = mine && msg.sentByName
+        ? `<span class="bubble-sender" title="Enviada por ${escapeHtml(msg.sentByName)}"><span class="avatar">${escapeHtml(initials(msg.sentByName))}</span></span>`
+        : '';
       const bubbleHtml = `
         <div class="bubble ${bubbleClass}">
           ${quotedHtml}
@@ -2793,7 +2822,7 @@
       const actionsHtml = bubbleActionsHtml(msg, mine);
       html += `
         <div class="bubble-row ${mine ? 'mine' : 'theirs'}${msg.reaction ? ' has-reaction' : ''}" data-row-msg-id="${escapeHtml(msg.id)}">
-          ${mine ? actionsHtml + bubbleHtml : bubbleHtml + actionsHtml}
+          ${mine ? actionsHtml + senderHtml + bubbleHtml : bubbleHtml + actionsHtml}
         </div>
       `;
     });
@@ -3200,6 +3229,7 @@
         id: 'tmp-' + Date.now(), type: 'audio', text: null, replyToId,
         mediaUrl: URL.createObjectURL(blob), mimetype: blob.type,
         direction: 'out', status: 'sent', createdAt: new Date().toISOString(),
+        sentBy: state.ownerId, sentByName: myBitrixName,
       };
       state.messages.push(optimisticMsg);
       renderMessages();
@@ -3207,7 +3237,7 @@
         const res = await apiFetch(`${API_BASE}/send-media`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: 'audio', mimetype: blob.type, dataBase64, replyToId }),
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: 'audio', mimetype: blob.type, dataBase64, replyToId, senderName: myBitrixName }),
         });
         if (!res.ok) throw new Error('Falha no envio');
         const data = await res.json();
@@ -3286,7 +3316,7 @@
       const replyToId = state.replyingTo?.id || null;
       cancelReply();
 
-      const optimisticMsg = { id: 'tmp-' + Date.now(), text, replyToId, direction: 'out', status: 'sent', createdAt: new Date().toISOString() };
+      const optimisticMsg = { id: 'tmp-' + Date.now(), text, replyToId, direction: 'out', status: 'sent', createdAt: new Date().toISOString(), sentBy: state.ownerId, sentByName: myBitrixName };
       state.messages.push(optimisticMsg);
       renderMessages();
 
@@ -3294,7 +3324,7 @@
         const res = await apiFetch(`${API_BASE}/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, text, replyToId }),
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, text, replyToId, senderName: myBitrixName }),
         });
         if (!res.ok) throw new Error('Falha no envio');
         const data = await res.json();
@@ -3323,6 +3353,7 @@
         id: 'tmp-' + Date.now(), type: mediaType, text: null, replyToId, fileName,
         mediaUrl: URL.createObjectURL(file), mimetype: file.type,
         direction: 'out', status: 'sent', createdAt: new Date().toISOString(),
+        sentBy: state.ownerId, sentByName: myBitrixName,
       };
       state.messages.push(optimisticMsg);
       renderMessages();
@@ -3331,7 +3362,7 @@
         const res = await apiFetch(`${API_BASE}/send-media`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: mediaType, mimetype: file.type, dataBase64, fileName, replyToId }),
+          body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, type: mediaType, mimetype: file.type, dataBase64, fileName, replyToId, senderName: myBitrixName }),
         });
         if (!res.ok) throw new Error('Falha no envio');
         const data = await res.json();

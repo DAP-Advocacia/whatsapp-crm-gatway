@@ -1107,7 +1107,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // POST /send  { session, dealId, phone, text, replyToId? }
   // ---------------------------------------------------------------
   router.post('/send', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, dealId, phone, text, replyToId } = req.body || {};
+    const { session, dealId, phone, text, replyToId, senderName } = req.body || {};
 
     if (!phone || !text) {
       return res.status(400).json({ error: 'phone e text são obrigatórios' });
@@ -1118,6 +1118,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
       const replyTo = await resolveReplyTo(session, phone, replyToId);
       const message = await gateway.sendMessage(phone, text, replyTo);
       message.replyToId = replyTo ? replyToId : null;
+      // sentBy é SEMPRE req.ownerId (quem autenticou esta requisição), nunca
+      // um valor vindo do client — evita alguém se declarar outra pessoa.
+      // senderName é best-effort (vem do BX24.callMethod('user.current') do
+      // próprio client) só pra exibir sem round-trip extra ao Bitrix; se não
+      // vier, fica sem nome mas sentBy ainda identifica quem foi.
+      message.sentBy = req.ownerId;
+      message.sentByName = senderName || null;
       await store.addMessage(session, phone, message, dealId);
 
       // replica para qualquer outra aba aberta olhando o mesmo telefone nesta sessão
@@ -1230,7 +1237,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // um documento genérico como mídia embutida.
   // ---------------------------------------------------------------
   router.post('/send-media', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, dealId, phone, type, mimetype, dataBase64, caption, fileName, replyToId } = req.body || {};
+    const { session, dealId, phone, type, mimetype, dataBase64, caption, fileName, replyToId, senderName } = req.body || {};
 
     if (!phone || !type || !mimetype || !dataBase64) {
       return res.status(400).json({ error: 'phone, type, mimetype e dataBase64 são obrigatórios' });
@@ -1262,6 +1269,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
       const message = {
         ...sent, type, text: caption || null, mediaUrl, mimetype: sentMimetype,
         replyToId: replyTo ? replyToId : null, fileName: type === 'document' ? fileName : null,
+        sentBy: req.ownerId, sentByName: senderName || null, // mesma regra de /send: sentBy nunca vem do client
       };
       await store.addMessage(session, phone, message, dealId);
 

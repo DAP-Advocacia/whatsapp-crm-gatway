@@ -4837,6 +4837,81 @@ aplicado em `chat.html` e `index.html` (`compactHtml` duplicada nos
 dois). Validado visualmente via Playwright: bolha "Alguém?" reproduzida
 bit a bit igual ao print do usuário antes do fix, e compacta depois.
 
+**Avatar do atendente em cada mensagem + aviso de troca de atendente
+(mesmo dia)**: pedido do usuário, com exemplo — "1 atendente fez o
+primeiro contato mas outro atendente continuou, eu quero essa métrica e
+histórico". Diferente do Painel de atendimento (Parte CI, que sabe quem
+era responsável por CONVERSA/período), isso é por MENSAGEM individual —
+não existia nenhum dado de "quem enviou" numa mensagem, só
+`conversations.assigned_to` (responsável atual da conversa inteira).
+
+**Schema** (`db/schema.sql`): `messages.sent_by`/`sent_by_name` — só
+preenchido em mensagens novas a partir de agora; mensagens já enviadas
+antes desta coluna existir ficam `null` pra sempre (não há como
+recuperar quem mandou no passado).
+
+**Backend**: `sentBy` é **sempre `req.ownerId`** (quem autenticou a
+requisição) — nunca aceito como valor vindo do client no body, pra
+ninguém poder se declarar outra pessoa (mesmo cuidado já documentado em
+`isManager` do Painel, Parte CI). `sentByName` é best-effort, vem do
+próprio client (`BX24.callMethod('user.current')`, já resolvido no boot
+como `myBitrixName`) — evita round-trip ao Bitrix no backend, mesma
+lógica já usada em `assigned_to_name`. As duas rotas de envio (`POST
+/send`, `POST /send-media` — cobre imagem/áudio/vídeo/documento, não há
+rota separada pra áudio) gravam `message.sentBy`/`message.sentByName`
+antes de `store.addMessage`, e como o mesmo objeto `message` já vai pro
+`broadcast()` do WebSocket, o dado chega de graça em tempo real pra
+quem estiver com a conversa aberta em outra aba, sem mudança adicional
+no evento realtime.
+
+**Frontend** (`public/chat.html`, `renderMessages()`):
+- Pequeno avatar (iniciais, 20px) ao lado de cada bolha `mine` com
+  `sentByName` preenchido — reaproveita `initials()`/padrão `.avatar` já
+  usado em outros lugares do app (ex: tag de atendente na lista, Parte
+  CF). Mensagens sem `sentByName` (antigas, ou otimistas que ainda não
+  voltaram do servidor) simplesmente não mostram avatar.
+- Divisor dourado "{Nome} assumiu o atendimento" — aparece entre duas
+  mensagens NOSSAS consecutivas (`direction='out'`) quando `sentBy`
+  muda. Rastreado via `lastSentBy` no loop de `renderMessages`, resetado
+  a cada dia novo (não teria como saber quem respondeu "por último
+  ontem" de forma confiável nesse resumo visual). Só compara quando
+  ambos os lados têm `sentBy` — mensagem sem esse dado nunca dispara o
+  aviso nem quebra o rastreamento do próximo.
+- As 3 funções de envio (`sendMessage`, `sendMediaFile`,
+  `sendRecordedAudio`) passam `senderName: myBitrixName` no body e já
+  preenchem `sentBy`/`sentByName` na mensagem OTIMISTA (mostrada antes
+  da resposta do servidor chegar) — sem isso, o avatar apareceria só
+  depois de um instante, quando a resposta real substituísse a
+  otimista.
+
+Validado visualmente via Playwright: conversa simulada com contato →
+Ana (2 mensagens seguidas, sem divisor entre elas) → Bruno assume (1
+mensagem, com divisor "Bruno Lima assumiu o atendimento" aparecendo
+exatamente entre a última mensagem da Ana e a primeira do Bruno) —
+avatares corretos em cada bolha (iniciais "AS"/"BL").
+
+- [ ] Não testado dentro do Bitrix ainda — só validação visual isolada
+  (Playwright, dados simulados) e teste direto do pipeline
+  backend/banco (inserir mensagem de teste com sentBy, conferir que
+  volta certo em getHistory). Falta confirmar em produção com duas
+  pessoas reais trocando o atendimento de uma conversa de verdade.
+- [ ] Mensagens antigas (antes desta parte) continuam sem `sent_by` —
+  diferente da Parte CI (Painel), que ganhou um script de backfill
+  (`db/backfill-assignment-history.js`) pra cobrir atribuições
+  anteriores, aqui NÃO existe backfill equivalente — não haveria como
+  inferir quem enviou uma mensagem de texto já mandada no passado (o
+  máximo que dava pra inferir seria "quem estava responsável pela
+  conversa naquele momento", que é uma aproximação bem mais fraca que
+  saber de verdade quem apertou enviar). Mensagens antigas simplesmente
+  não mostram avatar nem entram no rastreamento de troca de atendente.
+- [ ] O aviso de troca de atendente só considera mensagens NOSSAS
+  consecutivas — se o contato responder no meio (A responde, contato
+  fala algo, B responde), o divisor ainda aparece corretamente (o
+  rastreamento ignora mensagens `in`, não reseta `lastSentBy`). Não
+  testado ainda o caso de MUITAS trocas seguidas (ida e volta entre A e
+  B repetidas vezes) — deve funcionar pela mesma lógica, mas vale
+  confirmar visualmente se não fica poluído.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

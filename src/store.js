@@ -36,8 +36,8 @@ async function addMessage(sessionId, phone, message, dealId, pushName) {
 
   const { rowCount } = await pool.query(
     `insert into messages
-       (conversation_id, wa_message_id, direction, type, text, media_url, mimetype, status, created_at, reply_to_id, file_name)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       (conversation_id, wa_message_id, direction, type, text, media_url, mimetype, status, created_at, reply_to_id, file_name, sent_by, sent_by_name)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      on conflict (conversation_id, wa_message_id) do nothing`,
     [
       conversationId,
@@ -51,6 +51,8 @@ async function addMessage(sessionId, phone, message, dealId, pushName) {
       message.createdAt,
       message.replyToId ?? null,
       message.fileName ?? null,
+      message.sentBy ?? null,
+      message.sentByName ?? null,
     ]
   );
 
@@ -73,6 +75,8 @@ async function getHistory(sessionId, phone) {
          m.reaction_by as "reactionBy",
          m.reply_to_id as "replyToId",
          m.file_name as "fileName",
+         m.sent_by as "sentBy",
+         m.sent_by_name as "sentByName",
          m.created_at as "createdAt"
        from messages m
        join conversations c on c.id = m.conversation_id
