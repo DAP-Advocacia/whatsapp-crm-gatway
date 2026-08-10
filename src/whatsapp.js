@@ -26,9 +26,13 @@ const { convertToOggOpus } = require('./audioConvert');
  * Não é a API oficial da Meta. Veja o aviso de risco de banimento já dado na conversa.
  */
 class WhatsAppGateway extends EventEmitter {
-  constructor({ authFolder }) {
+  constructor({ authFolder, sessionId }) {
     super();
     this.authFolder = authFolder;
+    // Usado só pra prefixar arquivos de mídia salvos (ver saveMedia) — evita
+    // colisão de nome quando duas instâncias diferentes geram o mesmo
+    // key.id do WhatsApp (o espaço de ids não é coordenado entre contas).
+    this.sessionId = sessionId;
     this.sock = null;
     this.status = 'offline';
     this.lastQrDataUrl = null;
@@ -563,7 +567,7 @@ class WhatsAppGateway extends EventEmitter {
     if (media) {
       try {
         const buffer = await downloadMediaMessage(m, 'buffer', {});
-        mediaUrl = await saveMedia(m.key.id, buffer, media.mimetype);
+        mediaUrl = await saveMedia(this.sessionId, m.key.id, buffer, media.mimetype);
         mimetype = media.mimetype;
       } catch (err) {
         if (!isHistory) {

@@ -46,6 +46,7 @@ class SessionManager {
 
     const gateway = new WhatsAppGateway({
       authFolder: path.join(this.baseFolder, id),
+      sessionId: id,
     });
     gateway.on('status', (status) => this.onStatus(id, status));
     gateway.on('message', ({ phone, message, pushName, isHistory }) => this.onMessage(id, phone, message, pushName, isHistory));

@@ -84,7 +84,7 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, media
           mimetype: media.mimetype,
           caption: text || undefined,
         });
-        const mediaUrl = await saveMedia(sent.id, sentBuffer, sentMimetype);
+        const mediaUrl = await saveMedia(sessionId, sent.id, sentBuffer, sentMimetype);
         message = { ...sent, type: media.type, text: text || null, mediaUrl, mimetype: sentMimetype };
       } else {
         message = await gateway.sendMessage(phone, text);

@@ -710,7 +710,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
     if (mediaPayload) {
       try {
         const buffer = Buffer.from(mediaPayload.dataBase64, 'base64');
-        const url = await saveMedia(id, buffer, mediaPayload.mimetype);
+        const url = await saveMedia(session, id, buffer, mediaPayload.mimetype);
         mediaPayload = { type: mediaPayload.type, mimetype: mediaPayload.mimetype, url };
       } catch (err) {
         console.error('[campaign:schedule] falha ao subir mídia:', err.message);
@@ -1264,7 +1264,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
         fileName,
         replyTo,
       });
-      const mediaUrl = await saveMedia(sent.id, sentBuffer, sentMimetype);
+      const mediaUrl = await saveMedia(session, sent.id, sentBuffer, sentMimetype);
 
       const message = {
         ...sent, type, text: caption || null, mediaUrl, mimetype: sentMimetype,

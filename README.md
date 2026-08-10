@@ -344,6 +344,14 @@ manualmente nas 13 cópias.
   (`hydrateMedia()` em `chat.html`/`index.html`) já sabia buscar URLs relativas
   de forma autenticada antes dessa mudança — nenhuma alteração de frontend foi
   necessária.
+- **Nome do arquivo prefixado por instância**: `saveMedia(sessionId, id, buffer,
+  mimetype)` salva em `<sessionId>/<id>.<ext>`, não só `<id>.<ext>`. `id` é o
+  `key.id` que o próprio WhatsApp/Baileys atribui à mensagem — único dentro de
+  uma instância, mas **não coordenado entre instâncias diferentes**; sem o
+  prefixo, duas contas distintas podiam gerar o mesmo id e a segunda mídia
+  salva sobrescrevia a primeira no Storage (`upsert: true`), fazendo duas
+  conversas de instâncias diferentes exibirem o mesmo áudio/foto — bug real
+  encontrado em produção, corrigido em 2026-08-10 (HANDOFF, Parte CJ).
 
 ---
 
@@ -1391,9 +1399,11 @@ via `row.media_url` (`downloadMedia`, formato novo) com fallback pra
 dispara todo agendamento vencido.
 
 ### `src/media.js`
-- `saveMedia(id, buffer, mimetype)` → `async`, sobe pro bucket `media` do
-  Supabase Storage (privado) e devolve um caminho relativo
-  (`/api/whatsapp/media/<filename>`), não mais a URL pública.
+- `saveMedia(sessionId, id, buffer, mimetype)` → `async`, sobe pro bucket
+  `media` do Supabase Storage (privado) em `<sessionId>/<id>.<ext>` (prefixo
+  de instância evita colisão de `key.id` entre instâncias diferentes, ver
+  §7) e devolve um caminho relativo (`/api/whatsapp/media/<filename>`), não
+  mais a URL pública.
 - `getSignedMediaUrl(filename, expiresIn=300)`: usado pela rota `GET
   /media/:filename` (§16) pra gerar a signed URL na hora de exibir.
 - `downloadMedia(relativeUrl)`: extrai o filename e baixa os bytes direto do

@@ -51,8 +51,17 @@ function extFor(mimetype) {
   return EXT_BY_MIMETYPE[base] || 'bin';
 }
 
-async function saveMedia(id, buffer, mimetype) {
-  const filename = `${id}.${extFor(mimetype)}`;
+// `id` é o WA_MSG_ID que o próprio WhatsApp/Baileys atribui à mensagem —
+// único DENTRO de uma conta/instância, mas não entre instâncias diferentes
+// (cada número gera o próprio espaço de ids, sem coordenação entre eles).
+// Sem o prefixo de sessionId, duas instâncias distintas podiam gerar o
+// mesmo key.id pra mensagens diferentes; como o upload usa upsert:true, a
+// segunda sobrescrevia o arquivo da primeira no Storage — e as DUAS
+// mensagens no banco ficavam apontando pro mesmo mediaUrl, exibindo o
+// mesmo áudio/imagem em conversas de instâncias diferentes (bug real
+// reportado pelo usuário: mesmo áudio aparecendo em duas conversas).
+async function saveMedia(sessionId, id, buffer, mimetype) {
+  const filename = `${encodeURIComponent(sessionId)}/${id}.${extFor(mimetype)}`;
   const { error } = await supabase.storage.from(BUCKET).upload(filename, buffer, {
     contentType: mimetype,
     upsert: true,

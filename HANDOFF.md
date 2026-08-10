@@ -5192,4 +5192,70 @@ Detalhes de arquitetura, rotas e mapa de arquivos: ver `README.md`.
   reservado na conta ngrok correta — não muda em reinícios do túnel, **desde que**
   sempre suba com `ngrok http --url=https://maker-impaired-obliged.ngrok-free.dev 3333`).
 
+---
+
+### Parte CJ — Correção: mídia (áudio/foto) vazando entre conversas de instâncias diferentes (2026-08-10)
+
+Usuário reportou (com prints reais do Bitrix) o mesmo áudio de 10s, com o
+mesmo horário, aparecendo em **duas conversas diferentes** dentro do
+Chat. Não era coincidência visual: era literalmente o mesmo arquivo.
+
+**Causa raiz**: `saveMedia(id, buffer, mimetype)` (`src/media.js`) usava
+só o `key.id` que o próprio WhatsApp/Baileys atribui à mensagem como nome
+do arquivo no bucket `media` do Supabase Storage, com `upsert: true`.
+`key.id` (WA_MSG_ID) é único **dentro de uma conta/instância**, mas o
+espaço de ids **não é coordenado entre instâncias diferentes** — nada
+impede duas contas distintas gerarem o mesmo id pra mensagens totalmente
+diferentes. Quando isso acontecia, a segunda mídia salva **sobrescrevia
+a primeira no Storage** (mesmo nome de arquivo, `upsert: true`), e as
+duas mensagens no banco ficavam com o mesmo `media_url` apontando pro
+mesmo arquivo físico — uma delas passava a exibir a mídia da outra.
+
+**Tamanho real do estrago, medido em produção antes da correção**: query
+de diagnóstico (`media_url` repetido entre `conversation_id` diferentes)
+achou **36 arquivos de mídia colididos** no banco atual. Cruzando com
+`conversations.session_id`, a esmagadora maioria dos pares envolve
+**instâncias diferentes** (ex: `..._8465` vs `..._8465__ms6fzwlsri25`,
+20 colisões nesse par sozinho; `..._182084...` vs `..._183958...`, 7
+colisões), confirmando a causa. Como o arquivo já foi fisicamente
+sobrescrito no Storage, **não há como recuperar o conteúdo original
+perdido** — a correção abaixo impede colisões novas, não desfaz as já
+ocorridas.
+
+**Correção**: `saveMedia` ganhou parâmetro novo `sessionId`
+(`saveMedia(sessionId, id, buffer, mimetype)`), e o nome do arquivo no
+bucket passou a ser `<sessionId>/<id>.<ext>` em vez de só `<id>.<ext>` —
+duas instâncias diferentes agora nunca colidem, mesmo gerando o mesmo
+`key.id`. Atualizados os 4 pontos que chamam `saveMedia`: mídia recebida
+(`src/whatsapp.js`, `WhatsAppGateway` ganhou `this.sessionId` no
+construtor, passado por `src/sessions.js` na hora de criar o gateway),
+mídia enviada via `/send-media` e campanha agendada
+(`src/routes/whatsapp.js`), e campanha em massa (`src/campaigns.js`).
+
+Duas rotas que consomem o `media_url` foram conferidas e **não
+precisaram de mudança**: `GET /media/:filename` (`src/routes/whatsapp.js`)
+recebe `:filename` como segmento único, mas como o path é sempre gerado
+com `encodeURIComponent` (a barra interna vira `%2F`), o Express decodifica
+de volta pra `sessionId/id.ext` corretamente em `req.params.filename`
+(confirmado com teste isolado antes de aplicar) — a rota já funciona sem
+tocar nela. `downloadMedia` (`src/media.js`, usada por `src/scheduler.js`
+pra campanhas agendadas) usa `.split('/').pop()` sobre a URL completa,
+que já pega o filename codificado inteiro (com o `%2F` escapado, não uma
+barra literal) e decodifica corretamente — também não precisou de ajuste.
+
+**Validação**: `node -c` em todos os 5 arquivos alterados. Teste isolado
+com Express real confirmando que `%2F` no path vira `/` de volta em
+`req.params.filename`. Query de diagnóstico contra o banco de produção
+pra medir o estrago já existente (só leitura, nada alterado/apagado).
+
+**Pendências conhecidas**:
+- [ ] Os 36 arquivos já colididos continuam com conteúdo trocado/perdido —
+  não há como saber qual era o original de cada um. Não avisado
+  individualmente a nenhum usuário; se algum cliente/atendente notar uma
+  mídia "errada" numa conversa antiga, é provável que seja um desses
+  casos.
+- [ ] `mediaBlobCache` no frontend (`public/chat.html`) é um cache global
+  por URL, nunca limpo — não era a causa deste bug (a URL em si que
+  colidia, não o cache), mas fica registrado que existe.
+
 
