@@ -750,7 +750,8 @@
     border-radius: var(--radius); word-wrap: break-word; white-space: pre-wrap;
     position: relative; box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14);
   }
-  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border: 1px solid var(--border); border-bottom-left-radius: 3px; color: var(--text); }
+  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 3px; color: var(--text); }
+  .bubble code{ background:rgba(255,255,255,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
   .bubble-row.mine .bubble{
     background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 3px;
     box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.25);
@@ -2602,10 +2603,14 @@
   // (backBtn). Só age se não tiver nenhum modal aberto: nesse caso o outro
   // listener de ESC (mais acima, genérico pra qualquer .overlay) já cuida de
   // fechar o modal, e sair da conversa ao mesmo tempo seria demais de uma
-  // vez só.
+  // vez só. Também prioriza cancelar uma citação em andamento ("Respondendo
+  // a…") antes de sair — sem isso, ESC no meio de uma resposta desistida
+  // saía da conversa inteira em vez de só limpar a barra de citação (bug
+  // real reportado pelo usuário, ver HANDOFF.md).
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (document.querySelector('.overlay.open')) return;
+    if (state.replyingTo) { cancelReply(); return; }
     if (state.active) closeConversation();
   });
 
@@ -2939,8 +2944,25 @@
     const m = text && text.match(URL_REGEX);
     return m ? m[0] : null;
   }
+  // Formatação de texto do WhatsApp (*negrito*, _itálico_, ~tachado~,
+  // ```monoespaçado```) — sem isso, mensagens que usam esses marcadores
+  // (comum em bots/menus, ex: "*1. Opção*") apareciam com os símbolos
+  // literais no meio do texto, difícil de ler. Regras do próprio WhatsApp:
+  // o marcador só "conta" se colado à palavra (sem espaço logo depois de
+  // abrir nem logo antes de fechar) — evita, por exemplo, "3 * 4 = 12"
+  // virar itálico por engano. Roda em texto JÁ escapado (entra depois de
+  // escapeHtml), então os regex abaixo nunca precisam lidar com HTML de
+  // verdade, só com o texto visível.
+  function formatWhatsAppText(escaped) {
+    return escaped
+      .replace(/```([^`\n]+)```/g, '<code>$1</code>')
+      .replace(/(?<![*\w])\*([^\s*][^*]*?)\*(?![*\w])/g, '<strong>$1</strong>')
+      .replace(/(?<![_\w])_([^\s_][^_]*?)_(?![_\w])/g, '<em>$1</em>')
+      .replace(/(?<![~\w])~([^\s~][^~]*?)~(?![~\w])/g, '<del>$1</del>');
+  }
+
   function linkify(text) {
-    return escapeHtml(text).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+    return formatWhatsAppText(escapeHtml(text)).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
   }
 
   function renderBubbleBody(msg, mine) {

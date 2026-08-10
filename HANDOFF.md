@@ -4780,6 +4780,37 @@ estreitas (onde 60% já é menor que 480px). Validado visualmente via
 Playwright com o texto real do print (menu numerado de 10 itens) —
 bolha ficou compacta e legível, sem esticar pela tela.
 
+**Formatação de texto do WhatsApp interpretada + borda removida (mesmo
+dia)**: usuário reportou o mesmo menu numerado "embaralhado e sem
+padrão" — causa real era que o bot da Alterdata usa `*texto*` (negrito
+do WhatsApp) pra organizar os itens, e o chat mostrava os asteriscos
+literais, sem interpretar nenhuma marcação. Adicionado
+`formatWhatsAppText()` em `chat.html`/`index.html` (dentro de
+`linkify()`, entre `escapeHtml` e a linkificação de URL): `*negrito*`,
+`_itálico_`, `~tachado~`, `` ```monoespaçado``` `` — mesmas regras do
+WhatsApp real (marcador só conta se colado à palavra, sem espaço logo
+depois de abrir nem logo antes de fechar; testado explicitamente que
+"3 * 4 = 12" não vira itálico por engano). Roda em texto já escapado,
+então os regex nunca precisam lidar com HTML de verdade. Também removida
+a borda (`border: 1px solid var(--border)`) das bolhas do contato
+(`.bubble-row.theirs .bubble`) nos dois arquivos — usuário achou "feio".
+Validado visualmente via Playwright reaproveitando o mesmo preview do
+item anterior, com a função de formatação real aplicada ao texto do
+menu.
+
+**Bug de ESC saindo da conversa em vez de cancelar citação (mesmo
+dia)**: usuário reportou — ao clicar "Responder" numa mensagem e depois
+desistir com ESC, a tela saía da conversa inteira (voltava pra lista) em
+vez de só fechar a barra "Respondendo a…". Causa: o listener de ESC que
+fecha a conversa (`chat.html`, perto de `renderConversationView`) só
+checava se havia um modal aberto (`.overlay.open`) antes de agir, nunca
+checava `state.replyingTo`. Corrigido priorizando cancelar a citação
+(chama `cancelReply()`, já existente) antes de considerar sair da
+conversa — mesma ordem de prioridade que modais já tinham sobre a
+conversa. `index.html` (aba embutida no card do Negócio) não tem esse
+bug — não existe listener de ESC lá, porque não há "lista" pra voltar
+(uma conversa só, sem tela de lista).
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

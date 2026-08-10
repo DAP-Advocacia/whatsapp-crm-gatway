@@ -442,7 +442,14 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
 - **Conversa**: mesmo conjunto de recursos da aba do card — texto, imagem, áudio
   (gravado ou anexado), vídeo, tags por conversa, indicador de status da conexão.
   O campo de mensagem tem scrollbar customizado (fino, cor da identidade visual
-  do app) em vez do padrão do navegador — mesmo ajuste em `index.html`.
+  do app) em vez do padrão do navegador — mesmo ajuste em `index.html`. Bolha
+  tem largura máxima de `min(60%, 480px)` (nunca passa de 480px mesmo em
+  monitor largo) e sem borda do lado do contato.
+- **Formatação de texto do WhatsApp**: `*negrito*`, `_itálico_`, `~tachado~` e
+  `` ```monoespaçado``` `` são interpretados de verdade (não aparecem com os
+  símbolos literais) — `formatWhatsAppText()`, mesmas regras do WhatsApp real
+  (marcador só conta se colado à palavra). Comum em mensagens de bot/menu
+  (ex: `*1. Opção*`), sem isso ficavam com os asteriscos no meio do texto.
 - **Confirmação de leitura**: mensagem enviada mostra check simples (enviada),
   check duplo (entregue) ou check duplo **azul** (`#53bdeb`, lida — mesma cor
   do WhatsApp), ícones SVG desenhados em `tickIcon()`. Falha de envio tem ícone

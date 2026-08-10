@@ -348,10 +348,10 @@
 
   .bubble-row.theirs .bubble{
     background: var(--bubble-theirs);
-    border: 1px solid var(--border);
     border-bottom-left-radius: 3px;
     color: var(--text);
   }
+  .bubble code{ background:rgba(255,255,255,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
 
   .bubble-row.mine .bubble{
     background: var(--bubble-mine);
@@ -1021,8 +1021,21 @@
     const m = text && text.match(URL_REGEX);
     return m ? m[0] : null;
   }
+  // Formatação de texto do WhatsApp (*negrito*, _itálico_, ~tachado~,
+  // ```monoespaçado```) — mesmo motivo/regras de chat.html: sem isso,
+  // mensagens de bots/menus com esses marcadores apareciam com os
+  // símbolos literais. Roda em texto já escapado (entra depois de
+  // escapeHtml).
+  function formatWhatsAppText(escaped) {
+    return escaped
+      .replace(/```([^`\n]+)```/g, '<code>$1</code>')
+      .replace(/(?<![*\w])\*([^\s*][^*]*?)\*(?![*\w])/g, '<strong>$1</strong>')
+      .replace(/(?<![_\w])_([^\s_][^_]*?)_(?![_\w])/g, '<em>$1</em>')
+      .replace(/(?<![~\w])~([^\s~][^~]*?)~(?![~\w])/g, '<del>$1</del>');
+  }
+
   function linkify(text) {
-    return escapeHtml(text).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
+    return formatWhatsAppText(escapeHtml(text)).replace(URL_REGEX_G, (url) => `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`);
   }
 
   // Cache por URL (guarda a Promise, não só o resultado, pra a mesma URL
