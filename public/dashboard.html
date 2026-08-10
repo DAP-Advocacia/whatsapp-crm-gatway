@@ -858,9 +858,12 @@
     return getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#d8ab4f';
   }
 
-  // Filtro padrão: só conversas internas (testes entre usuários do Bitrix).
-  // "" = todas, sem filtro.
-  let currentOrigin = 'interna';
+  // Filtro padrão: todas as conversas (internas + externas), sem filtro —
+  // "interna" (só testes entre usuários do Bitrix) era o padrão até
+  // 2026-08-10, mas isso deixava o Dashboard parecendo vazio pra quem já
+  // está em uso real (a maioria das conversas de um escritório é com
+  // cliente externo, não colega de trabalho testando). Ver HANDOFF.md.
+  let currentOrigin = '';
 
   const originFilterEl = document.getElementById('originFilter');
   function syncOriginButtons() {

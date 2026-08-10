@@ -4738,6 +4738,37 @@ volume/tempo de resposta/pendência certos com mensagens datadas via SQL.
   VÁRIAS instâncias de um mesmo gerente ao mesmo tempo, vai precisar de
   desenho novo (hoje decisão consciente de manter simples).
 
+**"Dashboard não atualiza" — não era bug, era o filtro "Internas" ativo
+por padrão** (mesmo teste dentro do Bitrix, 2026-08-10): usuário reportou
+KPIs zerados mesmo tendo mensagem real trocada — mas os cards de
+"Insights de IA" (chamada separada, `GET /insights`) mostravam números
+corretos e não-zero pra mesma instância, o que já indicava que o
+problema era de renderização/filtro no client, não de dado/backend.
+Confirmado direto no banco: `computeMetrics` sem filtro (ou com
+`origin=externa`) devolve os números certos (23 mensagens, 5 conversas);
+com `origin=interna` (o padrão da página até então), devolve zero — a
+conversa de teste é com um número externo (não outro usuário do Bitrix),
+então caía fora do filtro "Internas" desde o carregamento da página.
+
+`currentOrigin` (`public/dashboard.html`) mudou de `'interna'` pra `''`
+(= "Todas", sem filtro) como valor inicial — o padrão antigo fazia
+sentido só na fase de testes internos entre colegas; em uso real, a
+maioria das conversas é com cliente externo, então "Internas" como
+padrão deixava o Dashboard parecendo vazio pra qualquer instância normal
+até alguém pensar em clicar em "Todas" manualmente.
+
+**Contatos "0" no card da instância — limitação conhecida, não bug**:
+mesmo teste, usuário notou "0 contatos" no card de `/instances.html`
+apesar de haver 5 contatos cadastrados na tabela `contacts`. Confirmado
+que são fontes DIFERENTES — o número do card vem de
+`WhatsAppGateway.getContactCount()` (acumulado em memória de eventos
+`contacts.upsert` do Baileys, zera a cada reinício do processo), não da
+tabela `contacts` do CRM (usada em Campanha/listas, que já tinha os 5
+registros certos). Limitação já documentada no README antes desta
+sessão — os vários deploys de hoje (Painel, backfill) reiniciaram o
+processo e zeraram esse contador em memória, que só volta a crescer
+conforme o WhatsApp mandar eventos novos de contato pra aquela sessão.
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)
