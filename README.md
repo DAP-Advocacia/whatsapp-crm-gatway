@@ -590,6 +590,20 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   paralelo com a busca no CRM, sem travar o resto do painel. Como o WhatsApp
   às vezes só expõe um participante como um JID `@lid` anônimo sem telefone
   associado, essa checagem é best-effort (mesma limitação de LID do §19).
+- **Painel de atendimento** (subaba "Painel", ao lado de "Chat" no topo —
+  só aparece com exatamente uma instância selecionada, não com "todas as
+  minhas instâncias"): desempenho da equipe que atende por aquela
+  instância — conversas por atendente, pendências, tempo médio de
+  resposta, e cards de insight gerados por IA em tom de storytelling
+  (`GET /api/whatsapp/team-metrics`/`team-insights`, ver §12.4). Dono real
+  da instância vê a equipe inteira; um delegado comum (manual ou via
+  hierarquia, ver §14) vê só o próprio desempenho, nunca o dos colegas —
+  `isManager` é resolvido no servidor comparando o dono real da instância
+  com quem está autenticado, nunca aceito como parâmetro do client.
+  Baseado em `conversation_assignment_history` (histórico de quem
+  atendeu cada período da conversa, não só a atribuição atual), pra não
+  contar o volume/tempo de resposta de uma conversa inteira pra quem só
+  pegou ela por último numa transferência.
 
 ---
 
@@ -1061,6 +1075,8 @@ revelar que o recurso existe).
 |---|---|---|
 | `metrics?origin=` | GET | Métricas agregadas das instâncias do dono autenticado (`req.ownerId`) — ver §8. |
 | `insights?refresh=` | GET | `{ insights:[{title,text,tone}], generatedAt, cached }` — cards de "Insights de IA" do Dashboard (§8), cacheados 30min por dono; `?refresh=1` força recalcular. |
+| `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
+| `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
 | `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount`; resposta também traz `limit` (ver §14). |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |

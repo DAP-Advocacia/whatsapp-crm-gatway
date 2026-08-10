@@ -248,6 +248,34 @@ create table if not exists hierarchy_subordinates (
 
 create index if not exists idx_hierarchy_subordinates_manager on hierarchy_subordinates (manager_owner_id);
 
+-- Histórico de atribuição de conversa (ver Painel de atendimento em
+-- chat.html) — conversations.assigned_to guarda só QUEM ESTÁ atendendo
+-- agora; sem isto não haveria como calcular métricas por atendente de
+-- forma correta se uma conversa trocou de mão no meio do caminho (ex:
+-- tempo de resposta contaria o histórico inteiro pro atendente atual,
+-- mesmo que ele tenha pegado a conversa ontem). Cada linha é um período
+-- em que a conversa esteve com um atendente: `started_at` quando a
+-- atribuição começou, `ended_at` (null = ainda vigente) quando terminou
+-- (por troca pra outra pessoa ou por "Liberar"). `owner_id` é sempre o
+-- dono real da instância (não muda por período) — é o que permite ao
+-- Painel achar rápido "todos os períodos de atendimento desta
+-- instância" sem precisar de join extra por conversa.
+create table if not exists conversation_assignment_history (
+  id bigserial primary key,
+  conversation_id bigint not null references conversations(id) on delete cascade,
+  owner_id text not null,
+  assigned_to text not null,
+  assigned_to_name text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz
+);
+
+create index if not exists idx_assignment_history_conversation on conversation_assignment_history (conversation_id);
+create index if not exists idx_assignment_history_owner on conversation_assignment_history (owner_id, assigned_to);
+-- acelera "qual é o período vigente desta conversa" (ended_at is null),
+-- consultado a cada nova atribuição pra fechar o período anterior.
+create index if not exists idx_assignment_history_open on conversation_assignment_history (conversation_id) where ended_at is null;
+
 -- Contatos e listas passam a ser do DONO (owner_id), não da instância —
 -- assim, se uma instância cai e o usuário conecta outra (novo session_id),
 -- os mesmos contatos/listas continuam aparecendo, em vez de ficar tudo

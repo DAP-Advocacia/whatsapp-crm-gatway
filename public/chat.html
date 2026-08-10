@@ -118,6 +118,7 @@
     --bubble-theirs: #261f16;
     --footer-h: 46px;
     --header-h: 90px;
+    --chat-tabs-h: 0px; /* vira 33px via body.has-chat-tabs — ver #chatTabs no JS */
   }
   *{ box-sizing: border-box; }
 
@@ -140,11 +141,12 @@
   }
   #app{
     margin-left: var(--sidebar-w);
-    height: calc(100vh - var(--footer-h));
+    height: calc(100vh - var(--footer-h) - var(--chat-tabs-h));
     display: flex;
     overflow: hidden;
     transition: margin-left .2s ease;
   }
+  body.has-chat-tabs{ --chat-tabs-h: 33px; }
   .credit-row{
     position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
     height: var(--footer-h);
@@ -347,11 +349,29 @@
     display:flex; flex-direction:column; justify-content:center;
     padding: 8px 16px; border-bottom:1px solid var(--border); flex-shrink:0;
   }
-  .conv-pane-head-top{ display:flex; align-items:center; justify-content:space-between; margin:0 0 10px; }
+  .conv-pane-head-top{ display:flex; align-items:center; justify-content:space-between; margin:0 0 6px; }
   .conv-pane-head-actions{ display:flex; align-items:center; gap:6px; flex-shrink:0; }
   .conv-filters-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
   .conv-pane-head h1{ font-family:'Fraunces',serif; font-weight:600; font-size:19px; margin:0; }
   .conv-pane-head select{ width:100%; }
+
+  /* Chat/Painel — irmão de #app (não filho): precisa continuar visível
+     mesmo quando #app fica display:none (Painel ativo), senão não teria
+     como voltar pra aba Chat. Só aparece quando a instância selecionada
+     tem dados de equipe pra mostrar (dono com delegados, ou o próprio
+     usuário com conversas atribuídas); ver updateChatTabsVisibility(). */
+  .chat-tabs{
+    display:flex; gap:16px; margin-left:var(--sidebar-w); padding:10px 20px 0;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed .chat-tabs{ margin-left:var(--sidebar-w-collapsed); }
+  @media (max-width: 760px){ .chat-tabs{ margin-left:0; } }
+  .chat-tab{
+    background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted);
+    font-size:12.5px; font-family:inherit; padding:0 0 8px; cursor:pointer;
+  }
+  .chat-tab:hover{ color:var(--text); }
+  .chat-tab.active{ color:var(--gold); border-bottom-color:var(--gold); font-weight:600; }
 
   .conv-filters{ padding: 12px 14px; display:flex; flex-direction:column; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0; }
   .conv-filters input, .conv-filters select{ width:100%; }
@@ -465,6 +485,46 @@
     #app:not(.chat-open) .conv-view{ display:none; }
     .back-btn{ display:flex; }
   }
+
+  /* ======================================================
+     Painel de atendimento (subaba "Painel") — desempenho por atendente
+     de uma instância compartilhada, visão de gerente (equipe toda) ou
+     de delegado (só o próprio desempenho). Mesmo padrão visual dos KPIs
+     e painéis do Dashboard (dashboard.html), reaproveitado aqui.
+     ====================================================== */
+  /* Irmão de #app, não filho — precisa do mesmo deslocamento pra sidebar
+     fixa não cobrir o conteúdo (bug encontrado testando visualmente antes
+     de publicar: sem isto, a ponta esquerda do Painel ficava escondida
+     atrás da sidebar). */
+  .painel-view{
+    margin-left: var(--sidebar-w); height: calc(100vh - var(--footer-h) - var(--chat-tabs-h));
+    overflow-y:auto; padding:24px 32px; box-sizing:border-box;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed .painel-view{ margin-left: var(--sidebar-w-collapsed); }
+  @media (max-width: 760px){ .painel-view{ margin-left:0; } }
+  .painel-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
+  .painel-head h2{ font-family:'Fraunces',serif; font-weight:600; font-size:18px; margin:0; }
+  .painel-head p{ font-size:12.5px; color:var(--text-muted); margin:4px 0 0; }
+  .painel-kpi-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:22px; }
+  .painel-kpi-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+  .painel-kpi-card .value{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--gold); }
+  .painel-kpi-card .label{ font-size:12px; color:var(--text-muted); margin-top:4px; }
+  .painel-panel{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:20px; }
+  .painel-panel h3{ font-family:'Fraunces',serif; font-weight:600; font-size:14.5px; margin:0 0 14px; }
+  .painel-insights-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px,1fr)); gap:14px; margin-bottom:22px; }
+  .painel-insight-card{ background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--gold-dim); border-radius:var(--radius); padding:14px 16px; }
+  .painel-insight-card.positive{ border-left-color:var(--green); }
+  .painel-insight-card.warning{ border-left-color:var(--red); }
+  .painel-insight-title{ font-size:12.5px; font-weight:700; color:var(--text); margin:0 0 5px; }
+  .painel-insight-text{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }
+  .agent-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  .agent-table th{ text-align:left; font-weight:600; color:var(--text-faint); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; padding:0 8px 10px; border-bottom:1px solid var(--border); }
+  .agent-table td{ padding:10px 8px; border-bottom:1px solid var(--border); color:var(--text); }
+  .agent-table tr:last-child td{ border-bottom:none; }
+  .agent-bar-track{ background:var(--surface-2); border-radius:100px; height:6px; overflow:hidden; min-width:60px; }
+  .agent-bar-fill{ background:var(--gold); height:100%; border-radius:100px; }
+  .agent-pending-tag{ display:inline-flex; align-items:center; font-size:10.5px; padding:2px 8px; border-radius:100px; border:1px solid var(--red); color:var(--red); background:rgba(var(--red-rgb),.1); }
 
   .tags-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
   .assignment-row{ display:flex; align-items:center; gap:10px; padding:8px 18px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; }
@@ -897,6 +957,11 @@
 
 <div class="toast-stack" id="toastStack"></div>
 
+<div class="chat-tabs" id="chatTabs" hidden>
+  <button type="button" class="chat-tab active" data-chat-tab="chat">Chat</button>
+  <button type="button" class="chat-tab" data-chat-tab="painel">Painel</button>
+</div>
+
 <div id="app">
   <div class="conv-pane">
     <div class="conv-pane-head">
@@ -935,6 +1000,8 @@
   <div class="conv-view" id="convView"></div>
   <div class="contact-panel" id="contactPanel"></div>
 </div>
+
+<div class="painel-view" id="painelView" hidden></div>
 
 <div class="overlay" id="newGroupModal">
   <div class="modal">
@@ -1682,7 +1749,131 @@
     closeInboxSockets();
     openInboxSockets();
     loadTags();
+    updateChatTabsVisibility();
     await loadConversations();
+  }
+
+  // =========================================================
+  // Painel de atendimento (subaba "Painel") — desempenho por atendente
+  // de UMA instância selecionada (ver GET /team-metrics). Só faz sentido
+  // com exatamente uma instância no filtro (não com "todas as minhas
+  // instâncias" — misturaria equipes diferentes num gráfico só).
+  // =========================================================
+  const chatTabsEl = document.getElementById('chatTabs');
+  const painelViewEl = document.getElementById('painelView');
+  let chatTabActive = 'chat';
+
+  function updateChatTabsVisibility() {
+    const eligible = state.sessionIds.length === 1;
+    chatTabsEl.hidden = !eligible;
+    document.body.classList.toggle('has-chat-tabs', eligible);
+    if (!eligible && chatTabActive === 'painel') setChatTab('chat');
+  }
+
+  function setChatTab(tab) {
+    chatTabActive = tab;
+    chatTabsEl.querySelectorAll('.chat-tab').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.chatTab === tab);
+    });
+    const isPainel = tab === 'painel';
+    painelViewEl.hidden = !isPainel;
+    appEl.style.display = isPainel ? 'none' : '';
+    if (isPainel) loadPainel();
+  }
+
+  chatTabsEl.querySelectorAll('.chat-tab').forEach((btn) => {
+    btn.addEventListener('click', () => setChatTab(btn.dataset.chatTab));
+  });
+
+  function painelKpiCard(value, label) {
+    return `<div class="painel-kpi-card"><div class="value">${escapeHtml(String(value))}</div><div class="label">${escapeHtml(label)}</div></div>`;
+  }
+
+  function renderPainelInsights(insights) {
+    if (!insights || !insights.length) return '';
+    return `<div class="painel-insights-row">${insights.map((i) => `
+      <div class="painel-insight-card ${escapeHtml(i.tone || 'neutral')}">
+        <p class="painel-insight-title">${escapeHtml(i.title)}</p>
+        <p class="painel-insight-text">${escapeHtml(i.text)}</p>
+      </div>`).join('')}</div>`;
+  }
+
+  function renderAgentTable(agents, isManager) {
+    if (!agents.length) {
+      return `<p class="empty">${isManager ? 'Nenhum atendimento registrado ainda nesta instância.' : 'Você ainda não tem nenhum atendimento registrado.'}</p>`;
+    }
+    const maxConversas = Math.max(...agents.map((a) => a.conversas), 1);
+    return `
+      <table class="agent-table">
+        <thead><tr>
+          <th>Atendente</th><th>Conversas</th><th>Pendentes</th><th>Tempo médio de resposta</th>
+        </tr></thead>
+        <tbody>
+          ${agents.map((a) => `
+            <tr>
+              <td>${escapeHtml(a.name)}</td>
+              <td>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span>${a.conversas}</span>
+                  <div class="agent-bar-track" style="flex:1;"><div class="agent-bar-fill" style="width:${Math.round((a.conversas / maxConversas) * 100)}%"></div></div>
+                </div>
+              </td>
+              <td>${a.pending > 0 ? `<span class="agent-pending-tag">${a.pending} pendente${a.pending > 1 ? 's' : ''}</span>` : '—'}</td>
+              <td>${escapeHtml(a.avgResponseLabel || 'sem dados')}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  }
+
+  async function loadPainel() {
+    if (state.sessionIds.length !== 1) return;
+    const sessionId = state.sessionIds[0];
+    painelViewEl.innerHTML = '<p class="empty" style="padding:24px;">Carregando painel…</p>';
+    try {
+      const res = await apiFetch(`${API_BASE}/team-metrics?session=${encodeURIComponent(sessionId)}`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar painel');
+      const metrics = await res.json();
+
+      const totalPendentes = metrics.totals.pending;
+      const totalConversas = metrics.totals.conversas;
+      const kpis = [
+        painelKpiCard(totalConversas, metrics.isManager ? 'Conversas atendidas pela equipe' : 'Suas conversas atendidas'),
+        painelKpiCard(totalPendentes, 'Pendentes agora'),
+        painelKpiCard(metrics.agents.length, metrics.isManager ? 'Atendentes ativos' : 'Você'),
+      ].join('');
+
+      painelViewEl.innerHTML = `
+        <div class="painel-head">
+          <div>
+            <h2>Painel de atendimento</h2>
+            <p>${metrics.isManager ? 'Desempenho da equipe que atende por esta instância.' : 'Seu desempenho nesta instância compartilhada.'}</p>
+          </div>
+        </div>
+        <div class="painel-kpi-grid">${kpis}</div>
+        <div id="painelInsights"></div>
+        <div class="painel-panel">
+          <h3>${metrics.isManager ? 'Por atendente' : 'Seu desempenho'}</h3>
+          ${renderAgentTable(metrics.agents, metrics.isManager)}
+        </div>
+      `;
+
+      loadPainelInsights(sessionId);
+    } catch (err) {
+      painelViewEl.innerHTML = `<p class="empty" style="padding:24px;">Falha ao carregar o painel: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  async function loadPainelInsights(sessionId) {
+    const el = document.getElementById('painelInsights');
+    if (!el) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/team-insights?session=${encodeURIComponent(sessionId)}`);
+      if (!res.ok) return; // best-effort — painel de números já apareceu, insight é bônus
+      const data = await res.json();
+      el.innerHTML = renderPainelInsights(data.insights);
+    } catch {
+      // best-effort, sem toast — não é crítico pro Painel funcionar
+    }
   }
 
   let searchTimer = null;

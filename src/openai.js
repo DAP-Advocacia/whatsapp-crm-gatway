@@ -197,4 +197,64 @@ async function generateDashboardInsights(metrics, stages) {
     }));
 }
 
-module.exports = { suggestAbTestAnalysis, summarizeConversation, generateDashboardInsights };
+// Formata computeTeamMetrics (src/metrics.js) num texto compacto pro
+// prompt do Painel de atendimento (chat.html) — mesmo cuidado do
+// describeMetricsForInsights: só números já agregados, nunca conteúdo de
+// mensagem/conversa individual.
+function describeTeamMetricsForInsights(teamMetrics) {
+  const t = teamMetrics.totals;
+  const agentsStr = (teamMetrics.agents || [])
+    .map((a) => `${a.name}: ${a.conversas} conversa(s), ${a.pending} pendente(s), tempo médio de resposta ${a.avgResponseLabel || 'sem dados'}`)
+    .join('; ') || 'nenhum atendente com histórico ainda';
+
+  return [
+    `Conversas com atendimento registrado: ${t.conversas}`,
+    `Pendentes no total (aguardando resposta agora): ${t.pending}`,
+    `Por atendente: ${agentsStr}`,
+  ].join('\n');
+}
+
+// Insights/"storytelling" pro Painel de atendimento (pedido do gerente que
+// compartilhou a própria instância, ver Parte CI do HANDOFF) — mesmo
+// contrato de generateDashboardInsights (3 a 5 cards, tone
+// positive/warning/neutral), mas focado em desempenho de EQUIPE, não
+// volume geral da instância: quem está com fila acumulada, quem responde
+// rápido, distribuição desigual de trabalho entre atendentes.
+async function generateTeamInsights(teamMetrics) {
+  const description = describeTeamMetricsForInsights(teamMetrics);
+  const raw = await callChatCompletion(
+    'Você é um analista de operações que olha o desempenho de atendimento via WhatsApp de uma equipe ' +
+      '(um gerente que compartilhou o próprio número com funcionários) e escreve observações curtas em tom de ' +
+      'história/narrativa (storytelling) sobre como a equipe está se saindo. ' +
+      'Responda em JSON com um campo "insights": uma lista de 3 a 5 objetos, cada um com ' +
+      '"title" (bem curto, até 6 palavras), "text" (1 a 2 frases, com um diagnóstico ou recomendação prática) ' +
+      'e "tone" (exatamente "positive", "warning" ou "neutral"). ' +
+      'Baseie-se SOMENTE nos números fornecidos — nunca invente dado que não apareceu neles. ' +
+      'Se não houver atendente com histórico ainda, diga isso diretamente em vez de inventar um cenário. ' +
+      'Priorize o que for mais acionável: quem está sobrecarregado (muita conversa/pendência), quem responde ' +
+      'rápido ou lento, e se o trabalho está bem distribuído entre a equipe. ' +
+      'Responda em português do Brasil, sem saudação nem introdução.',
+    description,
+    500,
+    true
+  );
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('resposta em formato inesperado da OpenAI');
+  }
+  if (!Array.isArray(parsed.insights) || !parsed.insights.length) {
+    throw new Error('resposta sem insights da OpenAI');
+  }
+  return parsed.insights
+    .filter((i) => i && i.title && i.text)
+    .map((i) => ({
+      title: i.title,
+      text: i.text,
+      tone: ['positive', 'warning', 'neutral'].includes(i.tone) ? i.tone : 'neutral',
+    }));
+}
+
+module.exports = { suggestAbTestAnalysis, summarizeConversation, generateDashboardInsights, generateTeamInsights };

@@ -155,12 +155,46 @@ async function setConversationArchived(sessionId, phone, archived) {
 // Atribui (assignedTo preenchido) ou desatribui (null) o atendimento de uma
 // conversa — ver POST /conversations/assign. `assignedToName` só faz
 // sentido junto de um assignedTo; desatribuir sempre limpa os dois.
-async function assignConversation(sessionId, phone, assignedTo, assignedToName) {
-  await pool.query(
-    `update conversations set assigned_to = $1, assigned_to_name = $2, updated_at = now()
-     where session_id = $3 and phone = $4`,
-    [assignedTo, assignedTo ? assignedToName : null, sessionId, phone]
-  );
+//
+// Também mantém conversation_assignment_history (ver Painel de
+// atendimento, chat.html): fecha o período vigente (se houver) e abre um
+// novo se `assignedTo` não for null — é o que permite calcular métricas
+// por atendente (tempo de resposta, volume) sem atribuir o histórico
+// inteiro da conversa a quem só pegou ela hoje. `ownerId` é sempre o dono
+// real da instância (resolvido pela rota via instancesStore.get), não o
+// atendente — grava certo mesmo quando quem está atendendo é um delegado.
+async function assignConversation(sessionId, phone, assignedTo, assignedToName, ownerId) {
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const { rows } = await client.query(
+      `update conversations set assigned_to = $1, assigned_to_name = $2, updated_at = now()
+       where session_id = $3 and phone = $4
+       returning id`,
+      [assignedTo, assignedTo ? assignedToName : null, sessionId, phone]
+    );
+    const conversationId = rows[0]?.id;
+    if (conversationId) {
+      await client.query(
+        `update conversation_assignment_history set ended_at = now()
+         where conversation_id = $1 and ended_at is null`,
+        [conversationId]
+      );
+      if (assignedTo) {
+        await client.query(
+          `insert into conversation_assignment_history (conversation_id, owner_id, assigned_to, assigned_to_name)
+           values ($1, $2, $3, $4)`,
+          [conversationId, ownerId, assignedTo, assignedToName || null]
+        );
+      }
+    }
+    await client.query('commit');
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // "Resgata" uma conversa presa numa instância que caiu/desconectou (comum
@@ -361,6 +395,70 @@ async function getAll(sessionIds) {
   return db;
 }
 
+// Dados-base pro Painel de atendimento (chat.html) — períodos de
+// atribuição (conversation_assignment_history) de todas as sessões
+// pedidas, cada um já trazendo as próprias mensagens (só as que caem
+// dentro do período, via filtro de created_at entre started_at/ended_at)
+// pra computeTeamMetrics (src/metrics.js) calcular volume/tempo de
+// resposta por atendente sem atribuir o histórico inteiro da conversa a
+// quem só pegou ela hoje. `ended_at is null` (período ainda vigente) usa
+// `now()` como fim só pro filtro de mensagens, sem alterar a tabela.
+async function getAssignmentPeriods(sessionIds) {
+  const { rows } = await pool.query(
+    `select
+       h.id as "periodId", h.conversation_id as "conversationId", h.owner_id as "ownerId",
+       h.assigned_to as "assignedTo", h.assigned_to_name as "assignedToName",
+       h.started_at as "startedAt", h.ended_at as "endedAt",
+       c.session_id as "sessionId", c.phone
+     from conversation_assignment_history h
+     join conversations c on c.id = h.conversation_id
+     where c.session_id = any($1::text[])
+     order by h.started_at asc`,
+    [sessionIds]
+  );
+  if (!rows.length) return [];
+
+  const conversationIds = [...new Set(rows.map((r) => r.conversationId))];
+  const { rows: msgRows } = await pool.query(
+    `select conversation_id as "conversationId", direction, created_at as "createdAt"
+     from messages
+     where conversation_id = any($1::bigint[])
+     order by conversation_id, created_at asc`,
+    [conversationIds]
+  );
+  const messagesByConv = new Map();
+  for (const m of msgRows) {
+    if (!messagesByConv.has(m.conversationId)) messagesByConv.set(m.conversationId, []);
+    messagesByConv.get(m.conversationId).push({ direction: m.direction, at: m.createdAt.getTime() });
+  }
+
+  return rows.map((r) => {
+    const startMs = r.startedAt.getTime();
+    // período ainda vigente (ended_at null) não tem fim de verdade — não usa
+    // Date.now() aqui (relógio do processo Node) porque pode ficar
+    // dessincronizado em segundos com o relógio do Postgres/Supabase que
+    // gerou started_at, e ficar "no passado" em relação a ele derrubava
+    // TODA mensagem do período pro filtro (bug real encontrado testando
+    // isto contra produção — nunca comparar timestamp de dois relógios
+    // diferentes). Sem endedAt, aceita qualquer mensagem >= startMs.
+    const endMs = r.endedAt ? r.endedAt.getTime() : null;
+    const allMsgs = messagesByConv.get(r.conversationId) || [];
+    const messages = allMsgs.filter((m) => m.at >= startMs && (endMs === null || m.at < endMs));
+    return {
+      periodId: r.periodId,
+      conversationId: r.conversationId,
+      ownerId: r.ownerId,
+      assignedTo: r.assignedTo,
+      assignedToName: r.assignedToName,
+      sessionId: r.sessionId,
+      phone: r.phone,
+      startedAt: r.startedAt.toISOString(),
+      endedAt: r.endedAt ? r.endedAt.toISOString() : null,
+      messages,
+    };
+  });
+}
+
 // Lista as conversas de uma ou mais sessões (instâncias), mais recente
 // primeiro, para a tela Chat (public/chat.html) — nome do contato (se
 // cadastrado em `contacts`), prévia da última mensagem e tags aplicadas.
@@ -544,6 +642,7 @@ module.exports = {
   getDealForPhone,
   setConversationArchived,
   assignConversation,
+  getAssignmentPeriods,
   moveConversationToInstance,
   setConversationNotifications,
   getConversationNotifPrefs,

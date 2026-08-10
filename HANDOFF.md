@@ -4567,6 +4567,142 @@ pedido separado do usuário: "Atualize a apresentação"):
   e os textos de risco/roadmap atualizados antes de compartilhar com a
   diretoria.
 
+### Parte CI — Painel de atendimento: subaba dentro do Chat, com gráficos e storytelling (2026-08-10)
+
+Pedido do usuário: uma subaba "Painel" dentro do Chat, pro gerente que
+compartilhou a própria instância acompanhar visualmente/graficamente o
+atendimento da equipe, com "storytelling" sobre os dados. Confirmado via
+perguntas antes de implementar: cobre desempenho por atendente (conversas
+atendidas, tempo de resposta, pendências) E saúde geral da instância;
+gerente (dono real) vê a equipe toda, delegado comum só o próprio
+desempenho; Painel funciona com UMA instância selecionada por vez (não
+agrega "todas as minhas instâncias", pra não misturar equipes diferentes
+de gerentes diferentes no mesmo gráfico).
+
+**Histórico de atribuição (tabela nova, decisão confirmada com o
+usuário)**: `conversations.assigned_to` só guarda quem está atendendo
+AGORA — sem histórico, uma conversa que trocou de atendente atribuiria o
+volume/tempo de resposta inteiro pra quem só pegou ela por último. Nova
+tabela `conversation_assignment_history` (`db/schema.sql`): cada linha é
+um período de atendimento (`started_at`/`ended_at`, `ended_at is null` =
+ainda vigente). `assignConversation` (`src/store.js`) passou a fechar o
+período anterior e abrir um novo dentro de uma transação, a cada
+atribuição/transferência/liberação — ganhou um parâmetro novo `ownerId`
+(dono real da instância, não o atendente), resolvido pela rota
+(`src/routes/whatsapp.js`) e sempre passado agora, mesmo pra desatribuir
+(antes só resolvia `ownerId` quando `assignedTo` era truthy).
+
+**Achado real testando contra produção — clock skew entre servidores**:
+o cálculo inicial de "mensagens dentro do período vigente" comparava
+`started_at` (gravado pelo `now()` do **Postgres/Supabase**) com
+`Date.now()` (relógio do **processo Node**) como fim do período. Os dois
+relógios estavam ~4 segundos fora de sincronia — o suficiente pra
+`endMs` calculado ficar **antes** de `startMs`, fazendo o filtro rejeitar
+TODAS as mensagens do período (bug 100% silencioso, sem erro, só
+resultado sempre vazio). Descoberto rodando `select now()` no Postgres e
+comparando com `Date.now()` local (`store.getAssignmentPeriods`,
+`src/store.js`) — a correção foi não usar limite superior nenhum quando
+o período ainda está vigente (`ended_at is null`), em vez de tentar
+sincronizar os dois relógios. Lição gravada no comentário do código:
+nunca comparar timestamp de dois relógios de processos diferentes.
+
+**`src/metrics.js` — `computeTeamMetrics(sessionIds, { viewerOwnerId,
+isManager })`**: nova função, ao lado de `computeMetrics` (que já
+existia, agregado por instância, nunca por atendente). Usa
+`store.getAssignmentPeriods` (nova, junto de `assignConversation`) —
+cada período já vem só com as mensagens que caíram dentro da própria
+janela de atendimento. Agrega por `assignedTo`: conversas, mensagens
+in/out, tempo médio de resposta (mesma heurística de
+`summarizeRange`/`computeMetrics`: primeira `out` depois de uma `in`) e
+pendências (período ainda vigente cuja última mensagem foi `in` sem
+resposta — mesma regra da tag "Pendente" da lista, Parte CF). Se
+`isManager` for falso, filtra pra só os períodos do próprio
+`viewerOwnerId` antes de agregar — é isso que implementa a visão
+restrita do delegado comum.
+
+**Storytelling via OpenAI** (`src/openai.js`): `generateTeamInsights`,
+mesmo contrato de `generateDashboardInsights` (3-5 cards
+title/text/tone), prompt ajustado pro contexto de equipe (quem está
+sobrecarregado, quem responde rápido/lento, distribuição de trabalho) e
+em tom de narrativa, como pedido ("storytelling"). `describeTeamMetricsForInsights`
+formata só os números já agregados (nunca manda conteúdo de
+mensagem/conversa individual pro prompt — mesmo cuidado da versão do
+Dashboard).
+
+**Rotas novas** (`src/routes/whatsapp.js`): `GET /team-metrics?session=`
+e `GET /team-insights?session=&refresh=1` — as duas recusam (400) se
+`session` tiver mais de um id (reforça a decisão de uma instância por
+vez). `isManager` é resolvido comparando `instancesStore.get(session).ownerId`
+com `req.ownerId` — não é um parâmetro que o client manda (evitaria
+qualquer risco de alguém se declarar "gerente" sem ser). Cache de
+insights em `teamInsightsCache` (chave composta `ownerId::sessionId`,
+igual TTL de 30min do `insightsCache` do Dashboard) — separado do cache
+existente porque a mesma pessoa pode ver o painel de instâncias
+diferentes, cada uma com dados de equipe diferentes.
+
+**Frontend (`public/chat.html`)** — tabs "Chat"/"Painel" acima da área
+de conversa, mesmo padrão de `.editor-tab`/`.editor-panel` já usado em
+`sites.html`. Só aparecem quando exatamente uma instância está
+selecionada (`updateChatTabsVisibility`, chamado em `onFilterChange`) —
+com "todas as minhas instâncias" ou nenhuma selecionada, ficam
+escondidas. Painel (`#painelView`) mostra KPIs (conversas, pendências,
+atendentes ativos), cards de insight coloridos por tom
+(verde/dourado/vermelho, mesmo padrão visual do Dashboard) e uma tabela
+por atendente com barra de progresso proporcional ao volume e tag de
+pendência.
+
+**Dois bugs de layout encontrados testando visualmente com Playwright
+antes de publicar** (ver "validação visual" abaixo):
+1. `.painel-view` é irmão de `#app`, não filho — sem o mesmo
+   `margin-left: var(--sidebar-w)` que `#app` já tinha, a ponta esquerda
+   do conteúdo ficava escondida atrás da sidebar (`position:fixed`).
+2. As tabs "Chat"/"Painel" foram desenhadas originalmente DENTRO de
+   `#app` (`.conv-pane-head`) — quando o Painel fica ativo (`#app{
+   display:none }`), as próprias tabs desapareciam, sem jeito de voltar
+   pra aba Chat. Movidas pra fora de `#app`, como elemento irmão
+   sempre visível, com o próprio `margin-left` (variável CSS nova
+   `--chat-tabs-h`, somada ao cálculo de altura de `#app` e
+   `.painel-view` via classe `body.has-chat-tabs`).
+
+**Validação visual**: sem servidor real (`chat.html` depende de
+BX24/autenticação de verdade), então o teste foi um preview isolado —
+`<head>`+`<aside>`+`#app`+`#painelView` extraídos pra um HTML estático,
+servido localmente, com as funções de render do Painel re-injetadas via
+`page.evaluate` (Playwright) e dados mockados (3 atendentes, KPIs,
+insights). Confirmado visualmente: layout correto sem cortes, cores de
+insight certas, clique real nas tabs alternando entre as duas views sem
+o bug de sobreposição.
+
+**Migração já rodada em produção** (`node db/migrate.js`, tabela
+`conversation_assignment_history` criada) — testada de ponta a ponta
+contra produção com dados de teste reais (criados e removidos na mesma
+sessão, sem deixar resíduo): atribuição → transferência → liberação
+gravando o histórico corretamente; `computeTeamMetrics` retornando
+volume/tempo de resposta/pendência certos com mensagens datadas via SQL.
+
+- [ ] **Não testado dentro do Bitrix com usuários reais** — toda a
+  validação foi via script direto contra produção (dados de teste
+  sintéticos) + preview visual isolado do frontend (dados mockados).
+  Falta confirmar com um gerente de verdade que já tem delegados/hierarquia
+  configurada vendo o Painel da própria instância, e um funcionário
+  delegado vendo a própria versão restrita.
+- [ ] Sem endpoint pra popular retroativamente `conversation_assignment_history`
+  a partir de atribuições que já existiam ANTES desta parte — conversas
+  já atribuídas continuam com `assigned_to` preenchido normalmente
+  (nada quebra), mas não geram um período de histórico até a próxima
+  troca/liberação. Na prática, o Painel só reflete atendimento de
+  verdade a partir de agora pra frente; atribuições antigas ficam sem
+  dado de volume/tempo de resposta até serem tocadas de novo.
+- [ ] Tempo médio de resposta por atendente usa a mesma heurística
+  simples do Dashboard (primeira `out` depois de uma `in`, ignorando
+  quem mandou de fato) — herda a mesma limitação já documentada:
+  não sabe diferenciar resposta automática de resposta humana, nem
+  várias mensagens `in` seguidas sem resposta no meio.
+- [ ] `GET /team-metrics`/`GET /team-insights` recusam mais de uma
+  sessão (400) — se o produto evoluir pra querer uma visão agregada de
+  VÁRIAS instâncias de um mesmo gerente ao mesmo tempo, vai precisar de
+  desenho novo (hoje decisão consciente de manter simples).
+
 ---
 
 ## 3. O que foi feito na sessão de 2026-07-01 (tarde)

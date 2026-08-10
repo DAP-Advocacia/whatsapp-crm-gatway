@@ -274,4 +274,95 @@ async function computeMetrics({ origin: originFilter, sessionIds } = {}) {
   };
 }
 
-module.exports = { computeMetrics, getOwnNumbersBySession };
+// Métricas por ATENDENTE, pro Painel de atendimento (ver "Painel" em
+// public/chat.html) — diferente de computeMetrics (agregado por
+// instância, ignora quem atendeu). Usa conversation_assignment_history
+// (store.getAssignmentPeriods), não conversations.assigned_to direto —
+// cada "período" já vem só com as mensagens que caíram dentro da janela
+// em que aquele atendente específico esteve responsável, então uma
+// conversa que trocou de mão não conta o histórico inteiro pra quem
+// pegou ela por último (ver Parte CI do HANDOFF).
+//
+// `viewerOwnerId`/`isManager`: quando quem está vendo o Painel NÃO é o
+// dono real da instância (é um delegado comum), a visão é restrita ao
+// próprio desempenho — os agregados de "equipe" (byAgent com todo mundo)
+// só saem preenchidos pra quem é dono. Decisão de produto confirmada com
+// o usuário: funcionário não vê o desempenho dos colegas, só o dele.
+async function computeTeamMetrics(sessionIds, { viewerOwnerId, isManager } = {}) {
+  const periods = await store.getAssignmentPeriods(sessionIds);
+  const visiblePeriods = isManager ? periods : periods.filter((p) => p.assignedTo === viewerOwnerId);
+
+  const byAgent = new Map(); // assignedTo -> { name, conversas: Set, in, out, responseTimesMs: [] }
+  for (const period of visiblePeriods) {
+    if (!byAgent.has(period.assignedTo)) {
+      byAgent.set(period.assignedTo, {
+        ownerId: period.assignedTo,
+        name: period.assignedToName || 'Atendente',
+        conversas: new Set(),
+        in: 0,
+        out: 0,
+        responseTimesMs: [],
+      });
+    }
+    const agent = byAgent.get(period.assignedTo);
+    agent.conversas.add(period.conversationId);
+    // nome mais recente ganha — mesma pessoa pode ter mudado de nome no
+    // Bitrix entre um período antigo e um mais novo (ver limitação já
+    // documentada nas Partes CD/CF sobre assigned_to_name congelado).
+    if (period.assignedToName) agent.name = period.assignedToName;
+
+    let lastInAt = null;
+    for (const m of period.messages) {
+      if (m.direction === 'in') {
+        agent.in++;
+        lastInAt = m.at;
+      } else {
+        agent.out++;
+        if (lastInAt != null) {
+          const delta = m.at - lastInAt;
+          if (delta >= 0) agent.responseTimesMs.push(delta);
+          lastInAt = null;
+        }
+      }
+    }
+  }
+
+  const agents = [...byAgent.values()].map((a) => {
+    const avgResponseMs = a.responseTimesMs.length
+      ? a.responseTimesMs.reduce((x, y) => x + y, 0) / a.responseTimesMs.length
+      : null;
+    return {
+      ownerId: a.ownerId,
+      name: a.name,
+      conversas: a.conversas.size,
+      messagesIn: a.in,
+      messagesOut: a.out,
+      avgResponseMs,
+      avgResponseLabel: formatDuration(avgResponseMs),
+    };
+  }).sort((x, y) => y.conversas - x.conversas);
+
+  // "pendente" = conversa cujo período de atribuição está aberto
+  // (ended_at null) e a última mensagem foi 'in' sem resposta ainda —
+  // mesma heurística usada na tag "Pendente" da lista (chat.html), só
+  // que aqui quebrado por atendente pra saber quem tem fila acumulada.
+  const pendingByAgent = new Map();
+  for (const period of visiblePeriods.filter((p) => !p.endedAt)) {
+    const last = period.messages[period.messages.length - 1];
+    if (last && last.direction === 'in') {
+      pendingByAgent.set(period.assignedTo, (pendingByAgent.get(period.assignedTo) || 0) + 1);
+    }
+  }
+  for (const agent of agents) agent.pending = pendingByAgent.get(agent.ownerId) || 0;
+
+  return {
+    isManager: !!isManager,
+    agents,
+    totals: {
+      conversas: new Set(visiblePeriods.map((p) => p.conversationId)).size,
+      pending: [...pendingByAgent.values()].reduce((a, b) => a + b, 0),
+    },
+  };
+}
+
+module.exports = { computeMetrics, computeTeamMetrics, getOwnNumbersBySession };

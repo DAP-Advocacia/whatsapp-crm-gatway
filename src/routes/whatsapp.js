@@ -2,13 +2,13 @@ const express = require('express');
 const store = require('../store');
 const { logMessageToTimeline } = require('../bitrix');
 const { saveMedia, getSignedMediaUrl } = require('../media');
-const { computeMetrics, getOwnNumbersBySession } = require('../metrics');
+const { computeMetrics, computeTeamMetrics, getOwnNumbersBySession } = require('../metrics');
 const { createCampaign, getCampaign, runCampaign } = require('../campaigns');
 const { computeCampaignMetrics } = require('../campaignStore');
 const scheduledStore = require('../scheduledCampaigns');
 const scheduler = require('../scheduler');
 const instancesStore = require('../instances');
-const { summarizeConversation, generateDashboardInsights } = require('../openai');
+const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
 const { getSubordinates } = require('../bitrixHierarchy');
@@ -26,6 +26,12 @@ const LINK_PREVIEW_TTL_MS = 60 * 60 * 1000;
 // quando o usuário pede "Atualizar" na tela (?refresh=1).
 const insightsCache = new Map(); // ownerId -> { insights, generatedAt, expiresAt }
 const INSIGHTS_TTL_MS = 30 * 60 * 1000;
+
+// Igual ao de cima, mas pro Painel de atendimento (GET /team-insights) —
+// chave composta `${viewerOwnerId}::${sessionId}` porque a mesma pessoa
+// pode ver o painel de instâncias diferentes (a própria + delegadas),
+// cada uma com dados de equipe diferentes.
+const teamInsightsCache = new Map();
 
 // Intervalo entre cada mensagem de uma campanha, e limite de destinatários —
 // precaução básica contra detecção de spam do WhatsApp (não é garantia).
@@ -141,6 +147,65 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ insights, generatedAt, cached: false });
     } catch (err) {
       console.error('[insights] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /team-metrics?session=<UMA instância>
+  // Painel de atendimento (subaba "Painel" em chat.html) — desempenho por
+  // atendente de UMA instância por vez (não agrega várias, pra não
+  // misturar equipes diferentes se o usuário tiver acesso a instâncias de
+  // mais de um gerente). `requireSession` já garante posse/delegação;
+  // aqui só falta decidir SE quem está vendo é o dono real (isManager) —
+  // dono vê a equipe inteira, delegado comum só o próprio desempenho
+  // (decisão de produto confirmada com o usuário, ver Parte CI do
+  // HANDOFF).
+  // ---------------------------------------------------------------
+  router.get('/team-metrics', requireSession((req) => req.query.session), async (req, res) => {
+    if (req.sessionIds.length !== 1) {
+      return res.status(400).json({ error: 'o Painel mostra uma instância por vez' });
+    }
+    try {
+      const [sessionId] = req.sessionIds;
+      const inst = await instancesStore.get(sessionId);
+      const isManager = !!inst && inst.ownerId === req.ownerId;
+      const metrics = await computeTeamMetrics([sessionId], { viewerOwnerId: req.ownerId, isManager });
+      res.json(metrics);
+    } catch (err) {
+      console.error('[team-metrics] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /team-insights?session=<UMA instância>&refresh=1
+  // "Storytelling" do Painel — mesmo padrão de cache/refresh de
+  // /insights, só que por instância + quem está vendo (viewerOwnerId),
+  // já que o conteúdo muda conforme isManager.
+  // ---------------------------------------------------------------
+  router.get('/team-insights', requireSession((req) => req.query.session), async (req, res) => {
+    if (req.sessionIds.length !== 1) {
+      return res.status(400).json({ error: 'o Painel mostra uma instância por vez' });
+    }
+    try {
+      const [sessionId] = req.sessionIds;
+      const cacheKey = `${req.ownerId}::${sessionId}`;
+      const cached = teamInsightsCache.get(cacheKey);
+      const forceRefresh = req.query.refresh === '1';
+      if (cached && !forceRefresh && cached.expiresAt > Date.now()) {
+        return res.json({ insights: cached.insights, generatedAt: cached.generatedAt, cached: true });
+      }
+
+      const inst = await instancesStore.get(sessionId);
+      const isManager = !!inst && inst.ownerId === req.ownerId;
+      const metrics = await computeTeamMetrics([sessionId], { viewerOwnerId: req.ownerId, isManager });
+      const insights = await generateTeamInsights(metrics);
+      const generatedAt = new Date().toISOString();
+      teamInsightsCache.set(cacheKey, { insights, generatedAt, expiresAt: Date.now() + INSIGHTS_TTL_MS });
+      res.json({ insights, generatedAt, cached: false });
+    } catch (err) {
+      console.error('[team-insights] erro:', err.message);
       res.status(502).json({ error: err.message });
     }
   });
@@ -824,18 +889,16 @@ function createWhatsappRouter({ sessions, broadcast }) {
     const { session, phone, assignedTo, assignedToName } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
     try {
-      if (assignedTo) {
-        const inst = await instancesStore.get(session);
-        const ownerId = inst ? inst.ownerId : session;
-        if (assignedTo !== ownerId) {
-          const delegates = await instancesStore.listDelegates(session);
-          if (!delegates.some((d) => d.delegateOwnerId === assignedTo)) {
-            return res.status(400).json({ error: 'assignedTo precisa ser o dono ou um delegado desta instância' });
-          }
+      const inst = await instancesStore.get(session);
+      const ownerId = inst ? inst.ownerId : session;
+      if (assignedTo && assignedTo !== ownerId) {
+        const delegates = await instancesStore.listDelegates(session);
+        if (!delegates.some((d) => d.delegateOwnerId === assignedTo)) {
+          return res.status(400).json({ error: 'assignedTo precisa ser o dono ou um delegado desta instância' });
         }
       }
       const finalAssignedToName = assignedTo ? assignedToName || null : null;
-      await store.assignConversation(session, phone, assignedTo || null, finalAssignedToName);
+      await store.assignConversation(session, phone, assignedTo || null, finalAssignedToName, ownerId);
       // replica pra qualquer outra aba olhando esta conversa ou a lista de
       // conversas (mesmo hub de WebSocket usado por mensagem/reação) — sem
       // isso a tag/linha de atribuição só atualizava ao trocar de tela.
