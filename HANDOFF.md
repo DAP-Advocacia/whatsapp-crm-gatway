@@ -5258,4 +5258,35 @@ pra medir o estrago já existente (só leitura, nada alterado/apagado).
   por URL, nunca limpo — não era a causa deste bug (a URL em si que
   colidia, não o cache), mas fica registrado que existe.
 
+---
+
+### Parte CK — Apresentação executiva atualizada com o Painel de atendimento (2026-08-10)
+
+Usuário perguntou "a apresentação está atualizada?" — conferido
+`public/apresentacao.html` contra o estado real do produto e achado
+desatualizada em dois pontos:
+
+1. **Faltava o módulo "Painel de atendimento"** (subaba dentro do Chat,
+   Parte CI, mesma sessão) na seção "03 · A solução" — os outros 13
+   módulos, incluindo o mais recente antes dele ("Atendimento em
+   equipe", card 13), já estavam listados. Adicionado card 14 com a
+   mesma estrutura dos demais (número, título, descrição, tag
+   "Analytics"), e o título da seção corrigido de "Treze módulos" pra
+   "Catorze módulos" (o parágrafo do sumário executivo também).
+2. **Seção "06 · A arquitetura em números" com contagens desatualizadas
+   há mais tempo** (não relacionado ao Painel especificamente): "11
+   Telas entregues" e "19 Tabelas de dados" — conferido contra o estado
+   real (`ls public/*.html` descontando `bridge.html`/infraestrutura de
+   iframe, `lead-form.html`/produto do módulo Sites e
+   `onboarding.html`/fluxo de setup único, e `grep -c "^create table"
+   db/schema.sql`): são **13 telas** (bate com o "treze telas" que já
+   estava correto no sumário executivo) e **24 tabelas**. Corrigidos os
+   dois números e a lista de exemplos de cada um.
+
+Validação: `vm.Script` sobre os 3 blocos `<script>` do arquivo (sintaxe
+ok), Playwright com screenshot das duas seções alteradas (grid de
+módulos com o card 14 renderizando igual aos outros; tira de números
+"13 / 24 / 1 / 0" alinhada sem quebra de layout) — arquivos de teste
+removidos depois.
+
 
