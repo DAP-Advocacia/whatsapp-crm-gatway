@@ -4686,13 +4686,48 @@ volume/tempo de resposta/pendência certos com mensagens datadas via SQL.
   Falta confirmar com um gerente de verdade que já tem delegados/hierarquia
   configurada vendo o Painel da própria instância, e um funcionário
   delegado vendo a própria versão restrita.
-- [ ] Sem endpoint pra popular retroativamente `conversation_assignment_history`
-  a partir de atribuições que já existiam ANTES desta parte — conversas
-  já atribuídas continuam com `assigned_to` preenchido normalmente
-  (nada quebra), mas não geram um período de histórico até a próxima
-  troca/liberação. Na prática, o Painel só reflete atendimento de
-  verdade a partir de agora pra frente; atribuições antigas ficam sem
-  dado de volume/tempo de resposta até serem tocadas de novo.
+- [x] ~~Sem endpoint pra popular retroativamente `conversation_assignment_history`
+  a partir de atribuições que já existiam ANTES desta parte~~ — resolvido
+  no mesmo dia, testando dentro do Bitrix pela primeira vez: usuário
+  reportou "tem mensagem pendente mas o Painel não mostra nada" numa
+  conversa (`Daniel Costa`, instância "Teste") atribuída antes do deploy
+  desta feature. Confirmado: zero linhas de histórico pra essa conversa.
+  Criado `db/backfill-assignment-history.js` (script pontual, mesmo
+  padrão de `migrate-media-urls.js`/`import-legacy-data.js`) — cria um
+  período "em aberto" (`ended_at is null`) pra toda conversa com
+  `assigned_to` preenchido mas sem nenhum histórico ainda. Idempotente
+  (`not exists`), roda quantas vezes quiser sem duplicar.
+
+  **Bug real no primeiro backfill, corrigido antes de publicar**: a
+  primeira versão usava `started_at = now()` — parecia razoável ("conta
+  a partir de agora"), mas deixava de fora mensagens recentes que já
+  existiam ANTES do backfill rodar. Na prática: a mensagem pendente das
+  14:25 ficou fora do período criado às 14:31 (6 minutos depois), porque
+  o filtro de `getAssignmentPeriods` exige `m.at >= startMs`. Corrigido
+  usando `conversations.created_at` como `started_at` — cobre todo o
+  histórico de mensagens já trocadas com aquela atribuição, não só o que
+  vier depois do backfill. Rodado em produção (2 conversas afetadas:
+  `Daniel Costa` na instância 183168, `Pedro Henrique Saraiva` na
+  instância 5769) — confirmado depois: `pending: 1` aparecendo
+  corretamente, tempo médio de resposta calculado (ficou alto — "47h
+  9min" — porque a conversa real tem gaps grandes entre mensagens; é
+  matematicamente correto, não bug, só um reflexo de como a média
+  simples reage a outliers, ver item novo abaixo).
+- [ ] **Dashboard mostrou cache desatualizado no mesmo teste** ("Gerado
+  em 10/08/2026, 11:12:27 (em cache)", de antes das mensagens de 14:25) —
+  `computeMetrics` testado direto contra produção mostra os números
+  certos (17 mensagens, 4 conversas); parece só o cache client-side
+  (`insightsCache`/cache do próprio botão de refresh) não ter sido
+  atualizado, não um bug de dado. Não confirmado ainda se resolveu só
+  com F5/clique em atualizar — usuário ainda não retestou depois disso.
+- [ ] Tempo médio de resposta (Dashboard E Painel) usa média simples,
+  sensível a outliers — uma conversa real com gaps grandes entre
+  mensagens (cliente que demora dias pra responder) infla a média pra
+  valores tipo "47h 9min", que não representa bem o tempo de resposta
+  "normal" do atendente. Não é bug, mas pode confundir quem está lendo o
+  número sem esse contexto. Se isso continuar gerando confusão,
+  considerar mediana em vez de média, ou excluir outliers extremos do
+  cálculo.
 - [ ] Tempo médio de resposta por atendente usa a mesma heurística
   simples do Dashboard (primeira `out` depois de uma `in`, ignorando
   quem mandou de fato) — herda a mesma limitação já documentada:
