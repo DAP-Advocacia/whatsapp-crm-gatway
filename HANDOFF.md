@@ -6352,19 +6352,36 @@ pedir):
   desta sessão) cobre a maior parte do risco de sintaxe/lógica óbvia.
   CI ficaria como próximo passo só se o projeto crescer bem mais.
 
-**Nova rota de diagnóstico TEMPORÁRIO**: usuário decidiu tentar
-recuperar os 5 nomes da Parte CT depois de eu esclarecer o que estaria
-em risco — não logout/QR novo, só uma reconexão de socket (mesmas
-credenciais). `POST /admin/diagnostics/soft-reconnect` `{sessionId}`
+**Nova rota de diagnóstico TEMPORÁRIO, testada e já REMOVIDA**: usuário
+decidiu tentar recuperar os 5 nomes da Parte CT depois de eu
+esclarecer o que estaria em risco — não logout/QR novo, só uma
+reconexão de socket (mesmas credenciais). `POST
+/admin/diagnostics/soft-reconnect` `{sessionId}`
 (`src/routes/whatsapp.js`, restrito a super admin, mesmo padrão das
-rotas de LID da Parte CP) — chama `gateway.sock.end(undefined)`
+rotas de LID da Parte CP) — chamou `gateway.sock.end(undefined)`
 (fecha sem deslogar, diferente de `WhatsAppGateway.disconnect()`, que
 faz `logout()` de verdade e apaga a pasta de credenciais). Confirmado
 antes de escrever a rota: `sock.end(undefined)` sem erro cai no `else`
 (queda temporária) do handler `connection === 'close'`
 (`statusCode` fica `undefined`, não bate com `loggedOut` nem
 `PERMANENT_CODES`) — reconecta sozinho via o backoff já existente,
-nunca exige QR novo. Usa `sessions.listActive()`/`getActiveGateway()`
-(nunca `sessions.get()`), mesma proteção de nunca criar sessão nova só
-de tentar diagnosticar. Remover depois de não ser mais necessária.
+nunca exige QR novo.
+
+**Resultado real, testado em produção**: a reconexão aconteceu
+exatamente como previsto (`statusCode=undefined loggedOut=false
+isPermanent=false`, voltou `online` sozinho em segundos, sem QR) — mas
+**não trouxe os nomes**. Nenhum evento `contacts.upsert` disparou. O
+WhatsApp não reenvia a lista de contatos numa reconexão de socket de
+rotina — é algo ligado a um momento de sincronização mais completo
+(pareamento inicial, plausivelmente), não replicável sob demanda com o
+que o Baileys expõe. Rota removida imediatamente depois do teste
+(`src/routes/whatsapp.js`) — cumpriu o propósito de investigação
+pontual, sem utilidade contínua confirmada.
+
+**Decisão final do usuário**: em vez de mais tentativas de
+infraestrutura, vai mandar/receber uma mensagem de verdade de um dos 5
+contatos — caminho que o próprio `onMessage`/`pushName` já cobre desde
+sempre (mensagem AO VIVO sempre trouxe nome, mesmo antes da correção
+da Parte CT — a correção só resolveu o caso do BACKFILL, que nunca traz
+pushName). Deve funcionar sem nenhuma ação adicional.
 

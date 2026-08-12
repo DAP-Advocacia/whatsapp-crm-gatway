@@ -1723,39 +1723,6 @@ function createWhatsappRouter({ sessions, broadcast }) {
     res.json({ sessionId, results });
   });
 
-  // ---------------------------------------------------------------
-  // POST /admin/diagnostics/soft-reconnect
-  // Diagnóstico TEMPORÁRIO (HANDOFF Parte CT/CU) — fecha e deixa o próprio
-  // fluxo de reconexão automática (já existente, ver connection.update em
-  // src/whatsapp.js) reabrir o socket de uma sessão específica, SEM
-  // deslogar e SEM apagar credenciais (sock.end(), não sock.logout() —
-  // diferente de WhatsAppGateway.disconnect()/POST /instances/:id/reconnect,
-  // que só faz algo quando needsAttention já é true). Motivação: forçar o
-  // Baileys a reenviar contacts.upsert (nome de contatos) numa sessão já
-  // saudável, sem risco de exigir novo QR. Não é garantido — o WhatsApp
-  // decide quando reenvia a lista de contatos, isto só força uma NOVA
-  // tentativa de conexão, que pode ou não vir acompanhada de contacts.upsert.
-  // Usa sessions.listActive()/getActiveGateway() (nunca sessions.get()) de
-  // propósito: nunca cria/inicia uma sessão só de tentar isto. 400 se a
-  // sessão não estiver online agora. Restrito a super admin. Remover esta
-  // rota depois que não for mais necessária pra investigação pontual.
-  // ---------------------------------------------------------------
-  router.post('/admin/diagnostics/soft-reconnect', requireSuperAdmin, async (req, res) => {
-    const { sessionId } = req.body || {};
-    if (!sessionId) return res.status(400).json({ error: 'sessionId é obrigatório' });
-    const active = sessions.listActive().find((s) => s.sessionId === sessionId);
-    if (!active || active.status !== 'online') {
-      return res.status(400).json({ error: `sessão "${sessionId}" não está online agora (status: ${active?.status || 'não encontrada em memória'})` });
-    }
-    const gateway = sessions.getActiveGateway(sessionId);
-    try {
-      await gateway.sock.end(undefined);
-      res.json({ ok: true, message: 'socket fechado — reconexão automática deve acontecer sozinha em poucos segundos' });
-    } catch (err) {
-      res.status(502).json({ error: err.message });
-    }
-  });
-
   return router;
 }
 
