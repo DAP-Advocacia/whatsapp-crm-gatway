@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const blockedOwners = require('./blockedOwners');
 
 /**
  * Verificação de identidade real do usuário Bitrix + emissão do token de
@@ -84,11 +85,26 @@ function verifyAppToken(token) {
 // Middleware: só confirma que o token é de um usuário Bitrix real deste
 // portal e ainda válido — NÃO confere que uma `session`/`owner` específica
 // pertence a ele (isso é responsabilidade de src/authz.js, por rota).
-function requireAuth(req, res, next) {
+//
+// Também corta quem foi bloqueado no Admin (ver src/blockedOwners.js,
+// HANDOFF Parte CO) — verificado AQUI, em toda request autenticada, não
+// só na emissão do token: um token já emitido (válido até
+// AUTH_TOKEN_TTL_HOURS) some de efeito na PRÓXIMA chamada depois do
+// bloqueio, em vez de continuar valendo até expirar sozinho. Decisão
+// consciente de custo (1 query extra por request) em troca de corte
+// imediato de acesso.
+async function requireAuth(req, res, next) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   const ownerId = verifyAppToken(token);
   if (!ownerId) return res.status(401).json({ error: 'não autenticado' });
+  try {
+    if (await blockedOwners.isBlocked(ownerId)) {
+      return res.status(403).json({ error: 'acesso revogado' });
+    }
+  } catch (err) {
+    console.error('[auth] falha ao checar bloqueio (seguindo sem bloquear):', err.message);
+  }
   req.ownerId = ownerId;
   next();
 }

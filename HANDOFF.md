@@ -5651,4 +5651,165 @@ separada, 3399, nunca a instância real na 3333):
 - [ ] Nenhuma forma de desativar o retry automático por instância/
   usuário — hoje é sempre-ligado pra toda campanha com falha 463.
 
+### Parte CO — Admin: gestão de usuários (trackeamento real) + Kanban de Sugestões + FAQ pública + sync automático de contatos (2026-08-12)
+
+Usuário mostrou prints de outro projeto com uma tela "Usuários" rica
+(lista de todo mundo, online/offline/nunca acessou, último acesso,
+tempo total 30d, página favorita, gráficos agregados, Editar/Revogar/
+Reativar) e pediu o equivalente aqui dentro do Admin já existente
+(§14.5). No meio da implementação, pediu também um Kanban de Sugestões
+dentro do Admin (com print de referência — 3 colunas + resposta
+publicada), e depois perguntou se conversas/mensagens vinculavam
+automaticamente com Contatos — a resposta foi "não, hoje não existe
+esse sync automático", o que gerou o terceiro pedido desta Parte.
+
+**1. Trackeamento real de navegação (tempo de verdade, não aproximado)**
+
+O que já existia (`admin_presence`, Parte CL) só guarda o ESTADO ATUAL
+(upsert, sem histórico, sem duração) — insuficiente pro que foi pedido.
+Banco novo (`db/schema.sql`): `page_sessions` (uma linha por visita a
+uma página — `owner_id`, `page`, `started_at`, `last_ping_at`,
+`ended_at` nulo enquanto aberta) e `blocked_owners` (`owner_id` como
+chave primária — bloqueio de acesso individual ao app inteiro).
+
+- `src/pageSessions.js` (novo): `openSession`/`pingSession`/
+  `closeSession` (ciclo de vida de uma visita), `closeStaleSessions`
+  (fecha sessões órfãs — crash, queda de luz, aba que nunca disparou
+  `pagehide` — com `last_ping_at` mais antigo que 90s; `ended_at =
+  last_ping_at`, **não** `now()`, pra duração registrada nunca incluir
+  o tempo "esquecido" até o job de limpeza rodar), `getLastAccess(Byowners)`,
+  `getUsageSince(sinceDate)` (agregação por owner e por página — soma
+  de duração via `coalesce(ended_at, last_ping_at) - started_at`, e
+  contagem de visitas — os dois números que os prints de referência
+  mostravam separados: "páginas mais acessadas" = contagem, "onde o
+  time passa mais tempo" = duração), `getSessionHistory(ownerId)`.
+  `setInterval` novo em `src/server.js` (a cada 60s) chama
+  `closeStaleSessions`.
+- `src/blockedOwners.js` (novo): `blockOwner`/`unblockOwner`/
+  `isBlocked`/`listBlocked`.
+- **Bloqueio verificado em TODA request**, não só na emissão do token:
+  `requireAuth` (`src/auth.js`), depois de resolver `req.ownerId`,
+  chama `blockedOwners.isBlocked` — 403 imediato mesmo pra um token já
+  emitido ANTES do bloqueio (corte na próxima chamada, não em até 12h
+  de TTL do token). `requireAuth` precisou virar `async` pra isso.
+- Frontend: `startPresenceHeartbeat()` (já existia nas 13 telas, ciclo
+  de 30s) ganhou `openSession` no boot + `ping` a cada ciclo (mesmo
+  timer, reaproveitado) + `window.addEventListener('pagehide', ...)`
+  chamando `navigator.sendBeacon('/api/whatsapp/page-session/close',
+  ...)`. **Decisão técnica chave**: `sendBeacon` não permite headers
+  customizados — não dá pra mandar `Authorization: Bearer`. A rota
+  `POST /page-session/close` aceita o token no BODY (`{sessionId,
+  token}`) e verifica com `verifyAppToken` direto, sem passar pelo
+  `requireAuth` padrão.
+- **`public/admin.html`** reescrito: 4 cards de métrica (online agora,
+  usuários ativos 30d, tempo total do time, página mais acessada) + 2
+  gráficos de barra horizontal (páginas mais acessadas por contagem;
+  onde o time passa mais tempo por duração) + tabela única de usuários
+  (substitui as 2 tabelas antigas "online agora"/"funcionários" — ver
+  §14.5 atualizado) cruzando `listEmployees()` (universo — todo mundo,
+  mesmo quem nunca abriu o app) com presença + `page_sessions` +
+  `blocked_owners`. `bitrixHierarchy.listEmployees()` ganhou o campo
+  `dateRegister` (`u.DATE_REGISTER`) pra coluna "Criado em".
+
+**Bug de arquitetura real encontrado e corrigido**: a rota `POST
+/page-session/close` foi inicialmente definida dentro do router criado
+por `createWhatsappRouter` — mas `app.use('/api/whatsapp', requireAuth,
+...)` em `src/server.js` aplica `requireAuth` a TODO o router antes de
+rotear qualquer coisa dentro dele. Uma rota que precisa fugir de
+`requireAuth` (alimentada por `sendBeacon`, sem header de auth) nunca é
+alcançável de dentro do router — confirmado via teste real (401 mesmo
+com token válido no body). Corrigido movendo a rota pra `src/server.js`
+direto, ANTES desse `app.use`.
+
+**2. Kanban de Sugestões (3 colunas) + FAQ pública**
+
+`suggestions` (Parte antiga, só 2 status) ganhou `response`/
+`responded_at` (`db/schema.sql`) e um 3º status no meio do fluxo
+(`pending → in_review → released`, sem CHECK constraint, é `text`
+livre). `src/suggestions.js`: `moveToReview` (só avança de `pending`,
+nunca volta por aqui), `respond` (pode responder em qualquer status —
+resposta e lançamento são independentes), `listFaq` (só sugestões já
+respondidas, **sem `ownerId`** — não expor quem perguntou o quê).
+
+`src/routes/suggestions.js`: `move-to-review`/`respond`/`release` agora
+exigem `requireSuperAdmin` (antes `release` era aberto a qualquer
+autenticado, por não existir um papel de admin separado — mudou porque
+a triagem passou a viver dentro do Admin). `list`/`create`/`GET /faq`
+continuam abertos a qualquer autenticado — visão de time, igual Análise
+de Conversas. Mover pra "Em análise" notifica quem sugeriu
+(`store.addNotification`, reaproveitado de `release`).
+
+Frontend: `public/admin.html` ganhou seção "Sugestões" com Kanban de 3
+colunas, cada card com "Responder" (textarea inline) e botões de mover
+coluna, atrás de `confirmDialog` (nunca `confirm()` nativo). `public/faq.html`
+(novo): tela pública simples (mesmo esqueleto de `settings.html`),
+acordeão pergunta/resposta via `GET /api/suggestions/faq`. Item "FAQ"
+novo na sidebar das 14 telas (inserido logo depois de "Sugestões";
+`suggestions.html` precisou de uma âncora diferente porque lá o próprio
+link de "Sugestões" já vem com `class="nav-item active"`, não
+`class="nav-item"` como nas outras 13).
+
+**3. Sync automático de contato ao chegar mensagem nova**
+
+Usuário perguntou se conversas linkavam com Contatos automaticamente —
+não linkavam. Perguntou depois se isso "já existiu antes" pedindo
+verificação em logs antes de reimplementar. **Investigação honesta, sem
+confirmação**: histórico do Git mostra só 2 commits tocando
+`src/contacts.js`, ambos do commit inicial do projeto, sem versão
+anterior com automação removida; logs do servidor via SSH só alcançam
+~46h atrás (container mais antigo disponível), não chegando perto do
+início do projeto. Reportado ao usuário sem inventar evidência que não
+existia — decidiu implementar prospectivamente, pra frente.
+
+`src/server.js`, dentro do callback `onMessage` do `SessionManager`
+(mesmo ponto que já salva a mensagem e faz o broadcast — Parte relativa
+à Central de Notificações, §15), depois de `if (isHistory) return;`:
+`instancesStore.ownerOf(sessionId)` (nunca retorna falsy, tem fallback
+pro próprio `sessionId`) seguido de `contactsStore.upsertContact(ownerId,
+{phone, name: pushName, dealId})`. Reaproveita o `ON CONFLICT (owner_id,
+phone) DO UPDATE ... coalesce` que `upsertContact` já tinha (§11) — uma
+segunda mensagem do mesmo contato nunca sobrescreve um nome/`dealId` já
+salvo com um valor vazio recebido depois. Best-effort (`.catch` só loga,
+nunca interrompe o fluxo de mensagem).
+
+**Validação**: `node -c` em 8 arquivos backend + `vm.Script` nas 15
+telas HTML tocadas (as 13 originais + `admin.html` + `faq.html`) — 0
+falhas. Testes end-to-end contra produção (servidor de teste isolado,
+porta 3399, nunca a instância real 3333, sempre com limpeza confirmada
+depois):
+- Page-session: open→ping→close via beacon simulado, `ended_at`
+  preenchido e duração calculada certa; sessão com `last_ping_at`
+  artificialmente antigo fechada sozinha pelo job com `ended_at =
+  last_ping_at` (não o momento da detecção).
+- Bloqueio: `ownerId` de teste bloqueado, 403 imediato numa rota
+  qualquer com token JÁ emitido antes do bloqueio (não só token novo);
+  confirmado que super admin não bloqueia o próprio `ownerId`.
+- `GET /admin/users` com um `ownerId` do cadastro Bitrix que nunca abriu
+  o app — aparece na lista com "Offline"/"Último acesso: —", não fica
+  ausente. `GET /admin/usage-metrics` com dados reais persistidos:
+  `totalSecondsAllUsers`/`topPage`/`activeUsers` corretos.
+- Kanban completo: criar sugestão → mover pra "Em análise" (notificação
+  criada) → responder (aparece em `GET /faq` sem `ownerId`) → lançar —
+  confirmado 403 em cada ação pra um `ownerId` não-admin.
+- Sync de contato: primeira mensagem cria contato; segunda mensagem do
+  mesmo telefone preserva nome já salvo e atualiza `dealId`.
+
+**Bug pré-existente descoberto e corrigido de passagem**: `campaign.html`/
+`contacts.html` tinham `API_BASE = '/api'` mas chamavam
+`${API_BASE}/presence/heartbeat` (sem o prefixo `/whatsapp`) — heartbeat
+nunca funcionou nessas 2 telas desde que foi implementado (404 silencioso,
+engolido por um `.catch(() => {})` vazio). Corrigido junto com a extensão
+do heartbeat pra page-session.
+
+**Pendências conhecidas**:
+- [ ] "Editar" no Admin só abre um modal com o motivo de bloqueio — não
+  existe cadastro de usuário próprio neste sistema pra editar de fato
+  (nome, permissão etc.), diferente do que os prints de referência
+  sugeriam.
+- [ ] "Sync automático já existiu antes" nunca foi confirmado (nem Git
+  nem logs alcançam a origem do projeto) — implementado como automação
+  nova, prospectiva, não como "restauração" de algo perdido.
+- [ ] `dateRegister` (coluna "Criado em") fica "—" se o Bitrix não
+  devolver `DATE_REGISTER` em `user.get` pra aquele usuário.
+
 

@@ -200,6 +200,8 @@ Isso inicia, na mesma porta:
 - `http://localhost:PORT/notifications.html` — Central de Notificações (Kanban/Calendário)
 - `http://localhost:PORT/settings.html` — Configurações (paleta de cores, §14.5)
 - `http://localhost:PORT/suggestions.html` — Sugestões de usuário (§15.5)
+- `http://localhost:PORT/faq.html` — FAQ pública (§15.5)
+- `http://localhost:PORT/admin.html` — Painel Admin, restrito (§14.5)
 - `http://localhost:PORT/onboarding.html` — Onboarding (§15.6)
 - `http://localhost:PORT/apresentacao.html` — relatório executivo (scrollytelling), sem sidebar
 
@@ -702,6 +704,15 @@ instância: se uma instância cai e o usuário conecta outra, os mesmos contatos
 listas continuam aparecendo (ver `owner_id` em `db/schema.sql`). Modelos de mensagem
 continuam por instância (cada uma pode ter textos próprios).
 
+- **Sync automático**: toda mensagem recebida (qualquer instância, não só quando o
+  Chat está aberto) já cria/atualiza um contato sozinha — `src/server.js`, dentro do
+  mesmo callback `onMessage` do `SessionManager` que salva a mensagem e notifica
+  (§15), chama `upsertContact(ownerId, {phone, name, dealId})`. Usa o mesmo
+  `ON CONFLICT (owner_id, phone) DO UPDATE ... coalesce` de baixo — uma segunda
+  mensagem do mesmo telefone nunca sobrescreve um nome/`dealId` já salvo com um
+  valor vazio recebido depois. Best-effort (falha não interrompe o recebimento da
+  mensagem). Antes disso, um contato só existia por criação manual ou pelos dois
+  botões de importação abaixo.
 - **Contatos**: criar manualmente, editar, excluir, **"Importar de conversas"**
   (cria um contato pra cada conversa de **qualquer** instância deste dono que ainda
   não tenha virado contato, sem nome), ou **"Importar de arquivo (CSV)"** — lê um
@@ -1047,25 +1058,74 @@ telas e só é revelado por JS depois que `GET /admin/whoami` confirma
 (`requireSuperAdmin`, 403 pra qualquer outro `ownerId`), não no
 esconder/mostrar do link.
 
-- **Quem está online agora**: sessão ativa do próprio app, não presença
-  do Bitrix24 em si. Toda tela autenticada (exceto `onboarding.html`, que
+### Métricas de uso (cards + gráficos)
+
+4 cards no topo (online agora, usuários ativos nos últimos 30 dias,
+tempo total do time, página mais acessada) + 2 gráficos de barra
+horizontal (páginas mais acessadas por contagem de visitas; onde o time
+passa mais tempo por duração real) — via `GET /admin/usage-metrics?days=`,
+alimentado por `page_sessions` (ver seção "Usuários" abaixo).
+
+### Usuários (tabela única + trackeamento real)
+
+Substituiu as duas tabelas antigas ("online agora"/"funcionários", ver
+histórico no HANDOFF Parte CL) por uma tabela só, um usuário por linha,
+via `GET /admin/users` — cruza o **universo completo** de
+`listEmployees()` (cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL`, §14 —
+todo mundo aparece, mesmo quem nunca abriu o app) com presença, último
+acesso, tempo total (30d), página favorita e bloqueio.
+
+- **Online/offline**: sessão ativa do próprio app, não presença do
+  Bitrix24 em si. Toda tela autenticada (exceto `onboarding.html`, que
   não tem nenhuma autenticação Bitrix hoje) manda um heartbeat pra `POST
   /presence/heartbeat` a cada 30s enquanto estiver aberta — qualquer
-  usuário autenticado pode mandar, não só admin. Upsert numa tabela só
-  (`admin_presence`, sem histórico) por `ownerId`; "online"/"offline" é
-  calculado **no frontend**, comparando `lastSeenAt` contra o
-  `Date.now()` do próprio navegador (nunca compara timestamp gerado pelo
-  Postgres com o relógio de outro processo — mesmo bug de clock skew já
-  corrigido no Painel de atendimento, §9). Considerado offline sem
+  usuário autenticado pode mandar, não só admin. Considerado offline sem
   heartbeat por 90s (3 ciclos perdidos).
-- **Funcionários (Bitrix)**: cadastro puxado de `user.get` via o mesmo
-  webhook `BITRIX_HR_WEBHOOK_URL` já usado pela hierarquia automática
-  (§14) — nome, cargo (`WORK_POSITION`), foto (`PERSONAL_PHOTO`), e-mail.
-  Sem a variável configurada, a lista fica vazia com um aviso explícito
-  na tela (não um erro nem um vazio silencioso). Cruza com a lista de
-  presença pelo `ownerId` (sufixo depois do `_`, que é o `userId` puro do
-  Bitrix) — mostra "Online agora" direto na linha do funcionário quando
-  bate.
+- **Trackeamento real de tempo/página** (tabela `page_sessions`,
+  `src/pageSessions.js`) — diferente do heartbeat (que só marca "app
+  aberto agora"), aqui é medido tempo de verdade por página, entrada e
+  saída: no boot de cada tela, `POST /page-session/open` cria uma linha
+  (`started_at`); a cada ciclo de heartbeat (30s), `POST
+  /page-session/ping` atualiza `last_ping_at`; ao trocar/fechar a
+  página, `window.addEventListener('pagehide', ...)` dispara
+  `navigator.sendBeacon('/api/whatsapp/page-session/close', ...)`, que
+  marca `ended_at = now()`. **Sessões órfãs** (crash, queda de luz, aba
+  que nunca disparou `pagehide`) são fechadas por um job (`setInterval`
+  em `src/server.js`, a cada 60s) depois de 90s sem ping —
+  `ended_at = last_ping_at` (não o momento da detecção), pra duração
+  registrada nunca incluir o tempo "esquecido" até o job rodar.
+  `sendBeacon` não permite header de `Authorization`; a rota de
+  fechamento aceita o token no próprio body por isso.
+- **Detalhado**: histórico completo de `page_sessions` de uma pessoa
+  (`GET /admin/users/:ownerId`), mais recente primeiro.
+- **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
+  **inteiro** (tabela `blocked_owners`) — `POST
+  /admin/users/:ownerId/block`|`unblock`. Verificado dentro de
+  `requireAuth`, em **toda** request autenticada: um `ownerId` bloqueado
+  é cortado (403) na próxima chamada, mesmo com um token já emitido
+  antes do bloqueio — não espera o token expirar. Um super admin nunca
+  consegue bloquear o próprio `ownerId` (trava contra ficar trancado
+  fora por engano).
+- **Editar**: só abre um modal com o motivo do bloqueio (`reason`) — não
+  existe um cadastro de usuário próprio neste sistema pra editar de fato
+  (nome, permissão), a identidade sempre vem do Bitrix.
+- **Funcionários (Bitrix)**: cargo (`WORK_POSITION`), foto
+  (`PERSONAL_PHOTO`), e-mail, data de criação (`DATE_REGISTER`, "—" se o
+  Bitrix não devolver esse campo pra aquele usuário) — mesmo webhook
+  `BITRIX_HR_WEBHOOK_URL` da hierarquia automática (§14). Sem a variável
+  configurada, a lista fica vazia com um aviso explícito na tela (não um
+  erro nem um vazio silencioso).
+
+### Sugestões — Kanban (3 colunas) restrito a super admin
+
+Segunda seção da mesma tela: Kanban de 3 colunas (Pendente / Em análise
+/ Lançado) sobre as sugestões enviadas em `/suggestions.html` — cada
+card com "Responder" (a resposta publica na FAQ pública, ver §15.5) e
+botões pra mover de coluna. Toda ação de triagem (mover, responder,
+marcar lançada) exige `requireSuperAdmin`; enviar/listar sugestão
+continua aberto a qualquer autenticado (visão de time). Mover pra "Em
+análise" notifica automaticamente quem sugeriu (Central de
+Notificações, §15).
 
 **Ação manual pendente em produção**: `SUPER_ADMIN_OWNER_IDS` precisa ser
 configurada nas env vars do EasyPanel — o `.env` local é gitignored, não
@@ -1117,6 +1177,34 @@ que sumia ao recarregar a página.
 
 ---
 
+## 15.5. Sugestões (`/suggestions.html`) e FAQ pública (`/faq.html`)
+
+Qualquer usuário autenticado manda uma sugestão de melhoria (`POST
+/api/suggestions`, até 2.000 caracteres) e acompanha o próprio status —
+badge com 3 estados: **Pendente** → **Em análise** → **Lançada**. Listar
+(`GET /`) e enviar (`POST /`) são visão de **time**, igual Análise de
+Conversas (todo mundo vê todas as sugestões de todo mundo, sem
+`owner_id` na leitura), sem `requireSuperAdmin` — só a **triagem** é
+restrita.
+
+- **Triagem (Kanban)**: vive dentro do Admin (§14.5, seção "Sugestões"),
+  não em `/suggestions.html` — 3 colunas (Pendente/Em análise/Lançado),
+  restrita a `requireSuperAdmin`. Mover pra "Em análise"
+  (`POST /:id/move-to-review`) notifica automaticamente quem sugeriu
+  (Central de Notificações, §15); marcar como lançada
+  (`POST /:id/release`) idem. Responder (`POST /:id/respond`, até 2.000
+  caracteres) não notifica ninguém sozinho — a resposta só aparece
+  publicada na FAQ (abaixo). Resposta e "lançada" são independentes: dá
+  pra responder ("não vamos fazer isso porque...") sem nunca marcar como
+  lançada.
+- **FAQ pública** (`/faq.html`, `GET /api/suggestions/faq`): lista em
+  acordeão só as sugestões que já têm resposta, mais antigas primeiro,
+  visível a **qualquer** usuário autenticado (não só admin) — mas
+  **sem o `owner_id`** de quem perguntou, de propósito (não expor quem
+  perguntou o quê numa tela pública pro time inteiro).
+
+---
+
 ## 16. Rotas / API
 
 Salvo indicação contrária, toda rota abaixo espera um identificador de **instância**
@@ -1162,6 +1250,9 @@ revelar que o recurso existe).
 | `/instances.html` | GET/POST | Gestão de instâncias. |
 | `/notifications.html` | GET/POST | Central de Notificações (Kanban/Calendário, ver §15). |
 | `/admin.html` | GET/POST | Painel Admin — restrito a `SUPER_ADMIN_OWNER_IDS` (ver §14.5). O arquivo é servido igual a qualquer outro estático; a restrição real está nas rotas `/api/whatsapp/admin/*` abaixo. |
+| `/suggestions.html` | GET/POST | Sugestões — enviar e acompanhar status (ver §15.5). |
+| `/faq.html` | GET/POST | FAQ pública — perguntas já respondidas (ver §15.5). |
+| `/api/whatsapp/page-session/close` | POST | Fora do middleware `requireAuth` de propósito (ver tabela `/api/whatsapp/*` abaixo) — montada aqui, direto em `src/server.js`, ANTES do `app.use('/api/whatsapp', requireAuth, ...)`. |
 | `/*` (estático) | GET | Arquivos de `public/`. |
 
 ### `/api/whatsapp/*`
@@ -1208,9 +1299,17 @@ revelar que o recurso existe).
 | `scheduled-campaigns/:id` | PUT | Body `{ scheduledAt }`. Reagenda. |
 | `scheduled-campaigns/:id` | DELETE | Cancela (só enquanto ainda estiver `scheduled`). |
 | `presence/heartbeat` | POST | Body `{ page?, ownerName? }`. Sinal de "app aberto agora" pro Painel Admin (§14.5) — QUALQUER usuário autenticado pode chamar, não só admin. `page` é `window.location.pathname`; `ownerName` é texto solto resolvido no frontend (`BX24 user.current`), nunca tratado como identidade. |
+| `page-session/open` | POST | Body `{ page, ownerName? }`. Abre uma visita rastreada (§14.5) — devolve `{ sessionId }`. QUALQUER usuário autenticado. |
+| `page-session/ping` | POST | Body `{ sessionId }`. Mantém a visita viva (`last_ping_at`) — chamado no mesmo ciclo de 30s do heartbeat. |
+| `page-session/close` | POST | Body `{ sessionId, token }`. **Fora de `requireAuth`** — montada em `src/server.js` antes do `app.use('/api/whatsapp', requireAuth, ...)` de propósito, porque `navigator.sendBeacon` (quem chama essa rota, no `pagehide` de cada página) não permite header `Authorization`; o `token` vai no body e é verificado direto com `verifyAppToken`. |
 | `admin/whoami` | GET | `{ isSuperAdmin }` — sem expor a lista de admins. Usado pra revelar/esconder o item "Admin" da sidebar. |
+| `admin/users` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Lista TODO o cadastro do Bitrix (`listEmployees`, mesmo sem nunca ter aberto o app) cruzado com presença/último acesso/tempo total 30d/página favorita/bloqueio — tabela principal do Admin (§14.5). |
+| `admin/users/:ownerId` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Histórico completo de `page_sessions` de uma pessoa, mais recente primeiro — botão "Detalhado". |
+| `admin/usage-metrics?days=` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Agregados globais (online agora, usuários ativos, tempo total do time, página mais acessada) + os 2 gráficos de barra — `days` padrão 30. |
+| `admin/users/:ownerId/block` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Body `{ reason? }`. Bloqueia o `ownerId` de usar o app inteiro (§14.5) — 400 se `ownerId === req.ownerId` (não dá pra se autobloquear). |
+| `admin/users/:ownerId/unblock` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Remove o bloqueio. |
 | `admin/presence` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS` (403 pra qualquer outro `ownerId`). `{ presence:[{ownerId, ownerName, lastPage, lastSeenAt}] }` — quem já mandou heartbeat alguma vez. |
-| `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
+| `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds, dateRegister}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
@@ -1235,6 +1334,22 @@ mensagem continuam por instância (`session` obrigatório).
 | `templates` | POST | Body `{ session, name, body }`. |
 | `templates/:id` | PUT | Body `{ name, body }`. |
 | `templates/:id` | DELETE | |
+
+### `/api/suggestions/*` (`src/routes/suggestions.js`)
+
+Ver §15.5. `list`/`create`/`faq` são visão de time, abertos a qualquer
+autenticado; as 3 rotas de triagem exigem `requireSuperAdmin` (403 pra
+qualquer outro `ownerId`) — vivem no Kanban do Admin (§14.5), não em
+`/suggestions.html`.
+
+| Rota | Método | Uso |
+|---|---|---|
+| `suggestions` | GET | Lista todas as sugestões (visão de time), mais recentes primeiro, limit 500. |
+| `suggestions` | POST | Body `{ text }` (até 2.000 caracteres). Envia uma sugestão nova, status inicial `pending`. |
+| `suggestions/faq` | GET | Pública pra qualquer autenticado (não exige `requireSuperAdmin`). `{ faq:[{id, question, answer, respondedAt}] }` — só sugestões já respondidas, mais antigas primeiro, **sem `ownerId`** de propósito. |
+| `suggestions/:id/move-to-review` | POST | Restrito a `requireSuperAdmin`. Avança `pending → in_review` (404 se já não estiver `pending`) e notifica quem sugeriu. |
+| `suggestions/:id/respond` | POST | Restrito a `requireSuperAdmin`. Body `{ response }` (até 2.000 caracteres; vazio/`null` limpa a resposta). Publica (ou remove) a resposta na FAQ — independente do status. |
+| `suggestions/:id/release` | POST | Restrito a `requireSuperAdmin` (antes era aberto a qualquer autenticado — mudou junto com o Kanban, ver HANDOFF Parte CO). Marca `released` (404 se já estava) e notifica quem sugeriu. |
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 
@@ -1327,7 +1442,10 @@ src/
   authz.js              # confere que session/owner de cada request pertence ao dono autenticado
   adminAuth.js           # requireSuperAdmin — confere req.ownerId contra SUPER_ADMIN_OWNER_IDS (Painel Admin, §14.5)
   presence.js            # heartbeat()/listPresence() — "quem está com o app aberto agora" (admin_presence)
+  pageSessions.js        # trackeamento real de navegação (page_sessions) — open/ping/close + closeStaleSessions + agregações (§14.5)
+  blockedOwners.js       # bloqueio de acesso individual ao app inteiro (blocked_owners), verificado em requireAuth (§14.5)
   bitrixHierarchy.js     # hierarquia de departamento/gestor via user.get/department.get + listEmployees() (§14/§14.5)
+  suggestions.js         # sugestões dos usuários — CRUD + moveToReview/respond/listFaq (Kanban do Admin + FAQ, §15.5)
   openapi.js             # spec OpenAPI da API REST, servido em GET /api-docs (Swagger UI)
   routes/
     whatsapp.js        # rotas REST /api/whatsapp/* (chat, instâncias, campanhas, agendamentos)
@@ -1350,6 +1468,8 @@ public/
   campaign-schedule.html# Agenda de Envios (Kanban/Calendário)
   instances.html        # Gestão de instâncias
   notifications.html    # Central de Notificações (Kanban/Calendário)
+  suggestions.html       # Sugestões — enviar e acompanhar o próprio status (§15.5)
+  faq.html               # FAQ pública — perguntas já respondidas na triagem do Admin (§15.5)
   admin.html             # Painel Admin — restrito a SUPER_ADMIN_OWNER_IDS (§14.5)
   apresentacao.html      # relatório executivo (scrollytelling) pra diretoria/CEO — sem sidebar, exportável em PDF
 db/

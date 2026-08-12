@@ -33,6 +33,8 @@ const { createSettingsRouter } = require('./routes/settings');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
+const pageSessions = require('./pageSessions');
+const contactsStore = require('./contacts');
 const { onCampaignMessageStatus } = require('./campaigns');
 const { logMessageToTimeline, logStatusToTimeline } = require('./bitrix');
 const { verifyBitrixToken, ownerIdFor, issueAppToken, verifyAppToken, requireAuth, TOKEN_TTL_MS } = require('./auth');
@@ -308,6 +310,19 @@ const sessions = new SessionManager({
       // falsas num import de histórico antes desta correção.
       if (isHistory) return;
 
+      // Sincroniza automaticamente com a tela de Contatos (ver
+      // src/contacts.js, HANDOFF Parte CO) — antes só existia o botão
+      // manual "Importar de conversas"; agora toda mensagem NOVA de
+      // verdade (não histórico) já garante que o telefone existe como
+      // contato do dono, sem precisar de ação manual. upsertContact já é
+      // seguro chamar de novo pra cada mensagem da mesma conversa (não
+      // sobrescreve nome já salvo com vazio, ver coalesce lá). Best-effort:
+      // uma falha aqui nunca deve impedir salvar/notificar a mensagem em
+      // si — é um efeito colateral, não o caminho principal.
+      instancesStore.ownerOf(sessionId)
+        .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name: pushName, dealId }))
+        .catch((err) => console.error('[contacts] falha ao sincronizar contato automaticamente:', err.message));
+
       broadcast(sessionId, phone, { type: 'message', message });
 
       const label =
@@ -419,6 +434,17 @@ sessions.startAllExisting();
 // verifica a cada 30s se algum agendamento de campanha (Kanban/Calendário)
 // já chegou na hora marcada e dispara sozinho
 require('./scheduler').startPolling(sessions);
+
+// Fecha sozinha page_sessions "órfãs" (aba fechada sem o beacon de saída
+// disparar — crash, queda de luz, ver HANDOFF Parte CO) — sem isto,
+// ficariam com ended_at null pra sempre. Intervalo de 60s (mais frequente
+// que o timeout de 90s que closeStaleSessions usa internamente, pra não
+// deixar uma sessão órfã "pendurada" por muito tempo além do necessário).
+setInterval(() => {
+  pageSessions.closeStaleSessions().catch((err) =>
+    console.error('[page-session] falha ao fechar sessões órfãs:', err.message)
+  );
+}, 60000);
 
 // ---------------------------------------------------------------
 // POST /api/auth/verify { accessToken }
@@ -541,6 +567,33 @@ app.post('/api/auth/verify', async (req, res) => {
     res.json({ ownerId, token: issueAppToken(ownerId), expiresIn: TOKEN_TTL_MS / 1000 });
   } catch (err) {
     console.error('[auth] erro ao verificar:', err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------
+// POST /api/whatsapp/page-session/close  { sessionId, token }
+// Fecha a "visita" de página com a duração real (ver navigator.sendBeacon
+// no frontend, disparado no evento 'pagehide' — ver HANDOFF Parte CO).
+// PRECISA ficar aqui, ANTES do app.use('/api/whatsapp', requireAuth, ...)
+// abaixo: sendBeacon() não permite setar headers customizados, então não
+// dá pra mandar Authorization: Bearer nele — uma rota "sem requireAuth"
+// dentro do router (createWhatsappRouter) nunca seria alcançada, porque
+// esse middleware já roda pra TODO o router antes de rotear qualquer
+// coisa dele. Verifica o mesmo token de app de sempre, só que lido do
+// BODY (não do header) — não é uma exceção de segurança, é a mesma
+// adaptação que toda rota alimentada por beacon precisa.
+// ---------------------------------------------------------------
+app.post('/api/whatsapp/page-session/close', async (req, res) => {
+  try {
+    const { sessionId, token } = req.body || {};
+    if (!sessionId || !token) return res.status(400).json({ error: 'sessionId e token são obrigatórios' });
+    const ownerId = verifyAppToken(token);
+    if (!ownerId) return res.status(401).json({ error: 'não autenticado' });
+    await pageSessions.closeSession(sessionId);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[page-session] falha ao fechar:', err.message);
     res.status(502).json({ error: err.message });
   }
 });

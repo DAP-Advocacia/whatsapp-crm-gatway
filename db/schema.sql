@@ -655,3 +655,50 @@ alter table scheduled_campaigns add column if not exists retry_attempt int not n
 -- de disparar de fato (sendScheduled, src/scheduler.js).
 alter table scheduled_campaigns add column if not exists min_delay_ms int;
 alter table scheduled_campaigns add column if not exists max_delay_ms int;
+
+-- Gestão de usuários no Admin (ver HANDOFF, Parte CO) — trackeamento
+-- ponta a ponta de navegação, diferente de admin_presence (que é só o
+-- estado ATUAL, sobrescrito a cada heartbeat). Uma linha por VISITA a uma
+-- página, com duração real (entrada/saída via navigator.sendBeacon, não
+-- aproximação pelo intervalo do heartbeat). ended_at null = ainda aberta
+-- OU órfã (aba fechada sem disparar o beacon de saída, crash, queda de
+-- luz) — ver closeStaleSessions em src/pageSessions.js, chamada
+-- periodicamente em src/server.js: fecha sozinha com ended_at =
+-- last_ping_at (não now()) quando last_ping_at passa de 90s sem
+-- atualização, nunca fica "aberta pra sempre".
+create table if not exists page_sessions (
+  id bigserial primary key,
+  owner_id text not null,
+  owner_name text,
+  page text not null,
+  started_at timestamptz not null default now(),
+  last_ping_at timestamptz not null default now(),
+  ended_at timestamptz
+);
+create index if not exists idx_page_sessions_owner on page_sessions (owner_id, started_at desc);
+create index if not exists idx_page_sessions_open on page_sessions (owner_id) where ended_at is null;
+
+-- Bloqueio de acesso individual (botão "Revogar" no Admin) — verificado
+-- em TODA request autenticada (dentro de requireAuth, src/auth.js), não
+-- só na emissão do token: quem já tem um token válido em uso (até 12h,
+-- AUTH_TOKEN_TTL_HOURS) é cortado na PRÓXIMA chamada, não só depois do
+-- token expirar sozinho. Decisão confirmada com o usuário — corte
+-- imediato, não confiança em o token vencer. blocked_by é o ownerId do
+-- super admin que bloqueou (nunca o próprio ownerId — trava aplicada na
+-- rota, não aqui no schema).
+create table if not exists blocked_owners (
+  owner_id text primary key,
+  blocked_by text not null,
+  blocked_at timestamptz not null default now(),
+  reason text
+);
+
+-- Kanban de Sugestões dentro do Admin (ver HANDOFF Parte CO) — status
+-- ganha um 3º valor no meio do fluxo ('pending' -> 'in_review' ->
+-- 'released'); sem CHECK constraint hoje (já era text livre antes), sem
+-- migração de dado necessária pras linhas existentes. response/responded_at
+-- alimentam a FAQ pública (GET /api/suggestions/faq) — resposta e
+-- "lançada" são independentes (uma sugestão pode ter resposta sem nunca
+-- ter sido lançada de fato, ex: "não vamos fazer isso porque...").
+alter table suggestions add column if not exists response text;
+alter table suggestions add column if not exists responded_at timestamptz;

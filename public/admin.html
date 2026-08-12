@@ -329,6 +329,75 @@
   }
   .warn-banner b{ color: var(--red); }
   .skeleton-row{ color: var(--text-faint); font-size:12.5px; padding: 14px 10px; }
+
+  /* ======================================================
+     Cards de métrica do topo (Usuários) + gráficos de barra
+     ====================================================== */
+  .metric-cards{ display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px; }
+  .metric-card{
+    background: var(--surface); border:1px solid var(--border); border-radius: var(--radius);
+    padding:16px 18px;
+  }
+  .metric-card .metric-label{
+    font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+    color:var(--text-faint); margin-bottom:6px; display:flex; align-items:center; gap:6px;
+  }
+  .metric-card .metric-value{ font-family:'Fraunces',serif; font-weight:600; font-size:24px; color:var(--text); }
+  .metric-card .metric-value.online-dot::before{
+    content:''; display:inline-block; width:8px; height:8px; border-radius:50%;
+    background:var(--green); margin-right:8px; box-shadow:0 0 0 3px rgba(var(--green-rgb),.25);
+  }
+
+  .bar-charts{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .bar-row{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  .bar-row:last-child{ margin-bottom:0; }
+  .bar-row .bar-label{ width:130px; flex-shrink:0; font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-row .bar-track{ flex:1; height:8px; background:var(--surface-2); border-radius:100px; overflow:hidden; }
+  .bar-row .bar-fill{ height:100%; background:var(--gold); border-radius:100px; transition:width .3s ease; }
+  .bar-row .bar-value{ width:70px; flex-shrink:0; text-align:right; font-size:11.5px; color:var(--text-faint); }
+
+  @media (max-width: 880px){
+    .metric-cards{ grid-template-columns:repeat(2, 1fr); }
+    .bar-charts{ grid-template-columns:1fr; }
+  }
+
+  .action-link{
+    background:none; border:none; color:var(--gold-dim); font-size:11.5px; cursor:pointer;
+    padding:0; text-decoration:underline; font-family:inherit;
+  }
+  .action-link:hover{ color:var(--gold); }
+  .action-link.danger{ color:var(--red); }
+  .action-link.danger:hover{ color:#e88b83; }
+  .actions-cell{ display:flex; gap:10px; flex-wrap:wrap; }
+
+  /* ======================================================
+     Kanban de Sugestões
+     ====================================================== */
+  .kanban-board{ display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; align-items:start; }
+  .kanban-col{ background: var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:12px; min-height:80px; }
+  .kanban-col-title{
+    font-size:12px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em;
+    margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;
+  }
+  .kanban-card{
+    background: var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px;
+    margin-bottom:10px; font-size:12.5px;
+  }
+  .kanban-card:last-child{ margin-bottom:0; }
+  .kanban-card .card-text{ color:var(--text); line-height:1.5; margin-bottom:8px; }
+  .kanban-card .card-meta{ color:var(--text-faint); font-size:11px; margin-bottom:8px; }
+  .kanban-card .card-response{
+    background: rgba(var(--gold-rgb),.08); border-left:2px solid var(--gold-dim); border-radius:6px;
+    padding:8px 10px; font-size:11.5px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;
+  }
+  .kanban-card .card-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .kanban-card textarea{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-family:inherit; font-size:12px; padding:8px; margin-bottom:8px; resize:vertical;
+  }
+  @media (max-width: 880px){
+    .kanban-board{ grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
@@ -418,6 +487,11 @@
       <span class="nav-label">Sugestões</span>
       <span class="nav-tip">Sugestões</span>
     </a>
+    <a href="/faq.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span>
+      <span class="nav-label">FAQ</span>
+      <span class="nav-tip">FAQ</span>
+    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -462,34 +536,80 @@
 
 <div id="app">
   <h1>Admin</h1>
-  <p class="subtitle">Painel restrito — quem está usando o app agora e o cadastro de funcionários do Bitrix.</p>
+  <p class="subtitle">Painel restrito — gestão de usuários, uso do app e sugestões da equipe.</p>
 
   <div id="hrWarning"></div>
 
+  <div class="metric-cards">
+    <div class="metric-card">
+      <div class="metric-label">Online agora</div>
+      <div class="metric-value online-dot" id="metricOnlineNow">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Usuários ativos (30d)</div>
+      <div class="metric-value" id="metricActiveUsers">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Tempo total do time</div>
+      <div class="metric-value" id="metricTotalTime">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-label">Página mais acessada</div>
+      <div class="metric-value" id="metricTopPage" style="font-size:16px;">—</div>
+    </div>
+  </div>
+
+  <div class="bar-charts">
+    <div class="panel">
+      <h2>Páginas mais acessadas</h2>
+      <p class="panel-hint">Por número de visitas (entradas na aba).</p>
+      <div id="barVisits"><div class="skeleton-row">Carregando…</div></div>
+    </div>
+    <div class="panel">
+      <h2>Onde o time passa mais tempo</h2>
+      <p class="panel-hint">Por tempo total estimado de uso.</p>
+      <div id="barDuration"><div class="skeleton-row">Carregando…</div></div>
+    </div>
+  </div>
+
   <div class="panel">
-    <h2>Quem está online agora <span class="panel-count" id="presenceCount">—</span></h2>
-    <p class="panel-hint">Sessão ativa do próprio app (heartbeat do navegador a cada 30s) — não é o status de presença do Bitrix24 em si. Sem heartbeat por mais de 90 segundos, considerado offline. Atualiza a cada 15s.</p>
-    <table class="admin-table" id="presenceTable">
+    <h2>Usuários <span class="panel-count" id="usersCount">—</span></h2>
+    <p class="panel-hint">Cadastro do Bitrix cruzado com uso real do app — inclusive quem nunca abriu nada ainda. "Revogar" bloqueia o acesso ao app inteiro, verificado na hora (não precisa esperar o token expirar).</p>
+    <table class="admin-table" id="usersTable">
       <thead>
-        <tr><th>Pessoa</th><th>Página atual</th><th>Status</th><th>Última vez visto</th></tr>
+        <tr><th>Usuário</th><th>Conta</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
       </thead>
-      <tbody id="presenceBody">
-        <tr><td colspan="4" class="skeleton-row">Carregando…</td></tr>
+      <tbody id="usersBody">
+        <tr><td colspan="7" class="skeleton-row">Carregando…</td></tr>
       </tbody>
     </table>
   </div>
 
   <div class="panel">
-    <h2>Funcionários (Bitrix) <span class="panel-count" id="employeesCount">—</span></h2>
-    <p class="panel-hint">Cadastro vindo direto do Bitrix (nome, cargo, e-mail) — a linha ganha o selo "Online agora" quando a mesma pessoa está com heartbeat ativo na tabela acima.</p>
-    <table class="admin-table" id="employeesTable">
-      <thead>
-        <tr><th>Funcionário</th><th>Cargo</th><th>E-mail</th><th></th></tr>
-      </thead>
-      <tbody id="employeesBody">
-        <tr><td colspan="4" class="skeleton-row">Carregando…</td></tr>
-      </tbody>
-    </table>
+    <h2>Sugestões <span class="panel-count" id="suggestionsCount">—</span></h2>
+    <p class="panel-hint">Kanban de triagem — mover, responder (a resposta vai pra FAQ pública) e marcar como lançada.</p>
+    <div class="kanban-board" id="suggestionsBoard">
+      <div class="kanban-col">
+        <div class="kanban-col-title">Pendente</div>
+        <div id="kanbanPending"><div class="skeleton-row">Carregando…</div></div>
+      </div>
+      <div class="kanban-col">
+        <div class="kanban-col-title">Em análise</div>
+        <div id="kanbanInReview"></div>
+      </div>
+      <div class="kanban-col">
+        <div class="kanban-col-title">Lançado</div>
+        <div id="kanbanReleased"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="userDetailModal" class="overlay" style="position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:80;">
+    <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; max-width:520px; width:90%; max-height:80vh; overflow-y:auto;">
+      <h2 id="userDetailTitle" style="margin-bottom:14px;">Histórico</h2>
+      <div id="userDetailBody"></div>
+      <button class="action-link" id="userDetailCloseBtn" style="margin-top:14px;">Fechar</button>
+    </div>
   </div>
 
   <div class="credit-row">
@@ -562,7 +682,6 @@
 <script>
 (function () {
   const API_BASE = window.location.origin + '/api/whatsapp';
-  const ONLINE_THRESHOLD_MS = 90 * 1000; // mesmo valor combinado com o heartbeat de 30s (3 ciclos perdidos)
 
   let resolveBx24Ready;
   const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
@@ -632,12 +751,39 @@
       myBitrixName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || null;
     });
   }
-  function startPresenceHeartbeat() {
-    const send = () => apiFetch(`${API_BASE}/presence/heartbeat`, {
+  let pageSessionId = null;
+  function openPageSession() {
+    apiFetch(`${API_BASE}/page-session/open`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ page: window.location.pathname, ownerName: myBitrixName }),
-    }).catch(() => {});
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.sessionId) pageSessionId = data.sessionId; })
+      .catch(() => {});
+  }
+  window.addEventListener('pagehide', () => {
+    if (!pageSessionId || !appToken) return;
+    try {
+      navigator.sendBeacon('/api/whatsapp/page-session/close', JSON.stringify({ sessionId: pageSessionId, token: appToken }));
+    } catch {}
+  });
+  function startPresenceHeartbeat() {
+    openPageSession();
+    const send = () => {
+      apiFetch(`${API_BASE}/presence/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page: window.location.pathname, ownerName: myBitrixName }),
+      }).catch(() => {});
+      if (pageSessionId) {
+        apiFetch(`${API_BASE}/page-session/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: pageSessionId }),
+        }).catch(() => {});
+      }
+    };
     send();
     setInterval(send, 30000);
   }
@@ -650,14 +796,6 @@
     const parts = name.trim().split(/\s+/);
     return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase();
   }
-  // ownerId é "<member_id>_<bitrixUserId>" (ver ownerIdFor em src/auth.js) —
-  // aqui só precisamos do sufixo pra casar com o `id` de listEmployees()
-  // (que é só o userId do Bitrix, sem o member_id na frente).
-  function bitrixUserIdFromOwnerId(ownerId) {
-    if (!ownerId) return null;
-    const idx = ownerId.lastIndexOf('_');
-    return idx === -1 ? ownerId : ownerId.slice(idx + 1);
-  }
   function timeAgo(ms) {
     const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
     if (diffSec < 60) return 'agora mesmo';
@@ -668,116 +806,305 @@
     return `há ${Math.floor(diffH / 24)}d`;
   }
 
-  let presenceRows = [];
-
-  async function loadPresence() {
-    try {
-      const res = await apiFetch(`${API_BASE}/admin/presence`);
-      if (!res.ok) throw new Error('falha ao carregar presença');
-      const data = await res.json();
-      presenceRows = data.presence || [];
-      renderPresence();
-      renderEmployees(); // refaz o cruzamento "online agora" com o dado novo
-    } catch (err) {
-      console.error('[admin] erro ao carregar presença:', err.message);
-    }
+  function formatDuration(seconds) {
+    if (!seconds) return '0min';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.round((seconds % 3600) / 60);
+    if (h > 0) return `${h}h ${m}min`;
+    return `${m}min`;
   }
-
-  function renderPresence() {
-    const body = document.getElementById('presenceBody');
-    const count = document.getElementById('presenceCount');
-    const now = Date.now();
-    const online = presenceRows.filter((r) => now - new Date(r.lastSeenAt).getTime() < ONLINE_THRESHOLD_MS);
-    count.textContent = `${online.length} online · ${presenceRows.length} total`;
-
-    if (!presenceRows.length) {
-      body.innerHTML = `<tr><td colspan="4" class="empty-state">Ninguém mandou heartbeat ainda — abra qualquer tela do app pra começar a aparecer aqui.</td></tr>`;
+  function formatDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('pt-BR');
+  }
+  function renderBarChart(containerId, rows, valueKey, formatFn) {
+    const el = document.getElementById(containerId);
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty-state">Sem dados nos últimos 30 dias ainda.</div>`;
       return;
     }
-
-    body.innerHTML = presenceRows.map((r) => {
-      const lastSeenMs = new Date(r.lastSeenAt).getTime();
-      const isOnline = now - lastSeenMs < ONLINE_THRESHOLD_MS;
-      const name = r.ownerName || 'Desconhecido';
-      return `
-        <tr>
-          <td>
-            <div class="person-cell">
-              <span class="avatar-fallback">${escapeHtml(initials(r.ownerName))}</span>
-              <div>
-                <div class="person-name">${escapeHtml(name)}</div>
-                <div class="person-sub">${escapeHtml(r.ownerId)}</div>
-              </div>
-            </div>
-          </td>
-          <td>${escapeHtml(r.lastPage || '—')}</td>
-          <td>
-            <span class="status-badge ${isOnline ? 'online' : 'offline'}">
-              <span class="dot"></span>${isOnline ? 'Online' : 'Offline'}
-            </span>
-          </td>
-          <td>${timeAgo(lastSeenMs)}</td>
-        </tr>
-      `;
-    }).join('');
+    const max = Math.max(...rows.map((r) => r[valueKey])) || 1;
+    el.innerHTML = rows.map((r) => `
+      <div class="bar-row">
+        <div class="bar-label" title="${escapeHtml(r.page)}">${escapeHtml(r.page)}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${(r[valueKey] / max) * 100}%"></div></div>
+        <div class="bar-value">${formatFn(r[valueKey])}</div>
+      </div>
+    `).join('');
   }
 
-  let employeesRows = [];
-
-  async function loadEmployees() {
+  async function loadUsageMetrics() {
     try {
-      const res = await apiFetch(`${API_BASE}/admin/employees`);
-      if (!res.ok) throw new Error('falha ao carregar funcionários');
+      const res = await apiFetch(`${API_BASE}/admin/usage-metrics`);
+      if (!res.ok) throw new Error('falha ao carregar métricas de uso');
       const data = await res.json();
-      employeesRows = data.employees || [];
+      document.getElementById('metricOnlineNow').textContent = String(data.onlineNow);
+      document.getElementById('metricActiveUsers').textContent = String(data.activeUsers);
+      document.getElementById('metricTotalTime').textContent = formatDuration(data.totalSecondsAllUsers);
+      document.getElementById('metricTopPage').textContent = data.topPage || '—';
+      renderBarChart('barVisits', data.mostVisitedPages, 'visits', (v) => `${v} visita${v === 1 ? '' : 's'}`);
+      renderBarChart('barDuration', data.mostTimeSpentPages, 'durationSeconds', formatDuration);
+    } catch (err) {
+      console.error('[admin] erro ao carregar métricas de uso:', err.message);
+    }
+  }
+
+  let usersRows = [];
+
+  async function loadUsers() {
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/users`);
+      if (!res.ok) throw new Error('falha ao carregar usuários');
+      const data = await res.json();
+      usersRows = data.users || [];
       const warning = document.getElementById('hrWarning');
       warning.innerHTML = data.hrConfigured
         ? ''
         : `<div class="warn-banner"><b>Cadastro do Bitrix indisponível.</b> A variável BITRIX_HR_WEBHOOK_URL não está configurada neste servidor — sem ela, esta lista fica sempre vazia (ver .env.example).</div>`;
-      renderEmployees();
+      renderUsers();
     } catch (err) {
-      console.error('[admin] erro ao carregar funcionários:', err.message);
+      console.error('[admin] erro ao carregar usuários:', err.message);
       if (window.showToast) window.showToast(err.message, 'error');
     }
   }
 
-  function renderEmployees() {
-    const body = document.getElementById('employeesBody');
-    const count = document.getElementById('employeesCount');
-    count.textContent = String(employeesRows.length);
+  function renderUsers() {
+    const body = document.getElementById('usersBody');
+    const count = document.getElementById('usersCount');
+    count.textContent = String(usersRows.length);
 
-    if (!employeesRows.length) {
-      body.innerHTML = `<tr><td colspan="4" class="empty-state">Nenhum funcionário encontrado.</td></tr>`;
+    if (!usersRows.length) {
+      body.innerHTML = `<tr><td colspan="7" class="empty-state">Nenhum usuário encontrado.</td></tr>`;
       return;
     }
 
-    const now = Date.now();
-    const onlineUserIds = new Set(
-      presenceRows
-        .filter((r) => now - new Date(r.lastSeenAt).getTime() < ONLINE_THRESHOLD_MS)
-        .map((r) => bitrixUserIdFromOwnerId(r.ownerId))
-    );
-
-    body.innerHTML = employeesRows.map((e) => {
-      const isOnline = onlineUserIds.has(e.id);
-      const photoCell = e.photo
-        ? `<img class="avatar-thumb" src="${escapeHtml(e.photo)}" alt="">`
-        : `<span class="avatar-fallback">${escapeHtml(initials(e.name))}</span>`;
+    body.innerHTML = usersRows.map((u) => {
+      const photoCell = u.photo
+        ? `<img class="avatar-thumb" src="${escapeHtml(u.photo)}" alt="">`
+        : `<span class="avatar-fallback">${escapeHtml(initials(u.name))}</span>`;
+      const onlineCell = u.isOnline
+        ? `<span class="status-badge online"><span class="dot"></span>Online</span>`
+        : `<span class="status-badge offline"><span class="dot"></span>Offline</span>`;
+      const revokeAction = u.isBlocked
+        ? `<button class="action-link" data-unblock="${escapeHtml(u.ownerId)}">Reativar</button>`
+        : `<button class="action-link danger" data-block="${escapeHtml(u.ownerId)}">Revogar</button>`;
       return `
         <tr>
           <td>
             <div class="person-cell">
               ${photoCell}
-              <div class="person-name">${escapeHtml(e.name || 'Sem nome')}</div>
+              <div>
+                <div class="person-name">${escapeHtml(u.name || 'Sem nome')}${u.isBlocked ? ' <span class="status-badge offline" style="margin-left:4px;">Bloqueado</span>' : ''}</div>
+                <div class="person-sub">${escapeHtml(u.workPosition || '')}</div>
+              </div>
             </div>
           </td>
-          <td>${escapeHtml(e.workPosition || '—')}</td>
-          <td>${escapeHtml(e.email || '—')}</td>
-          <td>${isOnline ? `<span class="status-badge online"><span class="dot"></span>Online agora</span>` : ''}</td>
+          <td>${escapeHtml(u.email || '—')}</td>
+          <td>${onlineCell}</td>
+          <td>${u.lastAccess ? timeAgo(new Date(u.lastAccess).getTime()) : '—'}</td>
+          <td>${formatDuration(u.totalSecondsLast30d)}</td>
+          <td>${escapeHtml(u.favoritePage || '—')}</td>
+          <td>
+            <div class="actions-cell">
+              <button class="action-link" data-detail="${escapeHtml(u.ownerId)}">Detalhado</button>
+              ${revokeAction}
+            </div>
+          </td>
         </tr>
       `;
     }).join('');
   }
+
+  async function openUserDetail(ownerId) {
+    const user = usersRows.find((u) => u.ownerId === ownerId);
+    const modal = document.getElementById('userDetailModal');
+    const body = document.getElementById('userDetailBody');
+    document.getElementById('userDetailTitle').textContent = user?.name || 'Histórico';
+    body.innerHTML = `<div class="skeleton-row">Carregando…</div>`;
+    modal.style.display = 'flex';
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(ownerId)}`);
+      if (!res.ok) throw new Error('falha ao carregar histórico');
+      const data = await res.json();
+      const history = data.history || [];
+      if (!history.length) {
+        body.innerHTML = `<div class="empty-state">Nenhuma navegação registrada ainda.</div>`;
+        return;
+      }
+      body.innerHTML = `
+        <table class="admin-table">
+          <thead><tr><th>Página</th><th>Entrada</th><th>Duração</th></tr></thead>
+          <tbody>
+            ${history.map((h) => `
+              <tr>
+                <td>${escapeHtml(h.page)}</td>
+                <td>${new Date(h.startedAt).toLocaleString('pt-BR')}</td>
+                <td>${formatDuration(h.durationSeconds)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('userDetailCloseBtn').addEventListener('click', () => {
+    document.getElementById('userDetailModal').style.display = 'none';
+  });
+
+  document.getElementById('usersBody').addEventListener('click', async (e) => {
+    const detailBtn = e.target.closest('[data-detail]');
+    if (detailBtn) return openUserDetail(detailBtn.dataset.detail);
+
+    const blockBtn = e.target.closest('[data-block]');
+    if (blockBtn) {
+      const ownerId = blockBtn.dataset.block;
+      const confirmed = await window.confirmDialog(`Revogar o acesso deste usuário? Ele deixa de conseguir usar o app imediatamente.`);
+      if (!confirmed) return;
+      try {
+        const res = await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(ownerId)}/block`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao revogar');
+        if (window.showToast) window.showToast('Acesso revogado.', 'success');
+        loadUsers();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+      return;
+    }
+
+    const unblockBtn = e.target.closest('[data-unblock]');
+    if (unblockBtn) {
+      const ownerId = unblockBtn.dataset.unblock;
+      const confirmed = await window.confirmDialog('Reativar o acesso deste usuário?');
+      if (!confirmed) return;
+      try {
+        const res = await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(ownerId)}/unblock`, { method: 'POST' });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao reativar');
+        if (window.showToast) window.showToast('Acesso reativado.', 'success');
+        loadUsers();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+    }
+  });
+
+  // ---------------- Kanban de Sugestões ----------------
+
+  let suggestionsRows = [];
+
+  async function loadSuggestions() {
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/suggestions`);
+      if (!res.ok) throw new Error('falha ao carregar sugestões');
+      const data = await res.json();
+      suggestionsRows = data.suggestions || [];
+      renderSuggestions();
+    } catch (err) {
+      console.error('[admin] erro ao carregar sugestões:', err.message);
+    }
+  }
+
+  function suggestionCardHtml(s) {
+    const responseHtml = s.response
+      ? `<div class="card-response"><b>Resposta:</b> ${escapeHtml(s.response)}</div>`
+      : '';
+    const actions = [];
+    if (s.status === 'pending') actions.push(`<button class="action-link" data-move-review="${s.id}">→ Em análise</button>`);
+    if (s.status !== 'released') actions.push(`<button class="action-link" data-release="${s.id}">Marcar lançada</button>`);
+    actions.push(`<button class="action-link" data-respond="${s.id}">${s.response ? 'Editar resposta' : 'Responder'}</button>`);
+    return `
+      <div class="kanban-card" data-suggestion-id="${s.id}">
+        <div class="card-text">${escapeHtml(s.text)}</div>
+        <div class="card-meta">${new Date(s.createdAt).toLocaleDateString('pt-BR')}</div>
+        ${responseHtml}
+        <div class="card-actions">${actions.join('')}</div>
+      </div>
+    `;
+  }
+
+  function renderSuggestions() {
+    document.getElementById('suggestionsCount').textContent = String(suggestionsRows.length);
+    const byStatus = { pending: [], in_review: [], released: [] };
+    suggestionsRows.forEach((s) => { (byStatus[s.status] || byStatus.pending).push(s); });
+
+    document.getElementById('kanbanPending').innerHTML = byStatus.pending.length
+      ? byStatus.pending.map(suggestionCardHtml).join('')
+      : `<div class="empty-state">Vazio.</div>`;
+    document.getElementById('kanbanInReview').innerHTML = byStatus.in_review.length
+      ? byStatus.in_review.map(suggestionCardHtml).join('')
+      : `<div class="empty-state">Vazio.</div>`;
+    document.getElementById('kanbanReleased').innerHTML = byStatus.released.length
+      ? byStatus.released.map(suggestionCardHtml).join('')
+      : `<div class="empty-state">Vazio.</div>`;
+  }
+
+  document.getElementById('suggestionsBoard').addEventListener('click', async (e) => {
+    const moveBtn = e.target.closest('[data-move-review]');
+    if (moveBtn) {
+      try {
+        const res = await apiFetch(`${window.location.origin}/api/suggestions/${moveBtn.dataset.moveReview}/move-to-review`, { method: 'POST' });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao mover');
+        loadSuggestions();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+      return;
+    }
+
+    const releaseBtn = e.target.closest('[data-release]');
+    if (releaseBtn) {
+      const confirmed = await window.confirmDialog('Marcar esta sugestão como lançada? Quem sugeriu recebe uma notificação.');
+      if (!confirmed) return;
+      try {
+        const res = await apiFetch(`${window.location.origin}/api/suggestions/${releaseBtn.dataset.release}/release`, { method: 'POST' });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao marcar como lançada');
+        if (window.showToast) window.showToast('Sugestão marcada como lançada.', 'success');
+        loadSuggestions();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+      return;
+    }
+
+    const respondBtn = e.target.closest('[data-respond]');
+    if (respondBtn) {
+      const card = respondBtn.closest('.kanban-card');
+      if (card.querySelector('textarea')) return; // já está em modo de edição
+      const suggestion = suggestionsRows.find((s) => String(s.id) === respondBtn.dataset.respond);
+      const textarea = document.createElement('textarea');
+      textarea.rows = 3;
+      textarea.value = suggestion?.response || '';
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'action-link';
+      saveBtn.textContent = 'Salvar resposta';
+      const actionsRow = card.querySelector('.card-actions');
+      card.insertBefore(textarea, actionsRow);
+      const wrap = document.createElement('div');
+      wrap.className = 'card-actions';
+      wrap.appendChild(saveBtn);
+      card.insertBefore(wrap, actionsRow);
+      saveBtn.addEventListener('click', async () => {
+        try {
+          const res = await apiFetch(`${window.location.origin}/api/suggestions/${respondBtn.dataset.respond}/respond`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: textarea.value.trim() }),
+          });
+          if (!res.ok) throw new Error((await res.json()).error || 'falha ao responder');
+          if (window.showToast) window.showToast('Resposta salva — já visível na FAQ.', 'success');
+          loadSuggestions();
+        } catch (err) {
+          if (window.showToast) window.showToast(err.message, 'error');
+        }
+      });
+    }
+  });
 
   async function init() {
     try {
@@ -796,8 +1123,8 @@
       resolveMyBitrixName();
       startPresenceHeartbeat();
 
-      await Promise.all([loadPresence(), loadEmployees()]);
-      setInterval(loadPresence, 15000);
+      await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions()]);
+      setInterval(loadUsageMetrics, 30000);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }

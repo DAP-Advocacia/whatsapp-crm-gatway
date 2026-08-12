@@ -14,7 +14,10 @@ const { requireSession, requireResourceSession, requireOwnerMatch, requireResour
 const { getSubordinates, listEmployees } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 const presence = require('../presence');
+const pageSessions = require('../pageSessions');
+const blockedOwners = require('../blockedOwners');
 const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
+const { ownerIdFor } = require('../auth');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
 // metadados de uma página raramente mudam num intervalo curto, e evita
@@ -1385,6 +1388,52 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
+  // POST /page-session/open  { page, ownerName? }
+  // Abre uma "visita" a uma página, com duração REAL (não aproximada pelo
+  // ciclo do heartbeat) — ver src/pageSessions.js e HANDOFF Parte CO.
+  // Devolve o sessionId que o frontend guarda e reusa em ping/close.
+  // ---------------------------------------------------------------
+  router.post('/page-session/open', async (req, res) => {
+    try {
+      const { page, ownerName } = req.body || {};
+      if (!page) return res.status(400).json({ error: 'page é obrigatório' });
+      const sessionId = await pageSessions.openSession(req.ownerId, ownerName, page);
+      res.json({ sessionId });
+    } catch (err) {
+      console.error('[page-session] falha ao abrir:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /page-session/ping  { sessionId }
+  // Sinal de "ainda aberta" a cada 30s (mesmo ciclo do heartbeat de
+  // presença, reaproveitado) — atualiza last_ping_at. Não falha se o
+  // sessionId já não existir/já ter sido fechado (idempotente o
+  // suficiente pra não gerar erro no console a cada corrida entre
+  // ping e close).
+  // ---------------------------------------------------------------
+  router.post('/page-session/ping', async (req, res) => {
+    try {
+      const { sessionId } = req.body || {};
+      if (!sessionId) return res.status(400).json({ error: 'sessionId é obrigatório' });
+      await pageSessions.pingSession(sessionId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[page-session] falha ao pingar:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // POST /page-session/close NÃO fica aqui — precisa ser acessível SEM o
+  // requireAuth global deste router (sendBeacon não permite header
+  // Authorization), e este router inteiro já está atrás de requireAuth em
+  // src/server.js (`app.use('/api/whatsapp', requireAuth, ...)`) ANTES de
+  // rotear qualquer coisa aqui dentro — uma rota "sem auth" definida neste
+  // arquivo nunca seria alcançada. Ver a rota real em src/server.js, montada
+  // antes desse app.use.
+
+  // ---------------------------------------------------------------
   // GET /admin/whoami
   // Só confirma se o usuário autenticado é super admin — usado pelo
   // frontend pra decidir se mostra o item "Admin" na sidebar/redireciona
@@ -1432,6 +1481,162 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ employees, hrConfigured: true });
     } catch (err) {
       console.error('[admin] falha ao listar funcionários:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // Limiar de "online" espelha o mesmo valor já usado no frontend
+  // (admin.html, ONLINE_THRESHOLD_MS) — repetido aqui só pro backend
+  // decidir o mesmo booleano na resposta de GET /admin/users, sem
+  // comparar timestamp gerado pelo Postgres com Date.now() de outro
+  // processo (mesma lição da Parte CI): last_seen_at vem do próprio
+  // banco, comparado contra Date.now() DESTE processo — ainda é uma
+  // comparação entre dois relógios, mas o mesmo tipo de comparação que
+  // já era aceita no resto do sistema pra esse cálculo específico.
+  const ADMIN_ONLINE_THRESHOLD_MS = 90 * 1000;
+  const ADMIN_USAGE_WINDOW_DAYS = 30;
+
+  // ---------------------------------------------------------------
+  // GET /admin/users
+  // Lista TODO o universo de funcionários do Bitrix (listEmployees —
+  // inclusive quem nunca abriu o app, ver HANDOFF Parte CO), cruzado com
+  // presença atual (admin_presence), último acesso e tempo total/página
+  // favorita dos últimos 30 dias (page_sessions), e status de bloqueio
+  // (blocked_owners). Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/users', requireSuperAdmin, async (req, res) => {
+    try {
+      const employees = await listEmployees();
+      if (employees === null) {
+        return res.json({ users: [], hrConfigured: false });
+      }
+
+      const ownerIds = employees.map((e) => ownerIdFor(e.id));
+      const [presenceRows, lastAccessMap, usage, blocked] = await Promise.all([
+        presence.listPresence(),
+        pageSessions.getLastAccessByOwners(ownerIds),
+        pageSessions.getUsageSince(new Date(Date.now() - ADMIN_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000)),
+        blockedOwners.listBlocked(),
+      ]);
+
+      const presenceByOwner = new Map(presenceRows.map((r) => [r.ownerId, r]));
+      const blockedByOwner = new Map(blocked.map((b) => [b.ownerId, b]));
+
+      const users = employees.map((e) => {
+        const ownerId = ownerIdFor(e.id);
+        const presenceRow = presenceByOwner.get(ownerId);
+        const isOnline = !!presenceRow && Date.now() - new Date(presenceRow.lastSeenAt).getTime() < ADMIN_ONLINE_THRESHOLD_MS;
+        const favoritePage = usage.favoritePageByOwner.get(ownerId);
+        const blockedRow = blockedByOwner.get(ownerId);
+        return {
+          ownerId,
+          name: e.name,
+          email: e.email,
+          photo: e.photo,
+          workPosition: e.workPosition,
+          dateRegister: e.dateRegister,
+          isOnline,
+          currentPage: presenceRow?.lastPage || null,
+          lastAccess: lastAccessMap.get(ownerId) || null,
+          totalSecondsLast30d: usage.totalByOwner.get(ownerId) || 0,
+          favoritePage: favoritePage?.page || null,
+          isBlocked: !!blockedRow,
+          blockedReason: blockedRow?.reason || null,
+        };
+      });
+
+      res.json({ users, hrConfigured: true });
+    } catch (err) {
+      console.error('[admin] falha ao listar usuários:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/users/:ownerId
+  // Histórico completo de navegação de UMA pessoa (page_sessions, mais
+  // recentes primeiro) — pro botão "Detalhado" na tabela de Usuários.
+  // Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/users/:ownerId', requireSuperAdmin, async (req, res) => {
+    try {
+      const history = await pageSessions.getSessionHistory(req.params.ownerId);
+      res.json({ history });
+    } catch (err) {
+      console.error('[admin] falha ao buscar histórico do usuário:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/usage-metrics?days=30
+  // Agregados do topo do Admin (online agora, usuários ativos, tempo
+  // total do time, página mais acessada) + os 2 gráficos de barra
+  // (páginas mais acessadas por CONTAGEM de visitas; onde o time passa
+  // mais tempo por DURAÇÃO somada — números diferentes de propósito).
+  // Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/usage-metrics', requireSuperAdmin, async (req, res) => {
+    try {
+      const days = Number(req.query.days) || ADMIN_USAGE_WINDOW_DAYS;
+      const [presenceRows, usage] = await Promise.all([
+        presence.listPresence(),
+        pageSessions.getUsageSince(new Date(Date.now() - days * 24 * 60 * 60 * 1000)),
+      ]);
+
+      const onlineNow = presenceRows.filter(
+        (r) => Date.now() - new Date(r.lastSeenAt).getTime() < ADMIN_ONLINE_THRESHOLD_MS
+      ).length;
+      const activeUsers = usage.totalByOwner.size;
+      const totalSeconds = [...usage.totalByOwner.values()].reduce((sum, s) => sum + s, 0);
+      const topPage = usage.mostVisitedPages[0]?.page || null;
+
+      res.json({
+        onlineNow,
+        activeUsers,
+        totalSecondsAllUsers: totalSeconds,
+        topPage,
+        mostVisitedPages: usage.mostVisitedPages.slice(0, 15),
+        mostTimeSpentPages: usage.mostTimeSpentPages.slice(0, 15),
+      });
+    } catch (err) {
+      console.error('[admin] falha ao calcular métricas de uso:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /admin/users/:ownerId/block  { reason? }
+  // "Revogar" na tabela de Usuários — bloqueia o ownerId de usar o app
+  // inteiro, verificado em toda request autenticada (ver requireAuth,
+  // src/auth.js). Nunca aceita bloquear o PRÓPRIO ownerId autenticado —
+  // trava de segurança contra o super admin se trancar fora por engano.
+  // Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.post('/admin/users/:ownerId/block', requireSuperAdmin, async (req, res) => {
+    const { ownerId } = req.params;
+    if (ownerId === req.ownerId) {
+      return res.status(400).json({ error: 'você não pode bloquear a si mesmo' });
+    }
+    try {
+      await blockedOwners.blockOwner(ownerId, req.ownerId, req.body?.reason);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin] falha ao bloquear usuário:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /admin/users/:ownerId/unblock
+  // "Reativar" na tabela de Usuários. Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.post('/admin/users/:ownerId/unblock', requireSuperAdmin, async (req, res) => {
+    try {
+      await blockedOwners.unblockOwner(req.params.ownerId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin] falha ao desbloquear usuário:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

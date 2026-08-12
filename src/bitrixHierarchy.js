@@ -220,6 +220,9 @@ async function listEmployees() {
     email: u.EMAIL || null,
     photo: u.PERSONAL_PHOTO || null,
     departmentIds: (u.UF_DEPARTMENT || []).map(String),
+    // "Criado em" na tela de Usuários do Admin (ver HANDOFF Parte CO) —
+    // data de registro da conta no próprio Bitrix, não deste app.
+    dateRegister: u.DATE_REGISTER || null,
   }));
 }
 

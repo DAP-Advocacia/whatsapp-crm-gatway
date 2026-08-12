@@ -474,6 +474,11 @@
       <span class="nav-label">Sugestões</span>
       <span class="nav-tip">Sugestões</span>
     </a>
+    <a href="/faq.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span>
+      <span class="nav-label">FAQ</span>
+      <span class="nav-tip">FAQ</span>
+    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -736,14 +741,48 @@
   // chamada de novo sem duplicar o setInterval (guarda por
   // heartbeatStarted).
   let heartbeatStarted = false;
+  let pageSessionId = null;
+  // Abre uma "visita" de página com duração REAL (ver src/pageSessions.js,
+  // HANDOFF Parte CO) — diferente do heartbeat de presença (que só diz
+  // "app aberto agora", sem histórico). pagehide + sendBeacon garante o
+  // fechamento mesmo em fechar aba/trocar de página — sendBeacon não
+  // permite headers customizados, por isso o token vai no BODY, e a URL é
+  // sempre o caminho absoluto completo (rota fora de qualquer API_BASE,
+  // montada em src/server.js antes do requireAuth global do router).
+  function openPageSession() {
+    apiFetch(`${API_BASE}/page-session/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page: window.location.pathname, ownerName: typeof myBitrixName !== 'undefined' ? myBitrixName : null }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.sessionId) pageSessionId = data.sessionId; })
+      .catch(() => {});
+  }
+  window.addEventListener('pagehide', () => {
+    if (!pageSessionId || !appToken) return;
+    try {
+      navigator.sendBeacon('/api/whatsapp/page-session/close', JSON.stringify({ sessionId: pageSessionId, token: appToken }));
+    } catch {}
+  });
   function startPresenceHeartbeat() {
     if (heartbeatStarted) return;
     heartbeatStarted = true;
-    const send = () => apiFetch(`${API_BASE}/presence/heartbeat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ page: window.location.pathname }),
-    }).catch(() => {});
+    openPageSession();
+    const send = () => {
+      apiFetch(`${API_BASE}/presence/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page: window.location.pathname }),
+      }).catch(() => {});
+      if (pageSessionId) {
+        apiFetch(`${API_BASE}/page-session/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: pageSessionId }),
+        }).catch(() => {});
+      }
+    };
     send();
     setInterval(send, 30000);
   }
