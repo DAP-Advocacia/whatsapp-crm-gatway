@@ -327,6 +327,18 @@
   .status-badge.connecting .status-dot{ background: var(--gold); }
   .status-badge.offline{ background: rgba(var(--red-rgb),.15); color: var(--red); }
   .status-badge.offline .status-dot{ background: var(--red); }
+  /* needsAttention (HANDOFF Parte CQ): desconexão que o WhatsApp recusou de
+     forma permanente (403/440/500) — parou de tentar reconectar sozinho,
+     precisa de ação manual. Mesma cor de "offline" (já é a mais urgente do
+     sistema), mas com aviso extra no corpo do card — o badge sozinho passa
+     despercebido fácil demais numa lista de vários cards. */
+  .instance-attention{
+    display:flex; align-items:flex-start; gap:8px; margin-top:8px;
+    padding:8px 10px; border-radius:8px;
+    background: rgba(var(--red-rgb),.08); border: 1px solid rgba(var(--red-rgb),.25);
+    font-size: 12px; color: var(--text-muted); line-height: 1.5;
+  }
+  .instance-attention strong{ color: var(--red); }
   .instance-phone{ font-size: 13px; color: var(--text-muted); }
   .instance-delegated-tag{ color: var(--gold); }
   .modal-hint{ font-size: 12.5px; color: var(--text-muted); margin: -4px 0 10px; line-height: 1.5; }
@@ -986,6 +998,13 @@
   const ICON_GROUPS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 
   const STATUS_LABEL = { online: 'Conectada', connecting: 'Aguardando QR', offline: 'Desconectada' };
+  // Traduz o DisconnectReason cru (ver src/whatsapp.js) pra uma frase que
+  // faz sentido pra quem não é técnico — HANDOFF Parte CQ.
+  const DISCONNECT_REASON_LABEL = {
+    forbidden: 'o WhatsApp recusou o acesso a esse número (pode ser uma restrição temporária da conta)',
+    connectionReplaced: 'outro aparelho assumiu essa conexão',
+    badSession: 'a sessão salva ficou inválida',
+  };
 
   function renderInstances(list, limit) {
     // O limite (MAX_INSTANCES_PER_OWNER) só conta as PRÓPRIAS instâncias —
@@ -1016,7 +1035,13 @@
           <span class="instance-stat">${ICON_CONTACTS} ${i.contactCount != null ? i.contactCount : '—'} contatos</span>
           <span class="instance-stat">${ICON_GROUPS} ${i.groupCount != null ? i.groupCount : '—'} grupos</span>
         </div>
+        ${i.needsAttention ? `
+          <div class="instance-attention">
+            <span><strong>Precisa de atenção:</strong> ${DISCONNECT_REASON_LABEL[i.lastDisconnectReason] || 'a conexão parou sozinha e não volta automaticamente'}. Pare de usar por algumas horas e tente reconectar, ou remova e pareie de novo se persistir.</span>
+          </div>
+        ` : ''}
         <div class="instance-actions">
+          ${i.needsAttention ? `<button type="button" data-reconnect="${i.id}">Tentar reconectar</button>` : ''}
           ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Ver QR</button>` : ''}
           ${i.delegated ? '' : `
             <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
@@ -1029,6 +1054,9 @@
 
     instancesWrap.querySelectorAll('[data-qr]').forEach((btn) => {
       btn.addEventListener('click', () => openQrModal(btn.dataset.qr));
+    });
+    instancesWrap.querySelectorAll('[data-reconnect]').forEach((btn) => {
+      btn.addEventListener('click', () => reconnectInstance(btn.dataset.reconnect));
     });
     instancesWrap.querySelectorAll('[data-rename]').forEach((btn) => {
       btn.addEventListener('click', () => openRenameModal(btn.dataset.rename, btn.dataset.label));
@@ -1376,6 +1404,22 @@
       if (window.showToast) window.showToast(err.message, 'error');
     }
   });
+
+  // ---------------- Tentar reconectar (needsAttention) ----------------
+  // HANDOFF Parte CQ — botão que aparece só quando o backend marcou
+  // needsAttention (desconexão que o WhatsApp recusou de forma permanente).
+  // Não apaga nada — tenta reconectar com as credenciais já salvas.
+
+  async function reconnectInstance(id) {
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/${id}/reconnect?owner=${encodeURIComponent(myOwnerId)}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      loadInstances();
+      if (window.showToast) window.showToast('Tentando reconectar…', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
 
   // ---------------- Remover ----------------
 

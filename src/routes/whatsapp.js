@@ -290,7 +290,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
         }
         const groupCount = gateway ? await gateway.getGroupCount() : null;
         const contactCount = gateway ? gateway.getContactCount() : null;
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount };
+        // needsAttention (HANDOFF Parte CQ): true quando o WhatsApp recusou a
+        // conexão de forma que parece permanente (403/440/500) — o gateway já
+        // parou de tentar reconectar sozinho; a tela precisa deixar isso
+        // visível (não é só "desconectada", como uma queda de rede comum).
+        const needsAttention = gateway?.needsAttention || false;
+        const lastDisconnectReason = gateway?.lastDisconnectReason || null;
+        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {
@@ -354,6 +360,34 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ ok: true });
     } catch (err) {
       console.error('[instances] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /instances/:id/reconnect?owner=...
+  // Botão "Tentar reconectar" — só faz sentido quando needsAttention
+  // (GET /instances) está true (desconexão marcada como permanente, ver
+  // WhatsAppGateway connection.update). Usa getActiveGateway (nunca get(),
+  // que criaria uma sessão nova por engano se ela não estivesse em memória
+  // por algum motivo) — 404 se a sessão nem existe no processo ainda.
+  // HANDOFF Parte CQ.
+  // ---------------------------------------------------------------
+  router.post('/instances/:id/reconnect', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    const owner = req.query.owner;
+    try {
+      const inst = await instancesStore.get(req.params.id);
+      if (!inst || inst.ownerId !== owner) {
+        return res.status(404).json({ error: 'instância não encontrada' });
+      }
+      const gateway = sessions.getActiveGateway(req.params.id);
+      if (!gateway) {
+        return res.status(404).json({ error: 'sessão não está ativa neste processo' });
+      }
+      await gateway.retryManually();
+      res.json({ ok: true, status: gateway.getStatus() });
+    } catch (err) {
+      console.error('[instances] falha ao reconectar manualmente:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

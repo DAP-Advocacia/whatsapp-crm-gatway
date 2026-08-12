@@ -39,6 +39,28 @@ class WhatsAppGateway extends EventEmitter {
     // true quando o WhatsApp encerrou a sessão pelo celular (loggedOut) — nesse
     // estado a sessão fica "morta" pra sempre até alguém chamar requestFreshQr().
     this.loggedOut = false;
+    // true quando o WhatsApp recusou a conexão de forma que PARECE permanente
+    // (403 forbidden, 440 connectionReplaced — outro dispositivo assumiu) mas
+    // sem certeza absoluta de ser definitivo como loggedOut, então NÃO apaga
+    // as credenciais sozinho (diferente de loggedOut) — só para de tentar
+    // reconectar automaticamente e fica visível pro usuário decidir (ver
+    // GET /instances, campo needsAttention). HANDOFF Parte CQ: até aqui,
+    // qualquer código que não fosse loggedOut tentava de novo a cada 3s pra
+    // sempre — 2 sessões banidas ficaram presas em loop (150 tentativas em 7
+    // minutos), sobrecarregando o processo até o Swarm matá-lo (ExitCode
+    // 137), o que derrubava TODAS as instâncias do servidor junto, mesmo as
+    // saudáveis. Repetir reconexão numa conta já restrita também prolonga o
+    // próprio bloqueio do lado do WhatsApp (cada tentativa reseta o timer de
+    // cooldown) — parar de insistir sozinho é proteção pro usuário, não só
+    // pro servidor.
+    this.needsAttention = false;
+    this.lastDisconnectReason = null;
+    // Contagem de falhas consecutivas (zera ao conectar com sucesso) — usado
+    // pro backoff crescente abaixo, segunda camada de proteção contra loop:
+    // mesmo um código "temporário" que eu não tenha previsto como permanente
+    // (ex: 408/503 batendo repetido) não fica preso em retry fixo de 3s pra
+    // sempre, o intervalo cresce até um teto.
+    this.consecutiveFailures = 0;
     // Contatos "vistos" via eventos do Baileys (contacts.upsert/update) —
     // Baileys não expõe uma chamada de "contar contatos" nem um snapshot
     // completo da agenda (só incrementos), então isto é um acumulado em
@@ -118,6 +140,8 @@ class WhatsAppGateway extends EventEmitter {
         this.status = 'online';
         this.lastQrDataUrl = null;
         this.loggedOut = false;
+        this.needsAttention = false; // reconectou de verdade -> não é mais um caso "parado"
+        this.consecutiveFailures = 0; // zera o backoff, a próxima queda começa do intervalo mínimo de novo
         this.emit('status', this.status);
         console.log('[whatsapp] conectado com sucesso');
       }
@@ -128,23 +152,58 @@ class WhatsAppGateway extends EventEmitter {
 
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
+        // Códigos que o WhatsApp usa pra recusar de forma que NÃO é queda de
+        // rede — insistir reconectando não resolve, só desperdiça e (pior)
+        // prolonga o próprio bloqueio do lado do WhatsApp (ver comentário no
+        // construtor). forbidden (403): conta restrita/banida ou credencial
+        // rejeitada. connectionReplaced (440): outro dispositivo assumiu essa
+        // sessão — reconectar aqui brigaria com o outro dispositivo pra
+        // sempre. badSession (500): credenciais corrompidas, só resolve com
+        // pareamento novo.
+        const PERMANENT_CODES = new Set([
+          DisconnectReason.forbidden,
+          DisconnectReason.connectionReplaced,
+          DisconnectReason.badSession,
+        ]);
+        const isPermanent = PERMANENT_CODES.has(statusCode);
         const sessionLabel = path.basename(this.authFolder);
         const reason = DisconnectReason[statusCode] || 'desconhecido';
 
         console.warn(
-          `[whatsapp:${sessionLabel}] conexão encerrada. statusCode=${statusCode} (${reason}) loggedOut=${loggedOut}`
+          `[whatsapp:${sessionLabel}] conexão encerrada. statusCode=${statusCode} (${reason}) loggedOut=${loggedOut} isPermanent=${isPermanent}`
         );
 
-        if (!loggedOut) {
-          // queda de conexão (rede, etc) -> tenta reconectar usando a sessão salva
-          setTimeout(() => this.start(), 3000);
-        } else {
+        if (loggedOut) {
           // usuário deslogou pelo celular -> as credenciais salvas não servem mais
           // pra reconectar (o WhatsApp já encerrou essa sessão do lado dele).
           // Fica marcado aqui; requestFreshQr() é quem de fato gera um QR novo,
           // chamado a cada acesso à sessão (ver SessionManager.get()).
           this.loggedOut = true;
           console.warn('[whatsapp] sessão encerrada pelo usuário. Aguardando novo login via /qr.');
+        } else if (isPermanent) {
+          // NÃO apaga credenciais sozinho (diferente de loggedOut acima) —
+          // sem certeza se é definitivo, e apagar seria destrutivo demais pra
+          // uma decisão automática. Só para de insistir e marca visível pro
+          // usuário (ver GET /instances, needsAttention) — precisa de ação
+          // manual: reconectar de novo (botão) ou remover a instância.
+          this.needsAttention = true;
+          this.lastDisconnectReason = reason;
+          console.error(
+            `[whatsapp:${sessionLabel}] desconexão PERMANENTE (${reason}) — parando de reconectar sozinho, precisa de ação manual.`
+          );
+        } else {
+          // queda de conexão temporária (rede, timeout, etc) -> tenta
+          // reconectar usando a sessão salva. Backoff crescente (não fixo em
+          // 3s) — proteção contra qualquer código que eu não tenha previsto
+          // como permanente também virar loop: 3s, 6s, 12s... até um teto de
+          // 5min. Zera ao conectar com sucesso (ver connection === 'open'
+          // acima), então uma queda isolada continua reconectando rápido.
+          this.consecutiveFailures++;
+          const backoffMs = Math.min(3000 * 2 ** (this.consecutiveFailures - 1), 5 * 60 * 1000);
+          if (this.consecutiveFailures > 1) {
+            console.warn(`[whatsapp:${sessionLabel}] tentativa ${this.consecutiveFailures}, próxima em ${Math.round(backoffMs / 1000)}s`);
+          }
+          setTimeout(() => this.start(), backoffMs);
         }
       }
     });
@@ -272,6 +331,24 @@ class WhatsAppGateway extends EventEmitter {
     if (fs.existsSync(this.authFolder)) {
       fs.rmSync(this.authFolder, { recursive: true, force: true });
     }
+    await this.start();
+  }
+
+  /**
+   * Decisão EXPLÍCITA do usuário (botão "Tentar reconectar" na tela de
+   * Instâncias) de tentar de novo depois de uma desconexão marcada como
+   * `needsAttention` (403/440/500 — ver connection.update). Diferente de
+   * `requestFreshQr`: NÃO apaga as credenciais, tenta reconectar com o que
+   * já está salvo (se o motivo real era temporário — ex: restrição de 48-72h
+   * do WhatsApp que já passou — volta a funcionar sem precisar escanear QR
+   * de novo). Se a sessão não estiver em `needsAttention`, não faz nada
+   * (evita reiniciar uma sessão já saudável por engano). HANDOFF Parte CQ.
+   */
+  async retryManually() {
+    if (!this.needsAttention) return;
+    this.needsAttention = false;
+    this.lastDisconnectReason = null;
+    this.consecutiveFailures = 0;
     await this.start();
   }
 
