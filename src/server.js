@@ -253,6 +253,17 @@ app.post('/settings.html', (req, res) => {
 // ---------------------------------------------------------------
 const subscribers = new Map(); // "sessionId::phone" (ou "sessionId::*") -> Set<ws>
 
+// Dedupe em memória do sync automático de contatos (ver onMessage abaixo) —
+// evita chamar upsertContact (1 query) de novo pro MESMO (sessionId, phone)
+// repetidas vezes dentro da mesma "rajada" de histórico: com
+// shouldSyncHistoryMessage aceitando syncType FULL (HANDOFF Parte CP), um
+// backfill inicial pode trazer centenas/milhares de mensagens do mesmo
+// contato de uma vez, e upsertContact já é idempotente (coalesce), então
+// repetir a query não causaria dado errado — só query redundante à toa.
+// Zera a cada restart do processo (não é dado persistido, é só otimização;
+// o próximo backfill/mensagem real corrige de novo sem problema).
+const contactSyncedThisRun = new Set(); // "sessionId::phone"
+
 // phone omitido = inscrição "toda a sessão" (usada pelo inbox do Chat, que
 // precisa saber de mensagens novas em qualquer conversa pra atualizar a
 // lista, não só a conversa aberta no momento).
@@ -299,29 +310,45 @@ const sessions = new SessionManager({
       const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName);
       if (!isNew) return; // já tínhamos essa mensagem (ex: eco da que nós mesmos enviamos)
 
-      // Mensagem de histórico (backfill via messaging-history.set, ver
-      // src/whatsapp.js) só precisa ser SALVA — ela já aconteceu há tempo,
-      // então não é uma "mensagem nova" de verdade. Sem este corte, um
-      // import de histórico (centenas/milhares de mensagens de uma vez)
-      // dispara broadcast em tempo real (parece mensagem chegando agora na
-      // tela de quem estiver com o Chat aberto), loga na timeline do
-      // Bitrix retroativamente e cria uma notificação por mensagem — já
-      // aconteceu isso na prática: uma instância só gerou 2325 notificações
-      // falsas num import de histórico antes desta correção.
-      if (isHistory) return;
-
       // Sincroniza automaticamente com a tela de Contatos (ver
-      // src/contacts.js, HANDOFF Parte CO) — antes só existia o botão
-      // manual "Importar de conversas"; agora toda mensagem NOVA de
-      // verdade (não histórico) já garante que o telefone existe como
-      // contato do dono, sem precisar de ação manual. upsertContact já é
-      // seguro chamar de novo pra cada mensagem da mesma conversa (não
-      // sobrescreve nome já salvo com vazio, ver coalesce lá). Best-effort:
+      // src/contacts.js, HANDOFF Parte CO/CP) — antes só existia o botão
+      // manual "Importar de conversas"; agora toda mensagem de verdade
+      // (nova OU de histórico — INCLUSIVE histórico, diferente de
+      // broadcast/timeline/notificação abaixo) já garante que o telefone
+      // existe como contato do dono, sem precisar de ação manual. Ao
+      // conectar uma instância nova, o backfill de histórico (agora
+      // completo, ver shouldSyncHistoryMessage em src/whatsapp.js) é
+      // justamente o que dá "histórico + contato já prontos, mesmo na
+      // 1ª conexão" — cortar isto pra histórico (como era antes)
+      // significava nunca sincronizar contato de conversa antiga nenhuma.
+      // upsertContact já é seguro chamar de novo pra cada mensagem da mesma
+      // conversa (não sobrescreve nome já salvo com vazio, ver coalesce
+      // lá) — o dedupe em memória abaixo só evita volume de query à toa
+      // num backfill grande, não é necessário pra correção. Best-effort:
       // uma falha aqui nunca deve impedir salvar/notificar a mensagem em
       // si — é um efeito colateral, não o caminho principal.
-      instancesStore.ownerOf(sessionId)
-        .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name: pushName, dealId }))
-        .catch((err) => console.error('[contacts] falha ao sincronizar contato automaticamente:', err.message));
+      const contactSyncKey = `${sessionId}::${phone}`;
+      if (!contactSyncedThisRun.has(contactSyncKey)) {
+        contactSyncedThisRun.add(contactSyncKey);
+        instancesStore.ownerOf(sessionId)
+          .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name: pushName, dealId }))
+          .catch((err) => {
+            contactSyncedThisRun.delete(contactSyncKey); // falhou -> tenta de novo na próxima mensagem
+            console.error('[contacts] falha ao sincronizar contato automaticamente:', err.message);
+          });
+      }
+
+      // Mensagem de histórico (backfill via messaging-history.set, ver
+      // src/whatsapp.js) só precisa ser SALVA (e o contato sincronizado,
+      // acima) — ela já aconteceu há tempo, então não é uma "mensagem
+      // nova" de verdade. Sem este corte, um import de histórico
+      // (centenas/milhares de mensagens de uma vez) dispara broadcast em
+      // tempo real (parece mensagem chegando agora na tela de quem estiver
+      // com o Chat aberto), loga na timeline do Bitrix retroativamente e
+      // cria uma notificação por mensagem — já aconteceu isso na prática:
+      // uma instância só gerou 2325 notificações falsas num import de
+      // histórico antes desta correção.
+      if (isHistory) return;
 
       broadcast(sessionId, phone, { type: 'message', message });
 

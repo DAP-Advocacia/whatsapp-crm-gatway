@@ -1641,6 +1641,54 @@ function createWhatsappRouter({ sessions, broadcast }) {
     }
   });
 
+  // ---------------------------------------------------------------
+  // GET /admin/diagnostics/sessions
+  // Diagnóstico TEMPORÁRIO (HANDOFF Parte CP) — lista as sessões já em
+  // memória no processo (sem criar nenhuma), pra saber quais estão online
+  // agora e por isso capazes de resolver LID->telefone de verdade. Só
+  // leitura. Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/diagnostics/sessions', requireSuperAdmin, (req, res) => {
+    res.json({ sessions: sessions.listActive() });
+  });
+
+  // ---------------------------------------------------------------
+  // POST /admin/diagnostics/resolve-lid
+  // Diagnóstico TEMPORÁRIO (HANDOFF Parte CP) — recebe { sessionId,
+  // lidNumbers: [...] } e tenta resolver cada um pro telefone real via o
+  // socket JÁ CONECTADO daquela sessão (signalRepository.lidMapping,
+  // mesmo mecanismo de _resolveLidPhone). SÓ LEITURA — não altera nenhuma
+  // linha do banco, não abre conexão nova, não envia nada pro WhatsApp.
+  // Usa sessions.listActive() (não sessions.get()) de propósito: nunca
+  // cria/inicia uma sessão só de tentar diagnosticar. 400 se a sessão não
+  // estiver online agora (não tem como resolver sem um socket real).
+  // Restrito a super admin. Remover esta rota depois que a investigação
+  // das conversas antigas (HANDOFF Parte CP) for concluída.
+  // ---------------------------------------------------------------
+  router.post('/admin/diagnostics/resolve-lid', requireSuperAdmin, async (req, res) => {
+    const { sessionId, lidNumbers } = req.body || {};
+    if (!sessionId || !Array.isArray(lidNumbers) || !lidNumbers.length) {
+      return res.status(400).json({ error: 'sessionId e lidNumbers (array) são obrigatórios' });
+    }
+    if (lidNumbers.length > 500) {
+      return res.status(400).json({ error: 'máximo 500 números por chamada' });
+    }
+    const active = sessions.listActive().find((s) => s.sessionId === sessionId);
+    if (!active || active.status !== 'online') {
+      return res.status(400).json({ error: `sessão "${sessionId}" não está online agora (status: ${active?.status || 'não encontrada em memória'})` });
+    }
+    const gateway = sessions.getActiveGateway(sessionId);
+    const results = {};
+    for (const lidNumber of lidNumbers) {
+      try {
+        results[lidNumber] = await gateway.resolveLidToPhone(String(lidNumber));
+      } catch (err) {
+        results[lidNumber] = null;
+      }
+    }
+    res.json({ sessionId, results });
+  });
+
   return router;
 }
 

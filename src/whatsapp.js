@@ -87,6 +87,18 @@ class WhatsAppGateway extends EventEmitter {
       // QR só é necessário até o primeiro pareamento; depois disso a sessão fica
       // salva em `authFolder` e o login persiste entre reinícios do processo.
       printQRInTerminal: false,
+      // syncFullHistory já é o default (true) — só PEDE o histórico completo
+      // ao celular. Quem de fato decide o que chega no evento
+      // messaging-history.set é shouldSyncHistoryMessage, cujo default da
+      // lib descarta silenciosamente o syncType FULL (histórico profundo,
+      // enviado uma vez no pareamento) — sobrava só RECENT/INITIAL_BOOTSTRAP
+      // (janela curta e recente), nunca o histórico de verdade. Sem
+      // sobrescrever isto, "histórico completo" nunca chegava de fato, só
+      // parecia (o comentário antigo no evento abaixo estava errado nesse
+      // ponto). Aceita todos os syncType — o dedupe por
+      // (conversation_id, wa_message_id) em store.addMessage já cobre
+      // qualquer mensagem que chegue mais de uma vez por sync duplicado.
+      shouldSyncHistoryMessage: () => true,
     });
 
     this.sock.ev.on('creds.update', saveCreds);
@@ -147,9 +159,13 @@ class WhatsAppGateway extends EventEmitter {
     });
 
     // Histórico de conversas que o próprio WhatsApp manda pro dispositivo —
-    // Baileys já pede isso em toda conexão (syncFullHistory: true é o
-    // default, nunca sobrescrito aqui) e entrega tudo já decodificado neste
-    // evento, mas até agora nada escutava e o histórico era descartado.
+    // com shouldSyncHistoryMessage sobrescrito acima (aceita todo syncType,
+    // incluindo FULL), chega aqui o histórico de verdade, não só uma janela
+    // curta recente. Isso significa: ao conectar uma instância NOVA (1º
+    // pareamento), pode chegar de uma vez um volume grande de mensagens
+    // antigas (semanas/meses) — normal, não é bug; o log abaixo mostra
+    // quantas foram processadas por chamada, várias chamadas podem
+    // acontecer em sequência até isLatest=true.
     // Reusa o mesmo `_processIncomingMessage` do caminho de mensagem nova
     // (mesmos filtros de status/grupo/newsletter/reação, mesma resolução de
     // telefone) — o dedupe por (conversation_id, wa_message_id) em
@@ -189,6 +205,10 @@ class WhatsAppGateway extends EventEmitter {
         const phoneSource =
           u.key.participantAlt || u.key.remoteJidAlt || u.key.participant || u.key.remoteJid;
         const phone = await this._resolveLidPhone(phoneSource);
+        // Sem telefone resolvido, não dá pra saber qual conversa atualizar
+        // (updateMessageStatus não teria com o que casar) — pula em vez de
+        // emitir com `phone: null` (ver _resolveLidPhone).
+        if (!phone) continue;
         this.emit('messageStatus', { phone, messageId: u.key.id, status });
       }
     });
@@ -484,18 +504,43 @@ class WhatsAppGateway extends EventEmitter {
   // Resolve um JID "<id>@lid" (sistema novo de identificador do WhatsApp,
   // usado quando não há participantAlt/remoteJidAlt disponível — ver
   // messages.update acima) pro telefone de verdade, via o mapeamento
-  // LID<->PN que o próprio Baileys mantém internamente. Best-effort: se a
-  // sessão não tiver esse contato mapeado ainda, cai de volta pro id cru
-  // (mesmo comportamento de antes) em vez de travar o processamento.
+  // LID<->PN que o próprio Baileys mantém internamente.
+  //
+  // Devolve `null` (não o id cru do LID) quando não consegue resolver —
+  // até 2026-08-12 caía de volta pro id cru (`_jidToPhone(jid)`), que faz
+  // sentido pra um "telefone temporariamente ilegível" só enquanto isso
+  // vira uma linha isolada de mensagem estranha, mas viesse a ser tratado
+  // como telefone de verdade (salvo em `messages.phone`, ou upsertado como
+  // CONTATO desde o sync automático — HANDOFF Parte CO) e o resultado é um
+  // "contato" com um ID interno de 12-15 dígitos no lugar do telefone —
+  // exatamente o que apareceu na tela de Contatos como várias linhas "sem
+  // nome" com números sem relação nenhuma com WhatsApp de verdade. Quem
+  // chama esta função precisa tratar `null` explicitamente (descartar a
+  // mensagem/pular o upsert), nunca assumir que sempre vem uma string.
   async _resolveLidPhone(jid) {
-    if (!jid || !jid.endsWith('@lid')) return this._jidToPhone(jid);
+    if (!jid) return null;
+    if (!jid.endsWith('@lid')) return this._jidToPhone(jid) || null;
     try {
       const pn = await this.sock.signalRepository.lidMapping.getPNForLID(jid);
-      if (pn) return this._jidToPhone(pn);
+      if (pn) return this._jidToPhone(pn) || null;
     } catch (err) {
       console.error('[whatsapp] falha ao resolver LID->telefone:', err.message);
     }
-    return this._jidToPhone(jid);
+    // Ainda não temos o mapeamento LID->telefone pra este contato — melhor
+    // não processar agora (a próxima mensagem tenta de novo) do que salvar
+    // com um telefone errado que nunca mais seria corrigido sozinho.
+    return null;
+  }
+
+  // Wrapper PÚBLICO de _resolveLidPhone pensado pro diagnóstico de conversas
+  // antigas com telefone LID cru salvo (HANDOFF Parte CP) — recebe só o
+  // NÚMERO do LID (sem "@lid", que é como ficou salvo em conversations.phone
+  // desde antes da correção), reconstrói o JID e tenta resolver. Só leitura,
+  // não muda nada no socket/sessão. `null` = não foi possível resolver ainda
+  // (mesma semântica de _resolveLidPhone).
+  async resolveLidToPhone(lidNumber) {
+    if (!this.sock || this.status !== 'online') return null;
+    return this._resolveLidPhone(`${lidNumber}@lid`);
   }
 
   // Normaliza UMA mensagem crua do Baileys pro formato que o resto da
@@ -568,8 +613,23 @@ class WhatsAppGateway extends EventEmitter {
     // key.senderPn/participantPn documentados não existem nesta versão.
     // Mensagem de grupo já foi descartada acima, então participant* aqui
     // só apareceria num caso estranho (não deveria acontecer na prática).
+    // Mas esse caso "estranho" acontece na prática com frequência (LID sem
+    // alt disponível ainda) — por isso passa por _resolveLidPhone (mesmo
+    // helper já usado em messages.update acima), que tenta o mapeamento
+    // LID->telefone real via o próprio Baileys antes de aceitar o id cru.
+    // Sem isso, um contato com LID ainda não mapeado virava uma "mensagem"
+    // salva com o ID interno do WhatsApp no lugar do telefone (12-15
+    // dígitos, sem relação com o número de verdade) — e, desde o sync
+    // automático de contatos (HANDOFF Parte CO), isso passou a criar um
+    // contato fantasma "sem nome" também, não só uma mensagem estranha.
     const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
-    const phone = this._jidToPhone(phoneSource);
+    const phone = await this._resolveLidPhone(phoneSource);
+    // Sem telefone resolvido, não tem conversa/contato pra associar — mesma
+    // decisão de grupo/status/newsletter acima: descarta em vez de salvar
+    // com um id interno no lugar do telefone (ver _resolveLidPhone). A
+    // mensagem original continua no WhatsApp; se o mapeamento LID->telefone
+    // resolver depois, a PRÓXIMA mensagem dessa conversa já vem certa.
+    if (!phone) return null;
 
     const media = this._extractMediaInfo(m.message);
     const text = media ? media.caption : this._extractText(m.message);

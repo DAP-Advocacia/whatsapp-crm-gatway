@@ -109,6 +109,33 @@ class SessionManager {
       }
     }
   }
+
+  /**
+   * Lista as sessões que JÁ estão em memória (conectadas ou não), sem criar
+   * nenhuma sessão nova — diferente de `get()`, que cria+inicia se ainda não
+   * existir. Usado por diagnósticos que precisam de um socket Baileys
+   * REALMENTE conectado (ex: resolver LID->telefone via
+   * signalRepository.lidMapping) sem o risco de iniciar uma conexão nova só
+   * de tentar ler o estado (HANDOFF Parte CP — investigação das conversas
+   * antigas com telefone LID cru).
+   */
+  listActive() {
+    return Array.from(this.sessions.entries()).map(([id, gateway]) => ({
+      sessionId: id,
+      status: gateway.getStatus(),
+      hasSock: !!gateway.sock,
+    }));
+  }
+
+  /**
+   * Devolve o gateway já em memória (SEM criar/iniciar nada) — companheiro
+   * de `listActive()` pra quando o diagnóstico já confirmou que a sessão
+   * está online e precisa do objeto de verdade (ex: chamar
+   * `resolveLidToPhone`). `undefined` se não estiver em memória.
+   */
+  getActiveGateway(sessionId) {
+    return this.sessions.get(sanitize(sessionId));
+  }
 }
 
 module.exports = { SessionManager, sanitize };
