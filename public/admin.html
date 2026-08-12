@@ -124,13 +124,18 @@
     font-family: 'Inter', -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+  /* 1180px (não 960px) — mesma largura já usada em telas com listas/tabelas
+     densas (campaign-schedule.html, notifications.html); a tabela de
+     Usuários tem 7 colunas de dados reais, 960px deixava tudo comprimido
+     e "flutuando" centralizado demais na tela (usuário reportou com print,
+     2026-08-12). */
   #app{
-    max-width: 960px;
-    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 960px) / 2));
+    max-width: 1180px;
+    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 1180px) / 2));
     padding: 28px 20px 70px;
     transition: margin-left .2s ease;
   }
-  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 960px) / 2)); }
+  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 1180px) / 2)); }
 
   /* ======================================================
      Sidebar de navegação (retrátil) + notificações/toast
@@ -296,6 +301,20 @@
   .admin-table td{ padding:11px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
   .admin-table tr:last-child td{ border-bottom:none; }
   .admin-table tr:hover td{ background: var(--surface-2); }
+  /* Larguras proporcionais explícitas — sem isto, com o #app mais largo
+     (1180px, ver acima), o navegador jogava o espaço extra quase todo pra
+     coluna de ações (badges/tempo/texto curto do meio ficavam "flutuando"
+     com folga enorme, ações ficavam longe do conteúdo) — usuário reportou
+     com print (2026-08-12). Percentuais somam 100%; "Usuário" e "Conta"
+     (nome+cargo, e-mail) recebem mais espaço por serem o conteúdo mais
+     longo, "Online"/ações ficam com o mínimo confortável. */
+  .admin-table th:nth-child(1), .admin-table td:nth-child(1){ width:24%; }
+  .admin-table th:nth-child(2), .admin-table td:nth-child(2){ width:22%; }
+  .admin-table th:nth-child(3), .admin-table td:nth-child(3){ width:9%; }
+  .admin-table th:nth-child(4), .admin-table td:nth-child(4){ width:13%; }
+  .admin-table th:nth-child(5), .admin-table td:nth-child(5){ width:12%; }
+  .admin-table th:nth-child(6), .admin-table td:nth-child(6){ width:12%; }
+  .admin-table th:nth-child(7), .admin-table td:nth-child(7){ width:8%; }
 
   .person-cell{ display:flex; align-items:center; gap:10px; }
   .avatar-thumb{

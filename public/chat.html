@@ -386,6 +386,15 @@
   }
   .archive-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
   .archive-filter button:not(.active):hover{ color: var(--gold); }
+  /* Mesmo visual do pill de dentro de .archive-filter, mas como botão solo
+     (não faz parte do grupo mutuamente exclusivo Ativas/Arquivadas). */
+  .archive-filter-standalone{
+    display: inline-flex; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; padding: 5px 11px; font-size: 11.5px; color: var(--text-muted);
+    cursor: pointer; align-self: flex-start;
+  }
+  .archive-filter-standalone.active{ background: var(--gold); color: #1a1408; font-weight: 600; border-color: var(--gold); }
+  .archive-filter-standalone:not(.active):hover{ color: var(--gold); }
 
   /* ---------- Modais (novo grupo) ---------- */
   .overlay{
@@ -1014,6 +1023,10 @@
           <button type="button" data-archived="false" class="active">Ativas</button>
           <button type="button" data-archived="true">Arquivadas</button>
         </div>
+        <!-- Independente de Ativas/Arquivadas (mesma barra visual, mas não faz
+             parte do grupo mutuamente exclusivo acima — combina com qualquer
+             um dos dois, ver pendingFilterBtn.addEventListener abaixo). -->
+        <button type="button" id="pendingFilterBtn" class="archive-filter-standalone" title="Mostrar só conversas com mensagem não lida">Pendentes</button>
         <span class="conv-pane-head-actions">
           <button class="icon-btn" id="viewGroupsBtn" title="Grupos do WhatsApp" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
@@ -1760,6 +1773,7 @@
   const convSearch = document.getElementById('convSearch');
   const tagFilterSelect = document.getElementById('tagFilterSelect');
   const assigneeFilterEl = document.getElementById('assigneeFilter');
+  const pendingFilterBtn = document.getElementById('pendingFilterBtn');
   const convList = document.getElementById('convList');
   const convView = document.getElementById('convView');
   const contactPanel = document.getElementById('contactPanel');
@@ -1772,6 +1786,7 @@
     tags: [],
     tagFilter: '',
     assigneeFilter: '', // '' = todos; caso contrário, ownerId de quem está atendendo
+    pendingFilter: false, // true = só conversas com unreadCount > 0 — independente de Ativas/Arquivadas
     search: '',
     archivedView: false, // false = "Ativas", true = "Arquivadas"
     active: null,       // { sessionId, phone, contactName, dealId, tags }
@@ -2004,6 +2019,15 @@
     appEl.classList.remove('chat-open');
     renderEmptyView();
     loadConversations();
+  });
+
+  // Independente do listener acima (não reseta state.active/recarrega do
+  // servidor) — filtra sobre o que já está carregado, mesmo padrão de
+  // passesAssigneeFilter/passesTagFilter (client-side, sem round-trip).
+  pendingFilterBtn.addEventListener('click', () => {
+    state.pendingFilter = !state.pendingFilter;
+    pendingFilterBtn.classList.toggle('active', state.pendingFilter);
+    renderConvList();
   });
 
   async function setConversationArchived(sessionId, phone, archived) {
@@ -2272,6 +2296,16 @@
     return conv.assignedTo === state.assigneeFilter;
   }
 
+  // Filtro independente (não faz parte do grupo mutuamente exclusivo
+  // Ativas/Arquivadas, ver pendingFilterBtn abaixo) — usa o MESMO
+  // unreadCount que decide a tag "Pendente" na lista (ver conv-item-pending,
+  // HANDOFF Parte CV), então "ligado" mostra exatamente as conversas com a
+  // tag visível, nunca uma contagem diferente por acaso.
+  function passesPendingFilter(conv) {
+    if (!state.pendingFilter) return true;
+    return (conv.unreadCount || 0) > 0;
+  }
+
   // Reconstrói os botões do filtro de atendente a partir de quem já está
   // atendendo alguma conversa da lista atual (não é uma lista fixa de
   // usuários — só aparece quem tem pelo menos 1 conversa atribuída).
@@ -2307,7 +2341,7 @@
   }
 
   function renderConvList() {
-    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c));
+    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c));
     if (!list.length) {
       convList.innerHTML = `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
       return;

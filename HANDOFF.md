@@ -6483,3 +6483,51 @@ depois deste deploy pra confirmar que a lógica em si funciona (era
 esperado que funcionasse, testado isolado com 7 casos, mas nunca
 validado ao vivo por causa do cache mascarando o resultado real).
 
+### Parte CX — Filtro "Pendentes" no Chat + layout do Admin (960px→1180px, colunas da tabela de Usuários) (2026-08-12)
+
+**Filtro "Pendentes"** (`public/chat.html`): usuário pediu um filtro
+igual ao de atendente, mas pra ver só conversas com mensagem não lida.
+Investigação prévia (pediu confirmação via `AskUserQuestion`) revelou 2
+padrões visuais distintos hoje — pills mutuamente exclusivos
+(Ativas/Arquivadas) vs. bolinhas de avatar clicáveis (atendente, cada
+uma um filtro independente combinável). Usuário confirmou: visualmente
+um 3º botão do LADO de Ativas/Arquivadas (mesma barra), mas
+FUNCIONALMENTE independente (não mutuamente exclusivo com eles —
+combina com qualquer um, ex: "Ativas E pendentes" ou "Arquivadas E
+pendentes"). `#pendingFilterBtn`, classe `.archive-filter-standalone`
+(mesmo visual do pill, mas fora do grupo que zera `.active` dos
+outros). `passesPendingFilter(conv)` — reusa o MESMO `conv.unreadCount`
+que decide a tag "Pendente" na lista (Parte CV/CW) — "ligado" mostra
+exatamente as conversas com a tag visível, nunca uma contagem
+diferente por acaso. Plugado em `renderConvList()` junto de
+`passesTagFilter`/`passesAssigneeFilter` (AND lógico entre os três).
+Testado isolado (5 casos: desligado sempre passa, ligado com
+unreadCount>0 passa, ligado com 0 não passa, `undefined` tratado como
+0, combinação com outro filtro simultâneo) — todos corretos.
+
+**Layout do Admin** (`public/admin.html`): usuário reportou "muito
+centralizado" + tabela de Usuários "fora do padrão" (com prints).
+Investigação: levantado o `max-width` de `#app` em TODAS as 12 telas
+com esse padrão (`grep` sistemático, não suposição) — variam de 720px
+(`faq.html`/`settings.html`) a 1180px (`campaign-schedule.html`/
+`notifications.html`); `admin.html` estava em 960px, próximo do valor
+usado por telas SIMPLES (`sites.html` 980px, `instances.html` 900px),
+não das telas com listas/tabelas DENSAS. Como a tabela de Usuários tem
+7 colunas de dados reais (mais densa que a maioria), ajustado pra
+**1180px** — mesmo valor máximo já em uso em outras telas densas, não
+um número novo inventado (fórmula de `margin-left` também ajustada, o
+número tem que bater dos dois lados ou a centralização quebra).
+
+Segundo problema real, mesma causa raiz do "fora do padrão": nenhuma
+coluna do `.admin-table` tinha `width` explícito — com o `#app` mais
+largo, o navegador jogava o espaço extra de forma desequilibrada (a
+última coluna, ações, ficava com folga enorme, o resto comprimido).
+Adicionado `width` percentual explícito por coluna (`nth-child`),
+somando 100%: "Usuário"/"Conta" (nome+cargo, e-mail — conteúdo mais
+longo) recebem mais espaço, "Online"/ações ficam com o mínimo
+confortável.
+
+**Validação**: `vm.Script` no bloco de script principal de ambos os
+arquivos (`chat.html`: 2425 linhas; `admin.html`: 458 linhas) — sem
+erro de sintaxe.
+
