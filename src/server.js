@@ -66,7 +66,17 @@ app.use(
   })
 );
 
-app.use(express.static('public'));
+// `no-cache` (não `no-store`): o navegador ainda pode GUARDAR o arquivo, mas é
+// OBRIGADO a revalidar com o servidor (If-Modified-Since/ETag, automático via
+// express.static) antes de usar a cópia local — na prática, sempre pega a
+// versão nova depois de um deploy, sem precisar de hard refresh manual. Sem
+// isto (comportamento padrão do navegador sem header explícito), correções de
+// frontend ficavam "presas" no cache até o usuário limpar/forçar reload —
+// usuário reportou a tag "Pendente" (Parte CV) só atualizando depois de trocar
+// de filtro/aba, mesmo com o deploy já confirmado no servidor (HANDOFF Parte
+// CV/CW). Aplica pra TODOS os estáticos (html/js/css em public/), não só
+// chat.html — mesma causa afetaria qualquer arquivo dali.
+app.use(express.static('public', { setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 // Imagem/áudio/vídeo ficam no Supabase Storage (ver src/media.js) — não
 // precisa de rota estática local pra mídia.
 

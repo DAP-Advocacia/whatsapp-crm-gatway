@@ -6438,3 +6438,48 @@ mensagens seguidas (acumula 1→2→3, não trava em 1), conversa nova
 ainda não na lista (não quebra, `bumpConversation` dispara o reload
 completo que já existia) — todos corretos.
 
+### Parte CW — Causa raiz real por trás da Parte CV: cache do navegador, não a lógica (2026-08-12)
+
+Usuário testou a correção da Parte CV em produção e reportou o MESMO
+sintoma — tag "Pendente" só aparecia depois de aplicar/remover um
+filtro de atendente (não mais "trocar de aba", mas mesma classe de
+problema: só atualiza numa ação que força reload/remontagem).
+
+**Causa raiz real**: `app.use(express.static('public'))`
+(`src/server.js`) nunca definiu `Cache-Control` — o navegador usa o
+comportamento PADRÃO dele (geralmente cache agressivo pra estático sem
+header explícito), então o `chat.html` com a correção da Parte CV
+publicado no servidor podia nunca chegar a ser buscado de novo pelo
+navegador do usuário, mesmo com o deploy do servidor 100% confirmado
+(mesmo problema que já causou um alarme falso nesta sessão — deploy
+correto no SERVIDOR não é o mesmo que o CLIENTE já estar rodando o
+código novo, pra estático servido direto sem versionamento de nome de
+arquivo/query string). Confirmado que não era bug de lógica antes de
+mudar qualquer coisa: pedido pro usuário fazer hard refresh (Ctrl+Shift+R)
+como teste rápido de diagnóstico.
+
+**Correção**: `express.static('public', { setHeaders: (res) =>
+res.set('Cache-Control', 'no-cache') })`. `no-cache` (não `no-store`)
+— o navegador ainda pode GUARDAR uma cópia local, mas é OBRIGADO a
+revalidar com o servidor antes de usar (`If-Modified-Since`/`ETag` via
+condicional HTTP, ambos já enviados por padrão pelo `express.static`
+sem precisar configurar nada a mais) — na prática, sempre pega a
+versão nova depois de um deploy (resposta `304 Not Modified` quando
+nada mudou, sem reenviar o arquivo — nenhuma penalidade de performance
+no caso comum), sem exigir hard refresh manual do usuário nunca mais.
+Aplica pra TODOS os estáticos em `public/` (qualquer `.html`/`.js`/
+`.css` servido direto), não só `chat.html` — a mesma causa afetaria
+qualquer arquivo dali igualmente, é fix estrutural, não pontual.
+
+**Validação**: `node -c` em `src/server.js`. Testado contra servidor
+local isolado (porta 3397, `AUTH_FOLDER` isolado) — `curl -I` confirmou
+`Cache-Control: no-cache` na resposta real, junto de `ETag`/
+`Last-Modified` já presentes por padrão.
+
+**Pendência real**: a correção da Parte CV (lógica de `unreadCount` em
+tempo real) segue não confirmada em produção pelo usuário — só o
+sintoma de cache foi isolado e corrigido aqui. Precisa de um novo teste
+depois deste deploy pra confirmar que a lógica em si funciona (era
+esperado que funcionasse, testado isolado com 7 casos, mas nunca
+validado ao vivo por causa do cache mascarando o resultado real).
+
