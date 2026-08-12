@@ -585,6 +585,19 @@ class WhatsAppGateway extends EventEmitter {
     // cliente nenhum, então descarta por completo também.
     if (isJidNewsletter(m.key.remoteJid)) return null;
 
+    // Mensagens de SISTEMA da própria Meta (avisos genéricos tipo "Conheça
+    // o WhatsApp Business"/"Salve notas privadas..." — mandadas uma vez a
+    // toda conta Business, sem remetente real). Não são conversa com
+    // ninguém: chegam com key.remoteJid vazio/inválido, então
+    // _resolveLidPhone (abaixo) nunca acha um telefone e o resultado virava
+    // uma "conversa" fantasma com phone="0" (HANDOFF Parte CP — achado ao
+    // investigar contatos fantasma de LID, causa raiz diferente daquela).
+    // wa_message_id é o MESMO em toda conta que recebe (não é gerado por
+    // instância) — filtro por id fixo é mais confiável que tentar inferir
+    // "remetente vazio" de outro jeito.
+    const SYSTEM_MESSAGE_IDS = new Set(['1484720636734891-1', '785376054348615-1']);
+    if (SYSTEM_MESSAGE_IDS.has(m.key.id)) return null;
+
     // Reação (emoji) a uma mensagem existente — não é uma mensagem nova,
     // é um "ponteiro" pra mensagem original (reactionMessage.key.id).
     // `text` vazio significa que a reação foi removida.

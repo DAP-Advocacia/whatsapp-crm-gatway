@@ -705,14 +705,20 @@ listas continuam aparecendo (ver `owner_id` em `db/schema.sql`). Modelos de mens
 continuam por instância (cada uma pode ter textos próprios).
 
 - **Sync automático**: toda mensagem recebida (qualquer instância, não só quando o
-  Chat está aberto) já cria/atualiza um contato sozinha — `src/server.js`, dentro do
-  mesmo callback `onMessage` do `SessionManager` que salva a mensagem e notifica
-  (§15), chama `upsertContact(ownerId, {phone, name, dealId})`. Usa o mesmo
+  Chat está aberto, e incluindo backfill de histórico ao conectar — ver §14) já
+  cria/atualiza um contato sozinha — `src/server.js`, dentro do mesmo callback
+  `onMessage` do `SessionManager` que salva a mensagem e notifica (§15), chama
+  `upsertContact(ownerId, {phone, name, dealId})`. Usa o mesmo
   `ON CONFLICT (owner_id, phone) DO UPDATE ... coalesce` de baixo — uma segunda
   mensagem do mesmo telefone nunca sobrescreve um nome/`dealId` já salvo com um
   valor vazio recebido depois. Best-effort (falha não interrompe o recebimento da
   mensagem). Antes disso, um contato só existia por criação manual ou pelos dois
-  botões de importação abaixo.
+  botões de importação abaixo. O telefone salvo depende de `_resolveLidPhone`
+  resolver corretamente o sistema LID do WhatsApp (ver §14, "conectar uma
+  instância") — nunca mais aceita o id interno cru como telefone (HANDOFF Parte
+  CP); se o WhatsApp ainda não tiver esse mapeamento, o contato simplesmente não
+  é sincronizado naquele momento (tenta de novo na próxima mensagem), em vez de
+  salvar um telefone errado.
 - **Contatos**: criar manualmente, editar, excluir, **"Importar de conversas"**
   (cria um contato pra cada conversa de **qualquer** instância deste dono que ainda
   não tenha virado contato, sem nome), ou **"Importar de arquivo (CSV)"** — lê um
@@ -998,6 +1004,18 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
 - **Renomear** e **Remover** — remover tenta deslogar de verdade do WhatsApp
   (`sock.logout()`, some da lista "Aparelhos conectados" no celular) além de apagar
   o registro e as credenciais locais.
+- **Conectar uma instância (1ª vez ou reconexão)**: o Baileys entrega sozinho,
+  via `messaging-history.set`, o histórico de conversas anterior à conexão —
+  `src/whatsapp.js` sobrescreve `shouldSyncHistoryMessage` pra aceitar TODO
+  `syncType` (incluindo `FULL`, o histórico profundo; o default da lib
+  descartava isso, só entregava uma janela curta recente). Reusa o mesmo
+  pipeline de `messages.upsert` (mesmos filtros, mesma resolução de
+  telefone), então o mesmo sync automático de contato (ver §11) já roda
+  pras mensagens de histórico também — conectar uma instância nova já traz
+  o histórico completo de conversas E os contatos correspondentes, sem
+  ação manual. Não é a agenda telefônica inteira (contato que nunca
+  trocou mensagem com aquele número) — o Baileys não expõe isso de forma
+  utilizável (ver HANDOFF Parte CP).
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
@@ -1310,6 +1328,8 @@ revelar que o recurso existe).
 | `admin/users/:ownerId/unblock` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Remove o bloqueio. |
 | `admin/presence` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS` (403 pra qualquer outro `ownerId`). `{ presence:[{ownerId, ownerName, lastPage, lastSeenAt}] }` — quem já mandou heartbeat alguma vez. |
 | `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds, dateRegister}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
+| `admin/diagnostics/sessions` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura. `{ sessions:[{sessionId, status, hasSock}] }` — sessões WhatsApp já em memória no processo (`SessionManager.listActive()`), SEM criar nenhuma sessão nova (diferente de acessar via `session=` em qualquer outra rota, que cria+inicia se ainda não existir). Usada pra saber quais instâncias têm um socket Baileys de verdade conectado agora — pré-requisito de `resolve-lid` abaixo. Ferramenta de diagnóstico permanente (HANDOFF Parte CP), não removida depois de usada. |
+| `admin/diagnostics/resolve-lid` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura (não altera nenhuma linha do banco, não envia nada pro WhatsApp). Body `{ sessionId, lidNumbers:[...] }` (máx. 500). Tenta resolver cada número do sistema LID do WhatsApp pro telefone real, via o socket JÁ CONECTADO daquela sessão (`signalRepository.lidMapping`) — `null` no resultado se não conseguir. 400 se a sessão não estiver `online` agora. Usada pra medir/corrigir conversas antigas salvas com o LID cru no lugar do telefone — ver `scripts/fix-lid-phones.js`/`fix-lid-contacts.js` e HANDOFF Parte CP. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
@@ -1482,6 +1502,9 @@ db/
   import-legacy-data.js  # importa o histórico de antes do Postgres (rodar 1x)
   migrate-to-company-supabase.js         # copia as 21 tabelas entre dois projetos Supabase (rodar 1x por migração de conta)
   migrate-storage-to-company-supabase.js # copia os buckets "media"/"public-assets" entre dois projetos Supabase (idem)
+scripts/
+  fix-lid-phones.js      # corrige conversations/messages salvos com telefone LID cru — --dry-run/--apply (HANDOFF Parte CP)
+  fix-lid-contacts.js    # idem, escopo contacts — --dry-run/--apply (HANDOFF Parte CP)
 auth_session/
   <sessionId>/         # credenciais Baileys por instância — faça backup
 ```

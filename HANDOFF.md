@@ -5812,4 +5812,156 @@ do heartbeat pra page-session.
 - [ ] `dateRegister` (coluna "Criado em") fica "—" se o Bitrix não
   devolver `DATE_REGISTER` em `user.get` pra aquele usuário.
 
+### Parte CP — Contato fantasma de LID: causa raiz, correção prospectiva e retroativa (2026-08-12)
+
+Usuário mandou print da tela de Contatos com várias linhas "sem nome" e
+telefones de 14-15 dígitos sem sentido, logo depois de o sync automático
+de contatos (Parte CO) entrar no ar. Investigação revelou um bug bem mais
+antigo e bem maior do que aparentava.
+
+**Causa raiz**: o WhatsApp tem um sistema novo de identificador interno
+("LID", `<id>@lid`) usado quando o remetente/destinatário ainda não tem
+o telefone real mapeado pro app. `_jidToPhone`/`_resolveLidPhone`
+(`src/whatsapp.js`) caíam de volta pro próprio id do LID como se fosse
+telefone quando o mapeamento não estava disponível — sempre existiu,
+mas até agora só virava uma linha de mensagem estranha isolada; o sync
+automático de contatos (Parte CO) começou a persistir isso como CONTATO
+de verdade, tornando o bug visível.
+
+**Correção prospectiva** (impede casos novos):
+- `_resolveLidPhone` (`src/whatsapp.js`) devolve `null` explicitamente
+  quando não consegue resolver — nunca mais o id cru do LID. Os 2
+  chamadores (`messages.update` e `_processIncomingMessage`, a mensagem
+  em si) tratam `null` descartando (mensagem/contato não são
+  processados naquele momento; a PRÓXIMA mensagem da mesma conversa
+  tenta de novo, sem perda permanente — só um pequeno atraso invisível
+  na prática).
+- `shouldSyncHistoryMessage` sobrescrito em `makeWASocket` (aceita todo
+  `syncType`, incluindo `FULL`) — o default da lib descartava o
+  histórico profundo silenciosamente, só entregava uma janela curta
+  recente. Objetivo do usuário: "conectei a instância e já carrega
+  automaticamente os contatos e o histórico completo, mesmo sendo a 1ª
+  conexão" — investigação (`Explore` agent) confirmou: dá pra trazer
+  histórico completo de CONVERSAS automaticamente (mensagem tem
+  telefone certo), mas NÃO dá pra trazer a agenda telefônica inteira
+  (contato que nunca trocou mensagem) — o Baileys não expõe isso, só
+  incrementos sem nome/telefone estruturado (`contacts.upsert`, já
+  usado só pra contagem em `getContactCount()`). Escopo confirmado:
+  só histórico de conversas.
+- `src/server.js`: sync automático de contato (`upsertContact`) movido
+  pra ANTES do corte de `isHistory` — antes só rodava em mensagem nova,
+  agora roda em histórico também (com dedupe em memória,
+  `contactSyncedThisRun`, pra não gerar 1 query por mensagem num
+  backfill grande do mesmo contato).
+- Mensagens de SISTEMA da própria Meta ("Conheça o WhatsApp
+  Business"/"Salve notas privadas...", mandadas 1x a toda conta
+  Business, sem remetente real) descobertas DEPOIS, investigando um
+  contato residual com `phone="0"`: `remoteJid` vazio/inválido, então
+  `_resolveLidPhone` nunca achava telefone e virava uma "conversa"
+  fantasma. `wa_message_id` é fixo e igual em toda conta
+  (`1484720636734891-1`, `785376054348615-1`) — filtrado por id exato
+  em `_processIncomingMessage`, mesmo padrão dos outros descartes
+  (status/grupo/newsletter/reação).
+
+**Rotas de diagnóstico** (`src/routes/whatsapp.js`, restritas a
+`requireSuperAdmin`, só leitura, ficam no código como ferramenta
+permanente de investigação — não foram removidas depois de usadas):
+`GET /admin/diagnostics/sessions` (lista sessões já em memória, sem
+criar nenhuma — `SessionManager.listActive()`, novo, usa `this.sessions`
+direto, nunca `get()` que criaria sessão nova só de tentar ler) e `POST
+/admin/diagnostics/resolve-lid` (`{sessionId, lidNumbers}` → tenta
+resolver cada um via o socket JÁ CONECTADO daquela sessão,
+`SessionManager.getActiveGateway()` + `WhatsAppGateway.resolveLidToPhone`,
+wrapper público de `_resolveLidPhone`; 400 se a sessão não estiver
+online, limite 500 números/chamada).
+
+**Descoberta em produção, no meio do processo**: `SUPER_ADMIN_OWNER_IDS`
+nunca tinha sido configurada nas env vars do EasyPanel (pendência já
+documentada na Parte CL, nunca resolvida) — na prática, TODO o Painel
+Admin (gestão de usuários, Kanban de Sugestões, e agora as rotas de
+diagnóstico) estava 403 pra qualquer um, inclusive o próprio usuário,
+em produção real. Usuário configurou a variável pelo EasyPanel (mesmo
+valor do `.env` local) — resolvido.
+
+**Investigação real, medida (não estimada)**: das 5.471 conversas
+antigas salvas com telefone LID cru no banco inteiro, só 3 das 19
+instâncias envolvidas estavam online no momento (`..._142498`,
+`..._999__msq741im7l6y`, `..._183168`, 532 telefones suspeitos entre as
+3) — via as rotas de diagnóstico acima, contra sockets Baileys reais já
+conectados na VPS. **531 de 532 resolvidos (99,8%)** — forte indício
+de que a maioria das 4.939 restantes também seria recuperável, bastando
+a instância correspondente estar online (não confirmado uma por uma,
+fora do escopo desta rodada).
+
+**Correção retroativa aplicada** (escopo: só as 3 sessões acima —
+usuário escolheu explicitamente "só as já testadas" em vez de esperar
+reconectar as 16 restantes):
+- `scripts/fix-lid-phones.js` (`--dry-run`/`--apply`, sempre dentro de
+  UMA transação — `BEGIN`/`ROLLBACK` em dry-run ou em qualquer falha,
+  `COMMIT` só no fim do `--apply` com sucesso): pra cada telefone
+  resolvido, dois casos. **Update simples** (500 casos — telefone real
+  ainda não existia como conversa separada): troca `conversations.phone`
+  direto. **Merge** (31 casos — telefone real JÁ existia como conversa
+  separada, confirmado com mensagens reais nos dois lados; 5 desses 31
+  eram exatamente os contatos fantasma do print original do usuário):
+  migra pra conversa real só as mensagens cujo `wa_message_id` ainda
+  não existe lá (evita duplicata — a maioria das mensagens JÁ era cópia
+  idêntica: o histórico tinha sido puxado duas vezes, uma resolvendo
+  certo, outra errado — 572 migradas, 97 descartadas por já duplicadas),
+  `push_name` fica com o valor mais recente entre os dois lados (regra
+  confirmada com o usuário), migra `conversation_tags`/
+  `conversation_assignment_history` (nenhum caso real nos 31, mas
+  tratado no código), mantém só o resumo de IA (`conversation_summaries`)
+  mais recente entre os dois lados e apaga os duplicados (39 apagados —
+  eram gerados repetidamente a partir de histórico incompleto, o
+  próprio bug), apaga a conversa-LID no final (cascade cuida do resto).
+- `scripts/fix-lid-contacts.js`: mesma lógica, escopo `contacts`
+  (por `owner_id`, não `session_id` — um contato fantasma podia sobrar
+  mesmo com a conversa já corrigida, foi exatamente o caso: 6 contatos,
+  1 update simples + 5 merges — os 5 do print original do usuário,
+  incluindo os contatos reais "Daniel EU"/"Tatyanne" que tinham um
+  duplicado fantasma). Migra `contact_list_members`/
+  `lead_form_submissions` se existirem (nenhum caso real, tratado no
+  código por robustez). Mantém o contato REAL, funde `name`/`deal_id`
+  faltantes via `coalesce` (nunca sobrescreve valor já preenchido),
+  apaga o fantasma.
+- **Lacuna real encontrada e corrigida durante o processo**: a primeira
+  versão de `fix-lid-phones.js` só calculava/reportava
+  tags/histórico/resumos duplicados dentro do bloco `if (!isDryRun)` —
+  o `--dry-run` nunca mostrava essa parte do que ia acontecer antes de
+  aplicar de verdade. Corrigido: os `SELECT`s de simulação rodam sempre
+  (dry-run também), só os `INSERT`/`UPDATE`/`DELETE` ficam atrás do
+  `isDryRun`.
+- Ambos os scripts testados em `--dry-run` (sempre `ROLLBACK`, seguro
+  contra produção real mesmo lendo dados reais) antes do `--apply`,
+  com confirmação explícita do usuário entre as duas etapas.
+
+**1 caso legitimamente não resolvido**: `55214185355719`
+(`..._183168`) segue `null` mesmo tentado de novo — o Baileys ainda não
+tem esse mapeamento específico. Não é bug, é estado normal (pode
+resolver sozinho numa próxima mensagem dessa pessoa, ou nunca).
+
+**Validação**: `node -c` em todos os arquivos alterados. Verificação
+pós-correção contra produção real: 0 contatos/conversas remanescentes
+com telefone LID errado nas 3 sessões corrigidas (exceto o 1 caso
+acima, esperado); 0 duplicatas de `wa_message_id` dentro da mesma
+conversa; contagens de mensagem batendo com migradas+preexistentes;
+`Daniel EU`/`Tatyanne` com nome preservado no contato final.
+
+**Pendências conhecidas**:
+- [ ] 4.939 das 5.471 conversas antigas (16 das 19 instâncias) ainda
+  não foram corrigidas — ficam com telefone LID errado até alguém
+  rodar o mesmo processo com aquelas instâncias online (as rotas de
+  diagnóstico + os 2 scripts já existem prontos pra isso).
+- [ ] `scripts/fix-lid-phones.js`/`fix-lid-contacts.js` lêem o
+  mapeamento de um arquivo local (`FIX_LID_RESULTS_PATH`, default
+  `/tmp/resolve-lid-results.json`) gerado manualmente contra as rotas
+  de diagnóstico — não é um comando único automatizado, precisa rodar
+  a resolução via HTTP primeiro e salvar o resultado à mão.
+- [ ] As rotas de diagnóstico (`admin/diagnostics/*`) ficam
+  permanentemente no código — método deliberado (servem pra rodar o
+  resto da correção depois), mas são superfície de leitura a mais
+  numa API de produção; considerar remover depois que as 16 instâncias
+  restantes forem processadas, se não houver mais uso previsto.
+
 
