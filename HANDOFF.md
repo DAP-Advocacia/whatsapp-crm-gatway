@@ -6282,5 +6282,73 @@ varredura retroativa de nome equivalente aos scripts de LID
 (`fix-lid-phones.js`/`fix-lid-contacts.js`), porque o nome (diferente
 do telefone) não é um dado ERRADO salvo, é só AUSENTE — menor urgência,
 mas resolvível do mesmo jeito (ler `contacts.upsert`/`contacts.update`
-da sessão já online, sem precisar de um backfill novo).
+da sessão já online, sem precisar de um backfill novo). Investigado e
+descartado: não existe no Baileys um método de "buscar nome de um
+contato específico sob demanda" (`onWhatsApp()` só confirma
+existência/JID, não nome) — só chega via mensagem nova da própria
+pessoa ou resincronização completa da sessão, e o usuário preferiu não
+arriscar uma reconexão forçada só por essas 5 conversas (ver Parte CU).
+
+### Parte CU — Permissão de push corrigida (Read→Write) + esclarecimento sobre estabilidade em deploy + ambiente de teste adiado (2026-08-12)
+
+**Push pro `origin` destravado**: a causa dos 403 anteriores (Partes CR
+em diante) era permissão real, não token — `DanielCosta1997` tinha
+papel `member` na organização `DAP-Advocacia` e permissão `push: false`
+(só leitura) no repositório especificamente (confirmado via `gh api
+repos/.../permissions` e `gh api orgs/.../memberships/...`, não só
+inferido do erro 403). Usuário se promoveu a `admin`/owner da
+organização — permissão no repo virou `push: true` automaticamente.
+Publicados de uma vez os 3 commits que estavam represados (Partes
+CR/CS/CT) — `984a5d6..58f9761`. Deploy automático (webhook
+GitHub→EasyPanel) confirmado de ponta a ponta: `GIT_SHA` do container
+novo bate exatamente com o commit publicado, `grep` de
+`_extractContactInfo`/`onContact` confirma o código novo rodando (não
+só que o deploy "disparou" — o conteúdo real, mesma régua de sempre pra
+confirmação assíncrona).
+
+**Nota lateral**: durante a investigação, uma tentativa de `docker
+restart` direto (pra tentar recarregar código copiado manualmente via
+`docker cp`, ANTES do acesso ao `origin` ser corrigido) falhou com erro
+de rede do Swarm e acabou fazendo o Swarm recriar o container do zero,
+a partir da imagem antiga — confirmando que **não existe** um jeito de
+"hot-swap" de código num container Swarm deste jeito; qualquer
+reinício sempre volta pra última imagem buildada a partir do commit
+mais recente no `origin` no momento do build. Não é um bug, é a
+natureza de como o EasyPanel builda a imagem (a partir do Git, não do
+filesystem do container rodando).
+
+**Pergunta do usuário, esclarecida**: "quando eu der deploy de novo, o
+servidor vai cair?" — Sim, sempre, é inerente a atualizar um processo
+Node.js com 1 réplica só (`Spec.Mode` sem redundância,
+`UpdateConfig.Parallelism: 1`, `Order: start-first` — o container novo
+sobe e é monitorado por 5s antes do antigo desligar, mas os sockets
+WebSocket do Baileys não sobrevivem à troca de processo de qualquer
+jeito). Toda sessão de WhatsApp de todo usuário desconecta/reconecta a
+cada deploy — sempre foi assim, é esperado, e é DIFERENTE do incidente
+original (Parte CQ: aquilo era um LOOP descontrolado de centenas de
+tentativas voltando a derrubar o processo repetidamente, não a queda
+única e escalonada de um deploy normal). Confirmado nesta sessão que as
+2 proteções estruturais da Parte CQ (erro permanente para depois de 1
+tentativa; backoff exponencial pro resto) cobrem o vetor que causou
+aquele incidente — não é garantia teórica, foi conferido lendo o
+próprio código rodando em produção (`PERMANENT_CODES` presente,
+memória em 1% de uso, boot escalonado a cada 15s confirmado nos logs).
+
+**Ambiente de teste — adiado, não esquecido**: usuário confirmou querer
+reduzir tanto risco de bug quanto o impacto da própria reconexão, mas
+decidiu adiar a implementação. Plano proposto (retomar quando o usuário
+pedir):
+- 2ª aplicação no EasyPanel, mesmo código-fonte, banco Postgres PRÓPRIO
+  (dados fictícios, nunca produção), pasta de `auth_session` própria
+  (1 instância de WhatsApp de TESTE, nunca uma instância de cliente
+  real).
+- Fluxo de deploy passa a ser: push → deploy automático na aplicação de
+  teste primeiro → validação manual das telas principais → só depois
+  aplicação de produção recebe o mesmo código (via um segundo trigger
+  de deploy, ou apontando o webhook de produção pra rodar depois/manual).
+- Não é CI automatizado (rodar sozinho a cada push) — julgado
+  over-engineering pro tamanho atual do projeto; a validação isolada já
+  feita antes de cada commit (mocks, sem tocar produção — mesmo padrão
+  desta sessão) cobre a maior parte do risco de sintaxe/lógica óbvia.
+  CI ficaria como próximo passo só se o projeto crescer bem mais.
 

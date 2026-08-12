@@ -1734,7 +1734,23 @@ replicada manualmente em todas.
   recria a task sozinho numa falha fatal e volta no boot da VPS. O histórico
   com PM2 valia para o deploy anterior em máquina Windows; ver
   [DEPLOY.md](DEPLOY.md) §4 para como reiniciar (`docker service update
-  --force`, **não** `docker restart`).
+  --force`, **não** `docker restart` — este último conflita com o
+  gerenciamento de rede do Swarm e, na prática, o Swarm detecta a falha e
+  recria o container do zero de qualquer jeito, a partir da ÚLTIMA IMAGEM
+  buildada, não do filesystem em memória — não existe "hot-swap" de código
+  num container rodando).
+- **Todo deploy desconecta e reconecta TODAS as sessões de WhatsApp de todos
+  os usuários** — inerente a rodar com 1 réplica só (`UpdateConfig.Parallelism:
+  1`, sem redundância): o container novo sobe primeiro (`Order: start-first`,
+  ~5s de monitoramento antes do antigo desligar), mas os sockets WebSocket do
+  Baileys não sobrevivem à troca de processo de qualquer forma. Reconexão
+  acontece sozinha, escalonada (`SESSION_STAGGER_MS`, 15s por sessão — ver
+  §env vars), sem intervenção manual. Isto é DIFERENTE do incidente do loop de
+  reconexão infinito (HANDOFF Parte CQ) — aquilo era um loop descontrolado de
+  centenas de tentativas martelando o processo; isto é uma queda única e
+  controlada por deploy, esperada, não um bug. Ambiente de teste separado
+  (aplicação própria no EasyPanel, banco+auth_session próprios) pra validar
+  antes de produção — planejado, não implementado ainda (HANDOFF Parte CU).
 - ~~O bucket `media` no Supabase Storage é público~~ — **resolvido**: o bucket é
   privado, mídia é servida via signed URL de curta duração por uma rota
   autenticada (`GET /media/:filename`, qualquer usuário deste portal — não
