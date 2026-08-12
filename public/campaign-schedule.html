@@ -324,6 +324,10 @@
   .mini-progress-bg{ height: 6px; border-radius: 4px; background: var(--surface); overflow: hidden; margin: 6px 0 4px; }
   .mini-progress-fill{ height: 100%; background: linear-gradient(135deg, #e3b65b, #c5912f); }
   .media-tag{ display:inline-block; font-size: 10px; color: var(--text-faint); }
+  .retry-tag{
+    display:inline-block; font-size: 10px; color: var(--gold); font-weight: 600;
+    background: rgba(var(--gold-rgb),.12); border-radius: 100px; padding: 1px 7px; margin-left: 4px;
+  }
 
   /* ---------- Calendário ---------- */
   .calendar-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom: 14px; }
@@ -955,6 +959,10 @@
   function renderCard(item, { draggable } = {}) {
     const nameHtml = item.name ? escapeHtml(item.name) : '<span class="no-name">sem nome</span>';
     const mediaTag = item.mediaType ? `<span class="media-tag">📎 ${item.mediaType}</span>` : '';
+    // Retry AUTOMÁTICO (criado sozinho pelo sistema após erro 463 do
+    // WhatsApp, ver HANDOFF Parte CN) — só um selo visual, não muda edição/
+    // cancelamento nenhum: cancela/reagenda igual a qualquer outro card.
+    const retryTag = item.retryOfCampaignId ? '<span class="retry-tag">↻ Retry automático</span>' : '';
 
     let body = '';
     if (item.status === 'scheduled') {
@@ -986,7 +994,7 @@
 
     return `
       <div class="sched-card" ${draggable ? 'draggable="true"' : ''} data-id="${item.id}" data-status="${item.status}">
-        <div class="card-name">${nameHtml}</div>
+        <div class="card-name">${nameHtml}${retryTag}</div>
         ${body}
       </div>
     `;

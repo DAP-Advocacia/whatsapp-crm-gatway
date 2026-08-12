@@ -636,6 +636,25 @@ async function listGroups(sessionIds) {
   return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
 }
 
+// "Esse telefone já me respondeu alguma vez de verdade?" — usado antes de
+// disparar uma campanha (ver POST /campaign/classify-recipients) pra
+// avisar o risco de erro 463 do WhatsApp ("account restricted or missing
+// tctoken" — exige token de privacidade antes de deixar iniciar conversa
+// NOVA com quem nunca respondeu; conversas com histórico de resposta real
+// não são afetadas). Telefones sem NENHUMA conversation (contato 100% novo,
+// nunca trocou mensagem em nenhuma direção) simplesmente não aparecem no
+// resultado — quem chama trata a ausência como hasReplied:false.
+async function classifyRecipients(sessionId, phones) {
+  const { rows } = await pool.query(
+    `select c.phone,
+            exists(select 1 from messages m where m.conversation_id = c.id and m.direction = 'in') as "hasReplied"
+     from conversations c
+     where c.session_id = $1 and c.phone = any($2::text[])`,
+    [sessionId, phones]
+  );
+  return rows;
+}
+
 module.exports = {
   addMessage,
   getHistory,
@@ -670,4 +689,5 @@ module.exports = {
   setAvatarUrl,
   createGroupRecord,
   listGroups,
+  classifyRecipients,
 };

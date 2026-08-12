@@ -5530,4 +5530,125 @@ com `ok:false` na linha certa) — limpo depois.
   processo) — não é uma regressão nova, é o mesmo padrão já existente
   no arquivo.
 
+---
+
+### Parte CN — 3 mitigações pro erro 463 de Campanha (2026-08-12)
+
+Usuário perguntou "como fazer o disparo funcionar" depois de entender
+(Parte CM) que o erro 463 do WhatsApp não tem cura — é política do
+próprio WhatsApp, nenhum gateway contorna. Confirmadas 3 mitigações
+(perguntou também sobre n8n; descartado depois de confirmar que não
+resolve o 463 em si — decisão do WhatsApp sobre conta/destinatário, não
+de qual sistema dispara — decidiu seguir com retry nativo no gateway).
+
+**Banco (`db/schema.sql`)**: índice novo
+`idx_messages_conversation_direction on messages (conversation_id,
+direction)` (acelera a classificação de risco pra até 100 telefones por
+disparo); 4 colunas novas em `scheduled_campaigns`:
+`retry_of_campaign_id`/`retry_attempt` (proveniência de um retry
+automático) e `min_delay_ms`/`max_delay_ms` (intervalo escolhido,
+persistido pra um agendamento futuro lembrar).
+
+**1. Aviso de risco antes de disparar** — nova `store.classifyRecipients(sessionId,
+phones)`: pra cada telefone, `exists(select 1 from messages where
+conversation_id = c.id and direction = 'in')` — "esse contato já me
+respondeu de verdade alguma vez?" (sinal mais forte de relação
+estabelecida que simplesmente "existe uma conversa"). Nova rota `POST
+/campaign/classify-recipients`. No frontend (`public/campaign.html`),
+chamada dentro do handler de `sendCampaignBtn`, ANTES da bifurcação
+enviar-agora/agendar (o risco vale pros dois modos) — se algum
+destinatário nunca respondeu, o `confirmDialog` já existente (que só
+perguntava "tem certeza?") ganha a contagem de quantos estão em risco.
+Best-effort: falha na classificação (rede etc.) não bloqueia o disparo,
+só não mostra o aviso.
+
+**2. Intervalo configurável** — `CAMPAIGN_MIN_DELAY_MS`/`CAMPAIGN_MAX_DELAY_MS`
+(antes fixos, duplicados em `src/routes/whatsapp.js` e
+`src/scheduler.js`) agora aceitam override via `minDelayMs`/`maxDelayMs`
+no body de `POST /campaign`/`POST /campaign/schedule`, validados
+(`validateDelayOverride` — entre 1s e 120s, min ≤ max) antes de
+qualquer coisa. Frontend: 3 presets clicáveis (Rápido 4-9s/padrão,
+Padrão 15-30s, Cauteloso 45-90s) + campo livre — clicar um preset só
+preenche os campos numéricos, o valor de fato enviado é sempre o que
+estiver neles no momento do clique de "Enviar campanha" (sem estado
+escondido de "qual preset está ativo"). Campo vazio/inválido cai no
+padrão de sempre — o backend já trata ausência.
+
+**3. Retry automático, 24h depois, só 1 tentativa** — valor inicial (1h,
+até 3 tentativas) foi mostrado ao usuário junto do aviso do PRÓPRIO
+código-fonte do Baileys ("retrying counts as another reach out and
+worsens the restriction" — retry repetido tende a piorar a restrição,
+não resolver) e ajustado para 24h/1 tentativa antes de implementar.
+
+`messageIdToCampaign` (Map em `src/campaigns.js`) passou a guardar
+também `sessionId`/`template`/`retryAttempt`/`media` por mensagem
+(antes só `campaignId`/`phone`) — necessário pra reconstruir um
+agendamento de retry sem re-consultar nada. Dentro de
+`onCampaignMessageStatus`, se `retryAttempt === 0` (a campanha original
+nunca foi ela mesma um retry), acumula o telefone falho num buffer em
+memória por `campaignId` (`pendingRetryBuffers`) com debounce de 60s
+sem falha nova — como as falhas 463 chegam de forma assíncrona e
+espalhada no tempo, isto agrupa TODAS as falhas daquela campanha num
+retry só, em vez de um `scheduled_campaigns` por telefone. Quando o
+debounce fecha, `scheduleCampaignRetry` chama `scheduledStore.create`
+(sem nenhuma mudança na função — já aceitava o formato certo) com
+`scheduledAt` = agora + 24h, `retryOfCampaignId`/`retryAttempt: 1`. O
+poller já existente (`startPolling`, `src/scheduler.js`) dispara isto
+sozinho quando chegar a hora — `sendScheduled` propaga
+`row.retry_attempt` pra `runCampaign`, que por sua vez propaga de volta
+pra `onCampaignMessageStatus`: se o PRÓPRIO retry falhar de novo,
+`retryAttempt` já é 1, então nenhum segundo retry é criado (regra de
+só 1 tentativa).
+
+Mídia da campanha original é preservada no retry (`message.mediaUrl`/`mimetype`
+guardados junto no `messageIdToCampaign`, propagados até
+`scheduledStore.create` no mesmo formato relativo que `POST
+/campaign/schedule` já usa) — evita que um retry de campanha com
+imagem/áudio/vídeo virasse silenciosamente um retry só de texto.
+
+Frontend (`public/campaign-schedule.html`): selo "↻ Retry automático"
+(`.retry-tag`, mesmo padrão visual de `.media-tag` já usado no
+arquivo) no card do Kanban/Calendário quando `retryOfCampaignId`
+estiver presente — só visual, não muda nenhum comportamento de
+edição/cancelamento (cancela/reagenda igual a qualquer outro card).
+
+**Validação**: `node -c`/`vm.Script` em todos os arquivos alterados.
+Testes end-to-end contra produção (servidor de teste numa porta
+separada, 3399, nunca a instância real na 3333):
+- Item 1: `classifyRecipients` e a rota HTTP completa, com telefones
+  reais conhecidos (`hasReplied: true` pro contato com conversa
+  antiga, `false` pro que só recebeu mensagem nossa) — resultado
+  exato.
+- Item 2: `validateDelayOverride` com todos os casos (sem override →
+  padrão; override válido; min abaixo do piso; max acima do teto; min
+  > max; valor não-numérico) — todos os erros esperados. `POST
+  /campaign/schedule` com intervalo customizado via HTTP real,
+  confirmado persistido no banco (`15000`/`30000`); tentativa inválida
+  (min>max) devolvendo 400 com mensagem certa. Presets validados
+  visualmente via Playwright (clique em "Cauteloso" preenche 45/90 e
+  marca a borda ativa, "Rápido" perde o destaque).
+- Item 3 (o mais crítico): simulado o fluxo completo — `createCampaign`
+  → `runCampaign` com gateway fake → 2 falhas 463 simuladas via
+  `onCampaignMessageStatus` → **aguardado o debounce real de 60s** →
+  confirmado 1 ÚNICO agendamento criado no banco, com os 2 telefones
+  agrupados, `template` preservado, `retry_attempt: 1`,
+  `scheduled_at` ~24h no futuro. Testado separadamente que uma falha
+  numa campanha com `retryAttempt: 1` (ela já é um retry) NÃO cria um
+  segundo agendamento — confirmado 0 linhas depois de esperar os
+  mesmos 60s. Dados de teste limpos em todos os casos, confirmado 0
+  linhas residuais.
+
+**Pendências conhecidas**:
+- [ ] `pendingRetryBuffers` (Map em memória) some num restart do
+  processo no meio da janela de debounce (60s) — uma falha 463 que
+  chegasse bem nesse instante perderia a chance de retry automático
+  pra aquele telefone específico (impacto baixo: 60s é uma janela
+  curta, e o restart do processo já é um evento raro).
+- [ ] Retry automático sempre cria uma campanha nova e separada nas
+  métricas (`campaigns`/`campaign-metrics.html`) — não é mesclado de
+  volta na campanha original; comportamento aceito, não confirmado
+  explicitamente como preferência definitiva.
+- [ ] Nenhuma forma de desativar o retry automático por instância/
+  usuário — hoje é sempre-ligado pra toda campanha com falha 463.
+
 

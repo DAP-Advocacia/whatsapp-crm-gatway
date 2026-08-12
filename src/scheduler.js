@@ -55,8 +55,15 @@ async function sendScheduled(id, sessions) {
     recipients,
     template: row.template,
     media,
-    minDelayMs: CAMPAIGN_MIN_DELAY_MS,
-    maxDelayMs: CAMPAIGN_MAX_DELAY_MS,
+    // min_delay_ms/max_delay_ms nulos = agendamento antigo (criado antes
+    // desta feature) ou sem escolha explícita — cai no padrão de sempre.
+    minDelayMs: row.min_delay_ms ?? CAMPAIGN_MIN_DELAY_MS,
+    maxDelayMs: row.max_delay_ms ?? CAMPAIGN_MAX_DELAY_MS,
+    // retry_attempt > 0 = este agendamento É o retry automático de uma
+    // campanha anterior (ver scheduleCampaignRetry, src/campaigns.js) —
+    // propagado pra onCampaignMessageStatus nunca agendar um SEGUNDO
+    // retry se este também falhar (decisão confirmada: só 1 tentativa).
+    retryAttempt: row.retry_attempt || 0,
   })
     .then(() => scheduledStore.setStatus(id, 'sent', campaignId))
     .catch((err) => {

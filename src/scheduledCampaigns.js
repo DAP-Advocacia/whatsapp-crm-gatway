@@ -9,11 +9,18 @@ const { pool } = require('./db');
 // `media.url` (caminho relativo já salvo no Storage via saveMedia, ver
 // POST /campaign/schedule) é o formato novo — `media.dataBase64` só existe
 // por compatibilidade, se algum caller antigo ainda passar assim.
-async function create({ id, sessionId, name, recipients, template, media, scheduledAt }) {
+// `minDelayMs`/`maxDelayMs`: nulo = usa o padrão de sempre na hora de
+// disparar (ver sendScheduled, src/scheduler.js) — sempre vêm já validados
+// (validateDelayOverride, src/routes/whatsapp.js) antes de chegar aqui.
+// `retryOfCampaignId`/`retryAttempt`: só preenchidos quando este agendamento
+// é um retry AUTOMÁTICO criado por src/campaigns.js (ver
+// scheduleCampaignRetry) após erro 463 — nulo/0 pra agendamento normal
+// criado pelo usuário.
+async function create({ id, sessionId, name, recipients, template, media, scheduledAt, minDelayMs, maxDelayMs, retryOfCampaignId, retryAttempt }) {
   await pool.query(
     `insert into scheduled_campaigns
-       (id, session_id, name, recipients, template, media_type, media_mimetype, media_base64, media_url, scheduled_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+       (id, session_id, name, recipients, template, media_type, media_mimetype, media_base64, media_url, scheduled_at, min_delay_ms, max_delay_ms, retry_of_campaign_id, retry_attempt)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       id,
       sessionId,
@@ -25,6 +32,10 @@ async function create({ id, sessionId, name, recipients, template, media, schedu
       media?.dataBase64 || null,
       media?.url || null,
       scheduledAt,
+      minDelayMs ?? null,
+      maxDelayMs ?? null,
+      retryOfCampaignId || null,
+      retryAttempt || 0,
     ]
   );
 }
@@ -43,6 +54,7 @@ async function listAll(sessionIds) {
        sc.recipients, sc.media_type as "mediaType",
        sc.scheduled_at as "scheduledAt", sc.status,
        sc.campaign_id as "campaignId", sc.created_at as "createdAt",
+       sc.retry_of_campaign_id as "retryOfCampaignId", sc.retry_attempt as "retryAttempt",
        jsonb_array_length(sc.recipients) as "recipientsCount",
        c.sent as "sentCount", c.failed as "failedCount", c.total as "totalCount",
        c.finished_at as "finishedAt"

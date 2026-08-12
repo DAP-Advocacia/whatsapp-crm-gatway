@@ -421,6 +421,30 @@
   .device-switch button.active{ background: var(--surface); color: var(--gold); }
   .device-switch button:hover:not(.active){ color: var(--text-muted); }
 
+  /* Presets de intervalo entre mensagens da campanha (item 2, ver
+     HANDOFF Parte CN) — 3 cartões clicáveis (Rápido/Padrão/Cauteloso) +
+     campo livre pra quem quiser um valor próprio. Clicar num preset só
+     preenche os campos numéricos; o valor de fato enviado é sempre o que
+     estiver neles no momento do clique de "Enviar campanha" — não existe
+     estado escondido de "qual preset está selecionado". */
+  .delay-presets{ display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-bottom:12px; }
+  .delay-preset{
+    background: var(--surface-2); border: 1.5px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; cursor: pointer; text-align: left; color: var(--text);
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .delay-preset:hover{ border-color: var(--gold-dim); }
+  .delay-preset.active{ border-color: var(--gold); background: rgba(var(--gold-rgb),.08); }
+  .delay-preset .preset-name{ font-weight: 600; font-size: 12.5px; margin-bottom: 2px; }
+  .delay-preset .preset-range{ font-size: 11px; color: var(--text-faint); }
+  .delay-custom{ display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  .delay-custom input[type="number"]{
+    width: 64px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-family: inherit; font-size: 13px; padding: 7px 9px; outline: none; text-align: center;
+  }
+  .delay-custom input[type="number"]:focus{ border-color: var(--gold-dim); }
+  .delay-custom span{ font-size: 12px; color: var(--text-muted); }
+
   .device-frame{ margin: 0 auto; width: 280px; transition: width .18s ease; }
   .device-frame.tablet{ width: 340px; }
   .device-frame.desktop{ width: 100%; }
@@ -708,9 +732,32 @@
           <p class="hint">No horário marcado o envio começa sozinho — ou adiante arrastando o card pra "Enviar agora" na <a href="/campaign-schedule.html" style="color:var(--gold)">Agenda de Envios</a>.</p>
         </div>
 
+        <label class="field-label">Intervalo entre cada mensagem</label>
+        <div class="delay-presets" id="delayPresets">
+          <button type="button" class="delay-preset active" data-min="4" data-max="9">
+            <div class="preset-name">Rápido</div>
+            <div class="preset-range">4-9s (padrão)</div>
+          </button>
+          <button type="button" class="delay-preset" data-min="15" data-max="30">
+            <div class="preset-name">Padrão</div>
+            <div class="preset-range">15-30s</div>
+          </button>
+          <button type="button" class="delay-preset" data-min="45" data-max="90">
+            <div class="preset-name">Cauteloso</div>
+            <div class="preset-range">45-90s</div>
+          </button>
+        </div>
+        <div class="delay-custom">
+          <span>ou personalize:</span>
+          <input type="number" id="delayMinInput" min="1" max="120" value="4">
+          <span>a</span>
+          <input type="number" id="delayMaxInput" min="1" max="120" value="9">
+          <span>segundos</span>
+        </div>
         <p class="hint" style="margin-bottom:12px">
-          Intervalo de ~4 a 9s entre cada mensagem (não é ajustável, é uma
-          precaução contra bloqueio). Máximo de 100 destinatários por campanha.
+          Intervalos maiores reduzem (não eliminam) o risco de bloqueio pelo
+          WhatsApp — sem preencher nada, usa o padrão "Rápido" de sempre.
+          Máximo de 100 destinatários por campanha.
         </p>
         <button class="send-btn" id="sendCampaignBtn">Enviar campanha</button>
 
@@ -1012,6 +1059,9 @@
   const sendModeSwitch = document.getElementById('sendModeSwitch');
   const scheduleFields = document.getElementById('scheduleFields');
   const scheduledAtInput = document.getElementById('scheduledAt');
+  const delayPresets = document.getElementById('delayPresets');
+  const delayMinInput = document.getElementById('delayMinInput');
+  const delayMaxInput = document.getElementById('delayMaxInput');
   const sendBtn = document.getElementById('sendCampaignBtn');
   const scheduleSuccessBox = document.getElementById('scheduleSuccessBox');
   const progressBox = document.getElementById('progressBox');
@@ -1037,6 +1087,19 @@
       scheduleFields.style.display = sendMode === 'schedule' ? 'block' : 'none';
       sendBtn.textContent = sendMode === 'schedule' ? 'Agendar campanha' : 'Enviar campanha';
       scheduleSuccessBox.style.display = 'none';
+    });
+  });
+
+  // Presets de intervalo — só preenchem os campos numéricos e marcam
+  // "active" visualmente. O valor de fato enviado no clique de "Enviar
+  // campanha" é sempre o que estiver em delayMinInput/delayMaxInput naquele
+  // momento (editar os campos à mão depois de clicar um preset não reativa
+  // nem desativa nenhum botão — comportamento aceito, não é bug).
+  delayPresets.querySelectorAll('.delay-preset').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      delayMinInput.value = btn.dataset.min;
+      delayMaxInput.value = btn.dataset.max;
+      delayPresets.querySelectorAll('.delay-preset').forEach((b) => b.classList.toggle('active', b === btn));
     });
   });
 
@@ -1396,6 +1459,49 @@
       ? { type: attachedMedia.type, mimetype: attachedMedia.mimetype, dataBase64: attachedMedia.dataBase64 }
       : undefined;
 
+    // Intervalo entre mensagens — segundos (UI) convertidos pra ms (API).
+    // Campo vazio/inválido cai no padrão de sempre (backend já trata
+    // ausência, ver validateDelayOverride em src/routes/whatsapp.js) —
+    // por isso só inclui a chave no payload quando o valor é um número
+    // válido, em vez de mandar NaN/string vazia.
+    const delayMinSec = Number(delayMinInput.value);
+    const delayMaxSec = Number(delayMaxInput.value);
+    const hasValidDelay = Number.isFinite(delayMinSec) && Number.isFinite(delayMaxSec) && delayMinSec > 0 && delayMaxSec > 0;
+    const delayPayload = hasValidDelay
+      ? { minDelayMs: Math.round(delayMinSec * 1000), maxDelayMs: Math.round(delayMaxSec * 1000) }
+      : {};
+
+    // Aviso de risco (erro 463 do WhatsApp — "account restricted or missing
+    // tctoken", exige token de privacidade antes de deixar iniciar conversa
+    // NOVA com quem nunca respondeu de verdade). Roda ANTES da bifurcação
+    // enviar-agora/agendar — o risco vale pros dois modos. Best-effort: se a
+    // classificação falhar (rede, etc.), segue sem bloquear o disparo —
+    // é um aviso, não uma trava.
+    let noHistoryCount = 0;
+    try {
+      const classifyRes = await apiFetch(`${API_BASE}/whatsapp/campaign/classify-recipients`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session, phones: recipients.map((r) => r.phone) }),
+      });
+      if (classifyRes.ok) {
+        const classifyData = await classifyRes.json();
+        const repliedPhones = new Set((classifyData.results || []).filter((r) => r.hasReplied).map((r) => r.phone));
+        noHistoryCount = recipients.filter((r) => !repliedPhones.has(r.phone)).length;
+      }
+    } catch (err) {
+      console.error('[campaign] falha ao classificar destinatários (seguindo sem aviso):', err.message);
+    }
+
+    if (noHistoryCount > 0) {
+      const confirmedRisk = await window.confirmDialog(
+        `${noHistoryCount} de ${recipients.length} destinatário(s) nunca trocaram mensagem com este número. ` +
+        `O WhatsApp pode rejeitar essas mensagens (erro 463: conta restrita), mesmo aparecendo como enviadas na hora. ` +
+        `Quer continuar mesmo assim?`
+      );
+      if (!confirmedRisk) return;
+    }
+
     if (sendMode === 'schedule') {
       if (!scheduledAtInput.value) { if (window.showToast) window.showToast('Escolha a data e hora do disparo.', 'error'); return; }
       const scheduledDate = new Date(scheduledAtInput.value);
@@ -1417,6 +1523,7 @@
             text,
             media: mediaPayload,
             scheduledAt: scheduledDate.toISOString(),
+            ...delayPayload,
           }),
         });
         const data = await res.json();
@@ -1458,6 +1565,7 @@
           recipients,
           text,
           media: mediaPayload,
+          ...delayPayload,
         }),
       });
       const data = await res.json();

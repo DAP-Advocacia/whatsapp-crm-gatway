@@ -37,9 +37,38 @@ const teamInsightsCache = new Map();
 
 // Intervalo entre cada mensagem de uma campanha, e limite de destinatários —
 // precaução básica contra detecção de spam do WhatsApp (não é garantia).
+// Valor PADRÃO — o usuário pode escolher um intervalo maior na hora de
+// disparar/agendar (minDelayMs/maxDelayMs no body, ver validateDelayOverride
+// abaixo); sem esses campos, cai neste padrão de sempre.
 const CAMPAIGN_MIN_DELAY_MS = 4000;
 const CAMPAIGN_MAX_DELAY_MS = 9000;
 const CAMPAIGN_MAX_RECIPIENTS = 100;
+
+// Limites aceitáveis pro override de intervalo (minDelayMs/maxDelayMs vindo
+// do client) — 1s no mínimo (abaixo disso é praticamente o disparo robótico
+// que a precaução tenta evitar) e 2min no máximo (acima disso uma campanha
+// de 100 destinatários levaria mais de 3h só de intervalo, sem contar o
+// tempo de envio em si). Devolve {minDelayMs, maxDelayMs} válidos (o padrão,
+// se nada foi passado) ou lança erro com mensagem pronta pra resposta 400.
+const DELAY_OVERRIDE_MIN_MS = 1000;
+const DELAY_OVERRIDE_MAX_MS = 120000;
+function validateDelayOverride(minDelayMs, maxDelayMs) {
+  if (minDelayMs == null && maxDelayMs == null) {
+    return { minDelayMs: CAMPAIGN_MIN_DELAY_MS, maxDelayMs: CAMPAIGN_MAX_DELAY_MS };
+  }
+  const min = Number(minDelayMs ?? CAMPAIGN_MIN_DELAY_MS);
+  const max = Number(maxDelayMs ?? CAMPAIGN_MAX_DELAY_MS);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    throw new Error('minDelayMs/maxDelayMs precisam ser números');
+  }
+  if (min < DELAY_OVERRIDE_MIN_MS || max > DELAY_OVERRIDE_MAX_MS) {
+    throw new Error(`intervalo precisa estar entre ${DELAY_OVERRIDE_MIN_MS / 1000}s e ${DELAY_OVERRIDE_MAX_MS / 1000}s`);
+  }
+  if (min > max) {
+    throw new Error('minDelayMs não pode ser maior que maxDelayMs');
+  }
+  return { minDelayMs: min, maxDelayMs: max };
+}
 
 // Máximo de instâncias de WhatsApp por dono (ver POST /instances abaixo) —
 // decisão do usuário, não uma limitação técnica do Baileys/gateway em si.
@@ -553,6 +582,32 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
+  // POST /campaign/classify-recipients  { session, phones: [...] }
+  // Pra cada telefone, diz se já existe conversa com pelo menos uma
+  // mensagem RECEBIDA de verdade (hasReplied) — sinal mais forte de que o
+  // contato já tem relação estabelecida com este número. Usado pela tela
+  // de Campanha ANTES de disparar, pra avisar o risco de erro 463 do
+  // WhatsApp ("account restricted or missing tctoken" — exige token de
+  // privacidade antes de deixar iniciar conversa NOVA com quem nunca
+  // respondeu; ver HANDOFF Parte CM/CN). Telefone sem nenhuma conversation
+  // (nunca trocou mensagem em nenhuma direção) não aparece no resultado —
+  // o frontend trata ausência como hasReplied:false.
+  // ---------------------------------------------------------------
+  router.post('/campaign/classify-recipients', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phones } = req.body || {};
+    if (!Array.isArray(phones) || !phones.length) {
+      return res.status(400).json({ error: 'phones (lista de telefones) é obrigatório' });
+    }
+    try {
+      const results = await store.classifyRecipients(session, phones);
+      res.json({ results });
+    } catch (err) {
+      console.error('[campaign:classify] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
   // POST /campaign  { session, name?, recipients: [{phone, name?}], text, media? }
   // Envia a mesma mensagem (com {{nome}}/{{telefone}} substituídos por
   // destinatário) pra vários telefones, um de cada vez, com intervalo entre
@@ -563,7 +618,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // GET /campaign/:id.
   // ---------------------------------------------------------------
   router.post('/campaign', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, name, recipients, phones, text, media } = req.body || {};
+    const { session, name, recipients, phones, text, media, minDelayMs, maxDelayMs } = req.body || {};
 
     const rawRecipients = Array.isArray(recipients) && recipients.length
       ? recipients
@@ -579,6 +634,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
     }
     if (rawRecipients.length > CAMPAIGN_MAX_RECIPIENTS) {
       return res.status(400).json({ error: `máximo de ${CAMPAIGN_MAX_RECIPIENTS} destinatários por campanha` });
+    }
+
+    let delayOverride;
+    try {
+      delayOverride = validateDelayOverride(minDelayMs, maxDelayMs);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
 
     let gateway;
@@ -623,8 +685,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
       recipients: uniqueRecipients,
       template: text.trim(),
       media: mediaPayload,
-      minDelayMs: CAMPAIGN_MIN_DELAY_MS,
-      maxDelayMs: CAMPAIGN_MAX_DELAY_MS,
+      minDelayMs: delayOverride.minDelayMs,
+      maxDelayMs: delayOverride.maxDelayMs,
     }).catch((err) => console.error('[campaign] falha inesperada:', err.message));
 
     res.json({ ok: true, campaignId, total: uniqueRecipients.length });
@@ -648,9 +710,16 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // (public/campaign-schedule.html).
   // ---------------------------------------------------------------
   router.post('/campaign/schedule', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, name, recipients, phones, text, media, scheduledAt } = req.body || {};
+    const { session, name, recipients, phones, text, media, scheduledAt, minDelayMs, maxDelayMs } = req.body || {};
 
     if (!scheduledAt) return res.status(400).json({ error: 'scheduledAt é obrigatório' });
+
+    let delayOverride;
+    try {
+      delayOverride = validateDelayOverride(minDelayMs, maxDelayMs);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
     const scheduledDate = new Date(scheduledAt);
     if (Number.isNaN(scheduledDate.getTime())) {
@@ -729,6 +798,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
         template: text.trim(),
         media: mediaPayload,
         scheduledAt: scheduledDate.toISOString(),
+        minDelayMs: delayOverride.minDelayMs,
+        maxDelayMs: delayOverride.maxDelayMs,
       });
       res.json({ ok: true, id, scheduledAt: scheduledDate.toISOString() });
     } catch (err) {

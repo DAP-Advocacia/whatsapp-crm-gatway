@@ -643,13 +643,23 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
 > conversa NOVA com quem nunca falou com este número (conversas já existentes não
 > são afetadas). O gateway detecta isso e corrige o status real da mensagem (Chat) e
 > as métricas da campanha (§12) alguns instantes depois — mas na hora do disparo em
-> si não há como saber de antemão quem vai ser rejeitado (ver HANDOFF, Parte CM).
+> si não há como saber de antemão quem vai ser rejeitado (ver HANDOFF, Parte CM). Três
+> mitigações (nenhuma é cura — o erro 463 é política do WhatsApp, não deste gateway):
+> aviso antes de disparar (abaixo), intervalo maior entre mensagens (abaixo), e retry
+> automático 24h depois pra quem falhar (§13) — ver HANDOFF, Parte CN.
 
 - **Instância de envio**: dropdown com as próprias instâncias do usuário (nunca as de
   outra pessoa), com status online/offline.
 - **Destinatários**: seleção por lista de contatos personalizada (ver §11), por
   checkboxes das conversas já existentes (vinculadas a negócio), e/ou colando números
   manualmente — tudo deduplicado por telefone.
+  - **Aviso de risco**: antes de confirmar o disparo (imediato ou agendado), o
+    gateway classifica cada destinatário (`POST /campaign/classify-recipients`,
+    `hasReplied`: já existe alguma mensagem RECEBIDA de verdade daquele telefone,
+    não só uma conversa criada) — se algum nunca respondeu, o diálogo de confirmação
+    já existente ganha a contagem de quantos estão em risco de erro 463. Best-effort:
+    se a classificação falhar (rede etc.), o disparo segue sem o aviso, não é
+    bloqueado por isso.
 - **Mensagem**: texto livre com variáveis `{{nome}}` e `{{telefone}}`, substituídas
   por destinatário no momento do envio (contato sem nome cadastrado recebe o telefone
   no lugar de `{{nome}}`). Pode ser escrita na hora ou carregada de um **modelo**
@@ -668,11 +678,17 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
     do vídeo (`extractYoutubeId` extrai o id de 11 caracteres de qualquer formato
     comum de link, monta `https://img.youtube.com/vi/<id>/hqdefault.jpg` — sem
     precisar de chave de API).
-- **Envio**: imediato (intervalo de ~4 a 9s entre cada mensagem, não ajustável —
-  precaução básica contra detecção de spam) ou **agendado** pra uma data/hora futura
-  (ver §13). Limite de 100 destinatários por campanha.
+- **Envio**: imediato ou **agendado** pra uma data/hora futura (ver §13). Limite de
+  100 destinatários por campanha.
+  - **Intervalo entre mensagens**: 3 presets (Rápido 4-9s = padrão, Padrão 15-30s,
+    Cauteloso 45-90s) ou um valor livre (min/max em segundos) — intervalos maiores
+    reduzem (não eliminam) o risco de bloqueio pelo WhatsApp. Persistido junto do
+    agendamento (`scheduled_campaigns.min_delay_ms`/`max_delay_ms`) pra um envio
+    futuro lembrar a escolha até a hora de disparar de fato.
 - Todo envio (imediato ou agendado) fica registrado em `campaigns`/`campaign_results`
-  e some no dashboard de Métricas de Campanhas (§12).
+  e some no dashboard de Métricas de Campanhas (§12). Se algum destinatário for
+  rejeitado pelo WhatsApp depois do envio (erro 463, ver aviso no topo desta seção),
+  um retry automático é agendado sozinho pra 24h depois — ver §13.
 - Layout em tela cheia (full-bleed, mesmo modelo da Análise de Conversas — sem
   teto de largura central), pra aproveitar melhor telas grandes.
 
@@ -942,6 +958,14 @@ Gestão de campanhas **agendadas** pra disparo futuro, com duas visões alterná
   Limitação conhecida: o arquivo "pendente" que fica no Storage entre agendar
   e disparar não é apagado depois (o disparo de verdade sobe uma cópia própria
   por destinatário) — vira lixo órfão no bucket com o tempo, ver §20.
+- **Retry automático (erro 463)**: quando um destinatário de uma campanha (§10) é
+  rejeitado pelo WhatsApp depois do envio, um agendamento novo é criado sozinho
+  aqui — 24h depois, só com os telefones que de fato falharam, com o selo "↻ Retry
+  automático" no card pra diferenciar de um agendamento manual. Nunca mais de 1
+  tentativa por campanha (mesmo que o próprio retry falhe de novo) — alinhado com
+  o aviso do código-fonte do Baileys de que retry repetido tende a piorar a
+  restrição, não resolver (ver HANDOFF, Parte CN). Cancela/reagenda como qualquer
+  outro card — o selo não muda nenhum comportamento, só identifica a origem.
 
 ---
 
@@ -1174,7 +1198,8 @@ revelar que o recurso existe).
 | `presence` | POST | Body `{ session, phone, state }`. `state` é `composing`/`recording`/`paused` — avisa o contato que a empresa está digitando/gravando áudio (ver §9). |
 | `link-preview?url=` | GET | `{ url, title, description, image, siteName }` (Open Graph da página, campos `null` se não achar nada) — usado pra pré-visualizar link nas mensagens (ver §9 e `src/linkPreview.js`). Sem `session`/`requireSession`, só `requireAuth`. |
 | `react` | POST | Body `{ session, phone, messageId, emoji }`. Reage a uma mensagem (`emoji` vazio remove a reação) — ver §9. |
-| `campaign` | POST | Body `{ session, name?, recipients:[{phone,name?}], text, media? }`. Dispara uma campanha imediatamente. |
+| `campaign/classify-recipients` | POST | Body `{ session, phones:[...] }`. `{ results:[{phone, hasReplied}] }` — usado antes de disparar pra avisar risco de erro 463 (ver §10). Telefone sem nenhuma conversa não aparece no resultado (frontend trata ausência como `hasReplied:false`). |
+| `campaign` | POST | Body `{ session, name?, recipients:[{phone,name?}], text, media?, minDelayMs?, maxDelayMs? }`. Dispara uma campanha imediatamente. `minDelayMs`/`maxDelayMs` (ms, opcionais) sobrescrevem o intervalo padrão de 4-9s — validados entre 1s e 120s, min ≤ max. |
 | `campaign/:id` | GET | Progresso "ao vivo" de uma campanha em andamento/concluída. |
 | `campaign/schedule` | POST | Mesmo body de `campaign`, + `scheduledAt` (ISO, no futuro). Agenda em vez de disparar na hora. |
 | `campaigns/metrics?session=` | GET | Métricas de campanhas — aceita uma instância ou várias separadas por vírgula (`session=a,b`). |

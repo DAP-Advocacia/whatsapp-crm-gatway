@@ -620,3 +620,38 @@ create table if not exists admin_presence (
   last_page text,
   last_seen_at timestamptz not null default now()
 );
+
+-- Mitigações contra o erro 463 do WhatsApp ("account restricted or
+-- missing tctoken" — exige token de privacidade antes de deixar iniciar
+-- conversa NOVA com quem nunca respondeu de verdade; conversas com
+-- histórico de resposta real não são afetadas. Ver HANDOFF, Parte CM/CN).
+
+-- Acelera classifyRecipients (src/store.js) — "esse telefone já me
+-- respondeu alguma vez?", consultado pra até 100 telefones por disparo
+-- (CAMPAIGN_MAX_RECIPIENTS) antes de mandar uma campanha, pra avisar o
+-- risco de erro 463 (contato sem resposta prévia = maior risco). Sem este
+-- índice, o exists(...) por conversation_id ainda funciona (usa
+-- idx_messages_conversation_created), mas varre linhas 'out' que nunca
+-- interessam pra essa pergunta.
+create index if not exists idx_messages_conversation_direction
+  on messages (conversation_id, direction);
+
+-- retry_of_campaign_id: marca que este agendamento é um retry AUTOMÁTICO
+-- (não criado à mão pelo usuário) de uma campanha anterior que teve
+-- destinatários rejeitados com erro 463 — usado só pro Kanban/Calendário
+-- (campaign-schedule.html) mostrar um selo distinto, não muda nenhum
+-- comportamento de edição/cancelamento. retry_attempt = 0 é agendamento
+-- normal; 1 é o próprio retry — nunca passa de 1 (decisão confirmada com o
+-- usuário: só 1 tentativa, 24h depois, alinhado com o aviso do próprio
+-- código-fonte do Baileys de que retry repetido piora a restrição em vez
+-- de resolver).
+alter table scheduled_campaigns add column if not exists retry_of_campaign_id text references campaigns(id);
+alter table scheduled_campaigns add column if not exists retry_attempt int not null default 0;
+
+-- Intervalo entre mensagens escolhido na hora de criar a campanha/agendar
+-- (ver POST /campaign, POST /campaign/schedule) — nulo = usa o padrão
+-- (CAMPAIGN_MIN_DELAY_MS/CAMPAIGN_MAX_DELAY_MS em src/routes/whatsapp.js).
+-- Persistido aqui pra um agendamento futuro lembrar a escolha até a hora
+-- de disparar de fato (sendScheduled, src/scheduler.js).
+alter table scheduled_campaigns add column if not exists min_delay_ms int;
+alter table scheduled_campaigns add column if not exists max_delay_ms int;

@@ -299,11 +299,19 @@ module.exports = {
         responses: { 200: jsonResponse('ok') },
       },
     },
+    '/api/whatsapp/campaign/classify-recipients': {
+      post: {
+        tags: ['WhatsApp — campanhas e agendamentos'],
+        summary: 'Classifica telefones por risco de erro 463 (já responderam de verdade alguma vez?)',
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['session', 'phones'], properties: { session: { type: 'string' }, phones: { type: 'array', items: { type: 'string' } } } } } } },
+        responses: { 200: jsonResponse('{ results: [{phone, hasReplied}] } — telefone sem conversa não aparece') },
+      },
+    },
     '/api/whatsapp/campaign': {
       post: {
         tags: ['WhatsApp — campanhas e agendamentos'],
         summary: 'Dispara uma campanha imediatamente',
-        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['session', 'recipients', 'text'], properties: { session: { type: 'string' }, name: { type: 'string' }, recipients: { type: 'array', items: { type: 'object', properties: { phone: { type: 'string' }, name: { type: 'string' } } } }, text: { type: 'string' }, media: { type: 'object' } } } } } },
+        requestBody: { content: { 'application/json': { schema: { type: 'object', required: ['session', 'recipients', 'text'], properties: { session: { type: 'string' }, name: { type: 'string' }, recipients: { type: 'array', items: { type: 'object', properties: { phone: { type: 'string' }, name: { type: 'string' } } } }, text: { type: 'string' }, media: { type: 'object' }, minDelayMs: { type: 'number', description: 'Override do intervalo mínimo entre envios (ms) — 1000 a 120000, padrão 4000' }, maxDelayMs: { type: 'number', description: 'Override do intervalo máximo entre envios (ms) — padrão 9000' } } } } } },
         responses: { 200: jsonResponse('Campanha criada') },
       },
     },
