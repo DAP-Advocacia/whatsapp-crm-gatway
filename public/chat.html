@@ -3490,10 +3490,26 @@
         // eco do que a gente mesmo mandou) e a conversa não está silenciada —
         // sem conversa ainda na lista (é nova) conta como "notifica", já que
         // o padrão do banco é notificar por padrão.
-        if (!isActive && payload.message.direction === 'in') {
-          const conv = state.conversations.find((c) => c.sessionId === id && c.phone === phone);
-          const notifyEnabled = !conv || conv.notificationsEnabled !== false;
-          if (notifyEnabled) notifyNewMessage(conv?.contactName || phone, payload.message, { sessionId: id, phone, contactName: conv?.contactName });
+        const conv = state.conversations.find((c) => c.sessionId === id && c.phone === phone);
+        const notifyEnabled = !conv || conv.notificationsEnabled !== false;
+        const isIncoming = payload.message.direction === 'in';
+        if (!isActive && isIncoming && notifyEnabled) {
+          notifyNewMessage(conv?.contactName || phone, payload.message, { sessionId: id, phone, contactName: conv?.contactName });
+        }
+
+        // Tag "Pendente" na lista (ver conv-item-pending) depende de
+        // unreadCount, que bumpConversation abaixo NUNCA atualiza (só troca
+        // texto/hora/direção) — sem isto, a tag só aparecia depois de trocar
+        // de aba/tela (o que remonta a lista via loadConversations, que
+        // busca o valor certo do banco) — usuário reportou com print
+        // (sessão 2026-08-12). Espelha a MESMA condição de notificar acima
+        // (backend cria uma linha em `notifications`, não lida, nas mesmas
+        // condições — ver src/server.js onMessage) pra não divergir do valor
+        // real que um reload traria. Incrementado ANTES de bumpConversation
+        // pra aproveitar o único renderConvList() que ela já faz no final,
+        // em vez de renderizar duas vezes por mensagem.
+        if (conv && !isActive && isIncoming && notifyEnabled) {
+          conv.unreadCount = (conv.unreadCount || 0) + 1;
         }
 
         bumpConversation(id, phone, {
@@ -3502,6 +3518,16 @@
           lastDirection: payload.message.direction,
           lastAt: payload.message.createdAt,
         });
+
+        // Conversa ATIVA é o caso oposto: o usuário está literalmente
+        // olhando pra ela agora — mesmo o backend tendo criado a notificação
+        // (não sabe que esta aba específica está com a conversa aberta),
+        // marca como lida na hora (markConversationRead já existe, chamado
+        // hoje só ao ABRIR a conversa — reaproveitado aqui pro caso de
+        // mensagem chegando com a conversa JÁ aberta, mesma causa raiz).
+        if (isActive && conv && conv.unreadCount) {
+          markConversationRead(conv);
+        }
       }
 
       if (payload.type === 'status') {

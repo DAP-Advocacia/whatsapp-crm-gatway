@@ -6385,3 +6385,56 @@ sempre (mensagem AO VIVO sempre trouxe nome, mesmo antes da correção
 da Parte CT — a correção só resolveu o caso do BACKFILL, que nunca traz
 pushName). Deve funcionar sem nenhuma ação adicional.
 
+### Parte CV — Tag "Pendente" na lista de conversas só aparecia depois de trocar de aba (2026-08-12)
+
+Usuário reportou (com 3 prints, testando o próprio backfill de nome da
+Parte CT) que a tag "Pendente" (`conv-item-pending`) só aparecia depois
+de trocar de aba/tela e voltar — não em tempo real quando a mensagem
+chega, mesmo com o WebSocket de tempo real já entregando a mensagem
+(visível na prévia atualizando na hora).
+
+**Causa raiz**: a tag depende de `conv.unreadCount > 0`
+(`public/chat.html`, renderização da lista). `unreadCount` no backend
+(`listConversations`, `src/store.js`) é a contagem de linhas em
+`notifications` com `read = false` casando `sessionId`+`phone` — só é
+recalculado numa carga nova da lista (`loadConversations()`, que roda
+ao montar a tela — daí trocar de aba "resolvia" temporariamente). O
+handler do WebSocket (`socket.onmessage`, `payload.type === 'message'`)
+já reage a mensagem nova em tempo real — atualiza texto/hora da
+prévia via `bumpConversation` — mas esse `patch` nunca incluía
+`unreadCount`, então o valor em memória do frontend ficava congelado
+até o próximo reload completo.
+
+**Correção** (`public/chat.html`, dentro de `socket.onmessage`):
+incrementa `conv.unreadCount` localmente na MESMA condição que já
+decide disparar a notificação do navegador (`!isActive &&
+direction === 'in' && notifyEnabled`) — espelha exatamente a condição
+que faz o backend criar a linha em `notifications` (`src/server.js`
+`onMessage`), pra nunca divergir do valor real que um reload traria.
+Incrementado ANTES de `bumpConversation` (que já chama
+`renderConvList()` no final) — evita renderizar a lista duas vezes por
+mensagem.
+
+**Bug relacionado, mesma causa raiz, corrigido junto**: se a conversa
+JÁ estiver aberta (`isActive`) quando uma mensagem nova chega, o
+backend cria a notificação (não sabe que esta aba específica está
+olhando pra ela agora) mas nada marcava como lida automaticamente —
+`markConversationRead` só era chamado ao ABRIR a conversa
+(`openConversation`), não a cada mensagem nova enquanto já aberta. Sem
+isto, um `unreadCount` residual apareceria na lista mesmo pra quem está
+literalmente vendo a conversa em tempo real. Corrigido chamando
+`markConversationRead(conv)` também neste caso.
+
+**Validação**: `vm.Script` no bloco de script principal (2404 linhas,
+`public/chat.html` tem 4 tags `<script>`, o alterado é o de
+`src="https://api.bitrix24.com/..."` seguinte, linha ~1223). Lógica
+testada isolada (função pura extraída, mesmo padrão de teste já usado
+nesta sessão pro backend): 7 casos — mensagem recebida/conversa
+inativa (incrementa), mensagem recebida/conversa ativa (não
+incrementa, não notifica), conversa ativa com `unreadCount` residual
+(marca como lida), mensagem enviada por nós mesmos (nunca incrementa),
+conversa silenciada (nunca incrementa, mesma regra do backend), 3
+mensagens seguidas (acumula 1→2→3, não trava em 1), conversa nova
+ainda não na lista (não quebra, `bumpConversation` dispara o reload
+completo que já existia) — todos corretos.
+
