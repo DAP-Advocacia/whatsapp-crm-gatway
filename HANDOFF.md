@@ -6352,3 +6352,19 @@ pedir):
   desta sessão) cobre a maior parte do risco de sintaxe/lógica óbvia.
   CI ficaria como próximo passo só se o projeto crescer bem mais.
 
+**Nova rota de diagnóstico TEMPORÁRIO**: usuário decidiu tentar
+recuperar os 5 nomes da Parte CT depois de eu esclarecer o que estaria
+em risco — não logout/QR novo, só uma reconexão de socket (mesmas
+credenciais). `POST /admin/diagnostics/soft-reconnect` `{sessionId}`
+(`src/routes/whatsapp.js`, restrito a super admin, mesmo padrão das
+rotas de LID da Parte CP) — chama `gateway.sock.end(undefined)`
+(fecha sem deslogar, diferente de `WhatsAppGateway.disconnect()`, que
+faz `logout()` de verdade e apaga a pasta de credenciais). Confirmado
+antes de escrever a rota: `sock.end(undefined)` sem erro cai no `else`
+(queda temporária) do handler `connection === 'close'`
+(`statusCode` fica `undefined`, não bate com `loggedOut` nem
+`PERMANENT_CODES`) — reconecta sozinho via o backoff já existente,
+nunca exige QR novo. Usa `sessions.listActive()`/`getActiveGateway()`
+(nunca `sessions.get()`), mesma proteção de nunca criar sessão nova só
+de tentar diagnosticar. Remover depois de não ser mais necessária.
+
