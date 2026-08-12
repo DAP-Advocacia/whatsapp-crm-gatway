@@ -6061,3 +6061,154 @@ no boot seguinte, sem intervenção manual.
   se revelar também permanente (ou se um desses 3 se revelar
   recuperável sozinho em algum caso).
 
+### Parte CR — Validado em produção real: backfill automático de contatos + histórico num pareamento zerado; achado um bypass de segurança em `/qr` (2026-08-12)
+
+Usuário perguntou se, ao escanear um QR novo, contatos e histórico já
+sobem automaticamente (dúvida central por trás de toda a Parte CP) —
+até este ponto isso só tinha sido testado isoladamente (mocks), nunca
+observado num pareamento de verdade em produção.
+
+**Preparação do teste**: pra testar o caso "primeira conexão" de
+verdade (não só "sessão caiu e reconectou", que já é coberto pela
+Parte CQ), o usuário pediu explicitamente para apagar todos os dados da
+própria instância "Principal" (`owner_id`/`session_id`
+`2c39349ea593c27fd3092b4fe2c47de7_183168`) e recriá-la zerada. Aplicado
+com dry-run prévio + confirmação explícita:
+- Banco: 12 conversas, 122 mensagens, 2 registros de histórico de
+  atribuição, 11 resumos de IA, 12 contatos, 4 membros de lista —
+  removidos numa única transação (`BEGIN`/`COMMIT`), respeitando a
+  mesma ordem de FKs já mapeada na Parte CP
+  (`messages`/`conversation_assignment_history`/`conversation_summaries`/`conversation_tags`
+  → `conversations`; `contact_list_members`/`lead_form_submissions` →
+  `contacts`; `instance_delegates` → `instances`).
+- Pasta de credenciais (`auth_session/<sessionId>/`, bind mount
+  `/srv/whatsapp-gateway-data/auth_session` no host) removida via
+  `docker exec ... rm -rf`.
+- `docker service update --force` pra garantir que nenhum socket
+  Baileys da sessão antiga sobrevivesse em memória do processo Node
+  (dados reais de clientes — não é uma ação de rotina, só justificada
+  aqui por ser a própria instância de teste do usuário, com
+  confirmação explícita a cada etapa).
+
+**Achado no meio do teste — bypass de segurança real**: depois de
+apagar a linha de `instances`, o processo entrou num loop
+`connecting → 408 timedOut → offline` sem nenhuma ação do usuário,
+mesmo com `startAllExisting()` corretamente ignorando a pasta vazia (só
+inicia sessões com `creds.json` presente, `src/sessions.js`). Causa
+raiz: `assertOwnsSession()` (`src/authz.js`) tem
+`if (id === ownerId) continue;` — quando o `sessionId` pedido é igual
+ao próprio `ownerId` (o padrão do ID da instância "Principal", herdado
+de antes de existir multi-instância), a validação aprova
+incondicionalmente **sem checar se a linha existe em `instances`**.
+Como `GET /qr` (linha ~932) chama `sessions.get(sessionId)` direto
+depois dessa validação, e `SessionManager.get()` cria+inicia a sessão
+se não existir em memória, isso recria um gateway "fantasma" — sem
+`creds.json` e sem registro no banco — que nunca consegue avançar além
+do QR e fica preso reiniciando sozinho.
+
+Em uso normal isso nunca acontece (ninguém apaga a linha de
+`instances` diretamente, só via `DELETE /instances/:id`, que
+provavelmente tem outro cuidado — não verificado). **Não é tratado
+como bug latente de produção**, é uma inconsistência que só existe
+porque este teste manipulou o banco diretamente por fora do fluxo
+normal da aplicação. Registrado aqui porque expõe uma premissa frágil
+(`id === ownerId` ⇒ sempre válido) que vale revisitar se um dia
+existir um fluxo de exclusão/reset de instância pela própria UI.
+
+**Correção aplicada** (só neste incidente, não uma mudança de código):
+chamado `instancesStore.ensureDefault(ownerId)` manualmente — o mesmo
+caminho que qualquer usuário sem nenhuma instância já passa
+automaticamente — pra recriar a linha `(id: ownerId, owner_id: ownerId,
+label: 'Principal')`. Seguido de outro `docker service update --force`
+pra limpar o gateway fantasma. Boot seguinte confirmado consistente:
+`startAllExisting()` não iniciou a sessão (sem `creds.json`, correto),
+QR gerado normalmente ao a UI pedir.
+
+**Resultado do teste real** (o que motivou tudo isso): usuário escaneou
+o QR novo. Backfill completo confirmado direto no banco, crescendo de
+0 pra:
+- **5 contatos, 5 conversas, 104 mensagens** — persistidos automaticamente,
+  sem nenhuma ação manual além do escaneamento.
+- Todos os 5 telefones em formato correto (nenhum LID cru) — a correção
+  da Parte CP também se comportou bem num pareamento real, não só nos
+  testes isolados anteriores.
+- Números estáveis (sem crescimento adicional) depois de ~1min —
+  backfill concluído dentro do esperado.
+
+**Resposta confirmada à pergunta original do usuário**: sim — ao
+escanear um QR novo (primeira conexão de uma instância), contatos e
+histórico completo de conversas sobem automaticamente, sem qualquer
+ação manual adicional. Comportamento implementado na Parte CP,
+validado de ponta a ponta em produção nesta parte.
+
+**Pendência conhecida** (sem mudança nesta sessão): as 4.939 conversas
+antigas ainda com telefone LID cru (16 das 19 instâncias, ver Parte CP)
+continuam precisando de correção retroativa quando cada instância
+estiver online — ferramentas já prontas (`scripts/fix-lid-phones.js`,
+`scripts/fix-lid-contacts.js`, rotas de diagnóstico), só não executadas
+para o restante do universo ainda.
+
+### Parte CS — `BITRIX_HR_WEBHOOK_URL` sumiu da VPS silenciosamente por 8+ dias, sem nenhum log de erro (2026-08-12)
+
+Usuário reportou o aviso vermelho na tela Admin ("Cadastro do Bitrix
+indisponível... esta lista fica sempre vazia") com print. Essa variável
+**já tinha sido configurada e validada** numa sessão anterior (Parte CG,
+04/08) — não era uma configuração nova faltando, era uma que
+desapareceu.
+
+**Alcance real, medido antes de reconfigurar** (não só a tela de
+Usuários — o que motivou investigar mais a fundo): `hierarchy_subordinates`
+tinha 1.136 linhas, **todas** com o mesmíssimo `refreshed_at`
+(`2026-08-04T12:34:56`) — ou seja, o cache nunca recalculou desde
+então, apesar do TTL de 6h (`HIERARCHY_CACHE_TTL_HOURS`) já ter forçado
+a tentativa umas ~32 vezes nesse intervalo. Toda tentativa falhou
+**silenciosamente**: `refreshHierarchyCache()`/`getSubordinates()`
+(`src/bitrixHierarchy.js`) fazem `if (!BITRIX_HR_WEBHOOK_URL) return
+false/[];` ANTES de qualquer `fetch` — nunca chega a logar erro, então
+não sobrou nenhum rastro em `docker logs` (confirmado: 0 ocorrências de
+`bitrixHierarchy` nos logs dos últimos 7 dias). Efeito prático: a
+**delegação automática de acesso por hierarquia** (gestor vê
+WhatsApp dos subordinados automaticamente, Parte CG) ficou rodando com
+a foto organizacional de 04/08 por mais de 1 semana — qualquer
+promoção/transferência de departamento/novo funcionário desde então não
+estava refletida nas permissões. Não foi possível provar o dia exato
+em que a variável foi removida (Docker Swarm só guarda o
+`PreviousSpec` mais recente, não histórico completo de specs).
+
+**Causa da remoção**: não determinada com certeza — possivelmente
+sobrescrita numa edição manual anterior das Environment Variables no
+EasyPanel (mesmo painel onde, nesta mesma sessão, o usuário editou
+`SUPER_ADMIN_OWNER_IDS` e uma vez colou no projeto errado antes de
+achar o certo — não confirmado que seja a mesma causa, só uma hipótese
+plausível dado o padrão de manuseio manual do bloco de env vars).
+
+**Correção**: usuário localizou o webhook de entrada correto no Bitrix
+(Aplicativos → Webhooks → "Usuários - Daniel", ID 874, escopos
+"Usuários" + "Estrutura da empresa" — o mesmo criado na configuração
+original da Parte CG). Testado via `curl` direto contra `user.get` e
+`department.get` ANTES de configurar (evitar descobrir só depois de
+salvar que o webhook tinha sido desativado/perdido permissão) — ambos
+responderam corretamente com dados reais. Variável recolocada no
+EasyPanel, serviço reiniciado automaticamente pelo próprio painel.
+
+**Validação end-to-end pós-deploy**: `refreshHierarchyCache()` chamado
+manualmente (sem esperar o TTL de 6h) — cache saltou de
+`2026-08-04T12:34:56` pra `2026-08-12T20:42:34`, com **66 gestores /
+1.024 vínculos** (contra 1.136 antes — a estrutura organizacional
+mudou de fato nesse intervalo, reforçando por que a lacuna importava).
+`listEmployees()` devolveu **764 funcionários** reais (nome, email,
+cargo, `UF_DEPARTMENT`, `DATE_REGISTER`) — antes disso, `null` (a
+condição `if (!BITRIX_HR_WEBHOOK_URL) return null;` cortava tudo antes
+do `fetch`).
+
+**Pendência sinalizada, não implementada nesta sessão**: hoje esse
+tipo de falha (variável de ambiente ausente/removida) é 100%
+silenciosa em produção — só descoberta porque o frontend (Admin) tem
+um aviso visível na tela. Recursos que dependem da mesma variável mas
+NÃO têm aviso visível equivalente (a delegação automática de
+hierarquia em si, `getSubordinates()`) ficam degradados sem nenhum
+sinal pra ningém — vale considerar um log de warning único no boot do
+servidor pra cada variável opcional-mas-importante que estiver ausente
+(`BITRIX_HR_WEBHOOK_URL`, e possivelmente outras do mesmo padrão), em
+vez de descoberta só quando alguém nota o efeito colateral dias depois.
+
