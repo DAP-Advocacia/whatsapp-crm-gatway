@@ -6212,3 +6212,75 @@ servidor pra cada variável opcional-mas-importante que estiver ausente
 (`BITRIX_HR_WEBHOOK_URL`, e possivelmente outras do mesmo padrão), em
 vez de descoberta só quando alguém nota o efeito colateral dias depois.
 
+### Parte CT — Conversas de backfill (1ª conexão) ficavam "sem nome" pra sempre (2026-08-12)
+
+Usuário reportou com print: as 5 conversas criadas no teste real da
+Parte CR apareceram na lista SEM nome (só telefone) — `Conversa sem
+atendente definido`.
+
+**Causa raiz**: `_processIncomingMessage` só preenche `pushName` a
+partir de `m.pushName` (linha ~753), e **mensagens de histórico
+(`messaging-history.set`) nunca trazem esse campo** — só mensagens AO
+VIVO trazem. Como o backfill de histórico (Parte CB, estendido na Parte
+CP) é justamente o caminho que cria a MAIORIA das conversas numa
+instância nova, isso deixava toda primeira conexão com nome ausente
+até a próxima mensagem ao vivo de cada contato — que podia nunca
+acontecer (conversa antiga, cliente que não escreve de novo).
+
+**O dado existia, só não estava sendo lido**: o próprio evento
+`messaging-history.set` do Baileys entrega, junto com `messages`, um
+array `contacts: Contact[]` — sempre presente (pode vir vazio), com o
+nome de exibição de cada contato (`Contact.notify`/`Contact.name`,
+`node_modules/@whiskeysockets/baileys/lib/Types/Contact.d.ts`). O
+código lia só `{ messages, syncType, isLatest }`, descartando
+`contacts` por completo. O mesmo vale pros eventos ao vivo
+`contacts.upsert`/`contacts.update` (já escutados, mas só pra CONTAGEM
+— `trackContacts`/`getContactCount` — nunca pra extrair nome).
+
+**Correção** (`src/whatsapp.js`): novo método `_extractContactInfo(contact)`
+— nome via `notify` (o que o PRÓPRIO contato definiu, mesmo significado
+de `m.pushName`, prioridade) ou `name` (agenda salva, fallback);
+telefone via `Contact.phoneNumber` (formato PN dedicado, quando vem
+preenchido) ou `_resolveLidPhone(contact.id)` (`Contact.id` pode vir em
+formato jid OU lid — reaproveita o mesmo helper já usado no resto do
+arquivo, mesma semântica de devolver `null` sem mapeamento ainda).
+Devolve `{ phone, name } | null` (null quando não sobra nome nenhum, ou
+telefone não resolve). Plugado em 3 lugares: `contacts.upsert`,
+`contacts.update` (ambos via `trackContacts`, que já existia) e dentro
+de `messaging-history.set` (novo — processa `contacts` ANTES de
+`messages`, mesmo evento). Emite `this.emit('contact', { phone, name })`
+— evento novo, paralelo a `'message'`.
+
+**`src/sessions.js`**: `SessionManager` ganha callback `onContact`
+(mesmo padrão de `onStatus`/`onMessage`/`onPresence`) — conecta
+`gateway.on('contact', ...)` ao callback recebido no construtor.
+
+**`src/server.js`**: `onContact` chama `contactsStore.upsertContact`
+direto (sem passar pelo dedupe `contactSyncedThisRun` de `onMessage` —
+fonte diferente, nome mais confiável, pode chegar depois de já ter
+sincronizado sem nome). `upsertContact` já é seguro chamar repetido
+(`coalesce`, nunca sobrescreve nome salvo com vazio, `src/contacts.js`)
+— o único custo é uma query extra por contato, aceitável pro volume
+normal.
+
+**Validação**: `node -c` nos 3 arquivos. Testado isolado (sem socket
+real, mesmo padrão já usado nesta sessão pra `_resolveLidPhone`/
+`retryManually`): 8 casos de `_extractContactInfo` (notify, name,
+notify-vence-sobre-name, phoneNumber dedicado, sem nome nenhum → null,
+LID mapeado, LID não mapeado → null, contact null → null) — todos
+corretos. Encadeamento `SessionManager` → `onContact(sessionId, phone,
+name)` testado com mock de `gateway.emit('contact', ...)` — evento
+chega com os 3 parâmetros certos.
+
+**Pendência**: as 5 conversas específicas do teste da Parte CR (já
+criadas sem nome, antes desta correção existir) precisam de correção
+retroativa pontual — a correção nova só vale pra CONEXÕES FUTURAS
+(nada reprocessa histórico já persistido automaticamente). Instâncias
+com o mesmo problema em outras 15 sessões (mesma pendência geral de LID
+da Parte CP) herdam esta correção só daqui pra frente — não há uma
+varredura retroativa de nome equivalente aos scripts de LID
+(`fix-lid-phones.js`/`fix-lid-contacts.js`), porque o nome (diferente
+do telefone) não é um dado ERRADO salvo, é só AUSENTE — menor urgência,
+mas resolvível do mesmo jeito (ler `contacts.upsert`/`contacts.update`
+da sessão já online, sem precisar de um backfill novo).
+

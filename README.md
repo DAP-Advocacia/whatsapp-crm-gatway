@@ -719,6 +719,15 @@ continuam por instância (cada uma pode ter textos próprios).
   CP); se o WhatsApp ainda não tiver esse mapeamento, o contato simplesmente não
   é sincronizado naquele momento (tenta de novo na próxima mensagem), em vez de
   salvar um telefone errado.
+- **Nome de contato — duas fontes independentes** (`onMessage`/`pushName` acima
+  cobre só mensagem NOVA recebida — histórico nunca traz esse campo, então toda
+  conversa criada via backfill numa 1ª conexão ficava sem nome até a próxima
+  mensagem ao vivo, HANDOFF Parte CT): `onContact`, callback novo e paralelo do
+  `SessionManager`, alimentado pela AGENDA do próprio WhatsApp
+  (`contacts.upsert`/`contacts.update` ao vivo, e o array `contacts` que vem
+  dentro do próprio evento de backfill de histórico) — chama `upsertContact` de
+  novo, independente do `onMessage` já ter rodado sem nome. Mesmo `coalesce` de
+  segurança acima garante que as duas fontes convivem sem se atropelar.
 - **Contatos**: criar manualmente, editar, excluir, **"Importar de conversas"**
   (cria um contato pra cada conversa de **qualquer** instância deste dono que ainda
   não tenha virado contato, sem nome), ou **"Importar de arquivo (CSV)"** — lê um

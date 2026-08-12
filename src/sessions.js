@@ -16,13 +16,18 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
     this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageStatus = onMessageStatus; // (sessionId, phone, messageId, status) => void
     this.onPresence = onPresence; // (sessionId, phone, state) => void
+    // Nome de contato vindo direto da agenda do WhatsApp (contacts.upsert/
+    // update ao vivo, ou a lista `contacts` dentro do backfill de
+    // histórico) — diferente de onMessage/pushName, que só vem em mensagem
+    // NOVA recebida (nunca em histórico). Ver WhatsAppGateway._extractContactInfo.
+    this.onContact = onContact; // (sessionId, phone, name) => void
     this.sessions = new Map(); // sessionId -> WhatsAppGateway
   }
 
@@ -53,6 +58,7 @@ class SessionManager {
     gateway.on('reaction', ({ phone, targetId, emoji, direction }) => this.onReaction?.(id, phone, targetId, emoji, direction));
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
+    gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));
     gateway.start().catch((err) =>
       console.error(`[whatsapp:${id}] falha ao iniciar sessão:`, err.message)
     );

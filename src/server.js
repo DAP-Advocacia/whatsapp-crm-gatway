@@ -396,6 +396,29 @@ const sessions = new SessionManager({
       console.error('[server] falha ao processar mensagem:', err.message);
     }
   },
+  // Nome de contato vindo da AGENDA do WhatsApp (contacts.upsert/update ao
+  // vivo, ou o backfill de histórico — ver WhatsAppGateway._extractContactInfo),
+  // não de uma mensagem em si. Existe separado de onMessage/pushName porque
+  // mensagem de HISTÓRICO nunca traz pushName (só mensagem nova recebida
+  // traz) — sem isto, toda conversa criada via backfill (1ª conexão de uma
+  // instância nova) ficava com nome null até a PRÓXIMA mensagem AO VIVO
+  // daquele contato (podendo nunca acontecer) — usuário reportou com print
+  // (sessão 2026-08-12).
+  //
+  // NÃO reusa o corte de contactSyncedThisRun (chave só session::phone) —
+  // aquele dedupe existe pra evitar volume de query à toa quando a MESMA
+  // fonte (pushName de mensagem) já rodou; aqui a fonte é outra (nome da
+  // agenda, mais confiável) e pode chegar DEPOIS de onMessage já ter
+  // sincronizado sem nome — vale sempre chamar de novo. upsertContact já é
+  // seguro chamar repetido (coalesce, nunca sobrescreve nome salvo com
+  // vazio, ver src/contacts.js) — o único custo é uma query extra, aceitável
+  // pro volume normal de contatos por pareamento.
+  onContact: (sessionId, phone, name) => {
+    if (!phone || !name) return;
+    instancesStore.ownerOf(sessionId)
+      .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name }))
+      .catch((err) => console.error('[contacts] falha ao sincronizar nome de contato da agenda:', err.message));
+  },
   onReaction: async (sessionId, phone, targetId, emoji, direction) => {
     try {
       await store.setMessageReaction(sessionId, phone, targetId, emoji, direction);

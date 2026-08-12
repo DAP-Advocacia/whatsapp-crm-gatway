@@ -230,7 +230,29 @@ class WhatsAppGateway extends EventEmitter {
     // telefone) — o dedupe por (conversation_id, wa_message_id) em
     // store.addMessage cobre sozinho o caso de a mesma mensagem chegar de
     // novo depois por messages.upsert.
-    this.sock.ev.on('messaging-history.set', async ({ messages, syncType, isLatest }) => {
+    this.sock.ev.on('messaging-history.set', async ({ messages, contacts, syncType, isLatest }) => {
+      // `contacts` é sempre um array (pode vir vazio) — nome de exibição de
+      // cada contato do backfill. Processado ANTES das mensagens de
+      // propósito: mensagens de histórico nunca trazem m.pushName (só
+      // mensagens ao vivo trazem, ver _processIncomingMessage), então sem
+      // isto uma instância nova ficava com N conversas "sem nome" até a
+      // PRÓXIMA mensagem ao vivo de cada contato (podendo nunca acontecer)
+      // — usuário reportou com print (sessão 2026-08-12, mesmo dia da Parte
+      // CR/CS). Emite os nomes primeiro, assim quando as mensagens abaixo
+      // criam a conversa (upsertContact, ver src/server.js onMessage) o
+      // nome já pode estar disponível, dependendo da ordem de processamento
+      // no consumidor — mas não é uma garantia forte, upsertContact tem que
+      // funcionar OK dos dois lados de qualquer ordem (coalesce, não
+      // sobrescreve com vazio).
+      for (const c of contacts || []) {
+        try {
+          const info = await this._extractContactInfo(c);
+          if (info) this.emit('contact', info);
+        } catch (err) {
+          console.error('[whatsapp] falha ao extrair nome de contato do histórico:', err.message);
+        }
+      }
+
       if (!messages?.length) return;
 
       let saved = 0;
@@ -287,9 +309,17 @@ class WhatsAppGateway extends EventEmitter {
     // Acumula contatos "vistos" pra estimativa de contagem no card da
     // instância (ver getContactCount) — Baileys só entrega incrementos
     // (upsert no sync inicial, update depois), nunca um total pronto.
+    // Também aproveita a mesma lista pra emitir nome+telefone (ver
+    // _extractContactInfo) — contacts.upsert dispara no sync inicial de uma
+    // sessão já pareada há mais tempo (fora do backfill de histórico, que
+    // tem sua própria lista de contacts dentro de messaging-history.set,
+    // tratada abaixo), contacts.update em qualquer troca de nome depois.
     const trackContacts = (list) => {
       for (const c of list || []) {
         if (c?.id) this.contactIds.add(c.id);
+        this._extractContactInfo(c)
+          .then((info) => { if (info) this.emit('contact', info); })
+          .catch((err) => console.error('[whatsapp] falha ao extrair nome de contato:', err.message));
       }
     };
     this.sock.ev.on('contacts.upsert', trackContacts);
@@ -607,6 +637,40 @@ class WhatsAppGateway extends EventEmitter {
     // não processar agora (a próxima mensagem tenta de novo) do que salvar
     // com um telefone errado que nunca mais seria corrigido sozinho.
     return null;
+  }
+
+  // Nome + telefone resolvido a partir de um objeto Contact do Baileys —
+  // usado tanto pelos eventos ao vivo (contacts.upsert/update) quanto pelos
+  // `contacts` que vêm dentro de messaging-history.set (backfill). Precisa
+  // existir porque mensagens de HISTÓRICO nunca trazem m.pushName (só
+  // mensagens ao vivo trazem — ver _processIncomingMessage), então sem ler
+  // esta lista separada as 5+ primeiras conversas de um pareamento novo
+  // ficavam com nome null pra sempre (usuário reportou com print, sessão
+  // 2026-08-12 — mesmo dia da Parte CR/CS).
+  //
+  // Contact.id vem em formato jid OU lid (preferencialmente jid, por doc do
+  // próprio Baileys) — reaproveita _resolveLidPhone, que já trata os dois
+  // casos. Contact.phoneNumber (formato PN dedicado) é preferido quando
+  // presente por evitar uma resolução de LID a mais, mas nem sempre vem
+  // preenchido.
+  //
+  // Nome: prioriza `notify` (nome que o PRÓPRIO contato definiu no WhatsApp
+  // dele — mesmo significado de m.pushName em mensagem ao vivo, mantém
+  // consistência) sobre `name` (nome que nós/o dono do número salvou na
+  // agenda dele — mais raro de vir preenchido via Web, mas serve de
+  // fallback). Devolve `{ phone, name } | null` — null quando não sobra
+  // nome nenhum pra extrair (não vale a viagem ao banco só pra não mudar
+  // nada) ou quando o telefone não resolve (mesmo critério de descarte de
+  // _resolveLidPhone).
+  async _extractContactInfo(contact) {
+    if (!contact) return null;
+    const name = contact.notify || contact.name || null;
+    if (!name) return null;
+    const phone = contact.phoneNumber
+      ? this._jidToPhone(contact.phoneNumber) || null
+      : await this._resolveLidPhone(contact.id);
+    if (!phone) return null;
+    return { phone, name };
   }
 
   // Wrapper PÚBLICO de _resolveLidPhone pensado pro diagnóstico de conversas
