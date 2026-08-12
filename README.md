@@ -1016,6 +1016,18 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
   ação manual. Não é a agenda telefônica inteira (contato que nunca
   trocou mensagem com aquele número) — o Baileys não expõe isso de forma
   utilizável (ver HANDOFF Parte CP).
+- **Desconexão e reconexão automática**: uma queda temporária (rede,
+  timeout) reconecta sozinha com backoff crescente (3s, 6s, 12s... até um
+  teto de 5min, zera ao reconectar de novo) — não precisa de nenhuma ação.
+  Já uma recusa que o WhatsApp trata como permanente (número
+  restrito/banido, outro aparelho assumiu a sessão, credencial corrompida)
+  faz o card mostrar **"Precisa de atenção"** com o motivo explicado e um
+  botão **"Tentar reconectar"** — o app para de insistir sozinho nesses
+  casos (ver HANDOFF Parte CQ: até 12/08/2026, o código tentava reconectar
+  a cada 3s pra sempre mesmo numa recusa permanente, o que sobrecarregava o
+  servidor inteiro e cada tentativa nova prolongava o próprio bloqueio do
+  WhatsApp). "Tentar reconectar" usa as credenciais já salvas (não apaga
+  nada); se não resolver, "Remover" e parear de novo continua disponível.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
@@ -1282,10 +1294,11 @@ revelar que o recurso existe).
 | `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
 | `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
-| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount`; resposta também traz `limit` (ver §14). |
+| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` (ver §14); resposta também traz `limit`. |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |
 | `instances/:id` | PUT | Body `{ owner, label }`. Renomeia. |
 | `instances/:id?owner=` | DELETE | Desconecta e remove a instância. |
+| `instances/:id/reconnect?owner=` | POST | Botão "Tentar reconectar" (§14) — só faz efeito se a instância estiver marcada `needsAttention`; tenta reconectar com as credenciais já salvas, sem apagar nada. 404 se a instância não existe ou não está ativa no processo. |
 | `qr?session=` | GET | Cria/inicia a instância e devolve `{ qr, status }`. |
 | `status?session=` | GET | `{ status }` — `'connecting' \| 'online' \| 'offline'`. |
 | `history?session=&dealId=&phone=` | GET | Histórico de mensagens + `connectionStatus` + `aiSummary`/`aiSummaryUpdatedAt` (resumo salvo, se já foi gerado). Também salva o vínculo telefone → negócio. |

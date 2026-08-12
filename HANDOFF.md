@@ -5964,4 +5964,100 @@ conversa; contagens de mensagem batendo com migradas+preexistentes;
   numa API de produção; considerar remover depois que as 16 instâncias
   restantes forem processadas, se não houver mais uso previsto.
 
+### Parte CQ — Loop de reconexão infinito derrubava o servidor inteiro (2026-08-12)
+
+Usuário perguntou "a instância está desconectando toda hora, qual o
+motivo?" — investigação (acesso SSH à VPS) revelou que não era a
+instância dele especificamente: o **container inteiro tinha reiniciado
+4 vezes em menos de 1 hora** (`ExitCode 137`, `docker service ps`),
+derrubando TODAS as instâncias de WhatsApp de todos os usuários juntas
+a cada vez, mesmo as saudáveis — a dele reconectava sozinha depois (por
+isso "parecia" só ela desconectando, era só a mais visível pro
+usuário).
+
+**Causa raiz**: 2 instâncias de OUTROS usuários (`..._153452`,
+`..._182084__msj80t2evfq3`) receberam `403 forbidden` do WhatsApp — que
+significa recusa de acesso permanente (conta restrita/banida ou
+credencial rejeitada), não uma queda de rede temporária. O código em
+`src/whatsapp.js` (`connection.update`) só tratava `401 loggedOut` como
+definitivo; qualquer outro `statusCode`, incluindo `403`, caía no
+`else` de "queda temporária, reconecta em 3s" — só que o WhatsApp
+seguia recusando, então virava um loop sem fim. Medido nos logs do
+container: **150 tentativas de reconexão em 7 minutos**, uma a cada 3s
+cravados. Isso sobrecarregava o processo até o Swarm matá-lo. Pesquisa
+([DisconnectReason — baileys.wiki](https://baileys.wiki/docs/api/enumerations/DisconnectReason/),
+[circuit breaker pra reconnect loop — openclaw#16270](https://github.com/openclaw/openclaw/issues/16270))
+confirmou um agravante: cada tentativa de reconexão numa conta já
+restrita **reseta o timer do próprio cooldown do WhatsApp** (48-72h) —
+o loop não só sobrecarregava o servidor, prolongava indefinidamente o
+bloqueio das duas contas afetadas.
+
+**Correção, duas camadas** (`src/whatsapp.js`):
+
+1. **Detecção de erro permanente**: `403 forbidden`, `440
+   connectionReplaced` (outro dispositivo assumiu a sessão — reconectar
+   brigaria com ele pra sempre) e `500 badSession` (credenciais
+   corrompidas) agora marcam `needsAttention = true` e **param de
+   reconectar sozinhos** — sem `setTimeout`, sem loop. Diferente de
+   `loggedOut` (que apaga as credenciais, via `requestFreshQr`), aqui
+   as credenciais NÃO são apagadas automaticamente — não há certeza
+   absoluta de ser definitivo (pode ser uma restrição de 48-72h que já
+   passou), então a decisão de reconectar ou desistir de vez fica com o
+   usuário, não com o código.
+2. **Backoff exponencial** pra tudo que sobrar (quedas temporárias de
+   verdade — rede, timeout, etc): `3s → 6s → 12s... teto 5min`, zera ao
+   reconectar com sucesso. Segunda camada de proteção — mesmo um código
+   que eu não tenha previsto como permanente também não vira loop
+   agressivo, o intervalo cresce sozinho.
+
+**Reconexão manual** (`WhatsAppGateway.retryManually()`): decisão
+explícita do usuário — tenta reconectar com as credenciais JÁ salvas
+(não apaga nada, diferente de remover+re-parear do zero), reseta
+`needsAttention`/backoff. No-op se a sessão não estiver em
+`needsAttention` (evita reiniciar uma sessão já saudável por engano).
+Rota nova `POST /instances/:id/reconnect` — usa
+`sessions.getActiveGateway()` (não `get()`, que criaria sessão nova por
+engano se ela não estivesse em memória por algum motivo).
+
+**Frontend** (`public/instances.html`): `GET /instances` passou a
+devolver `needsAttention`/`lastDisconnectReason` por instância — card
+ganha um aviso visível (`.instance-attention`, mesma cor vermelha de
+"offline", mas com texto explicando o motivo em linguagem não-técnica,
+`DISCONNECT_REASON_LABEL`) e um botão "Tentar reconectar" quando
+`needsAttention`. "Ver QR" continua disponível ao lado, pra quem
+preferir re-parear do zero em vez de tentar reconectar com o que já
+está salvo.
+
+**Validação**: `node -c` nos 3 arquivos backend + `vm.Script` em
+`instances.html`. Lógica de detecção/backoff testada isoladamente (sem
+precisar de socket real): todos os 6 `statusCode` testados
+(403/440/500 permanentes; 408/401/503 não — 401 tratado à parte)
+classificados corretamente; backoff cresce exponencial até o teto de
+5min, nunca ultrapassa. `retryManually()` testado isolado (mock de
+`start()`): reseta todo o estado e chama `start()`; no-op quando
+`needsAttention` já é `false`. Rota `POST /instances/:id/reconnect`
+testada contra servidor isolado (porta 3399, `AUTH_FOLDER` também
+isolado pra nunca arriscar tocar credenciais reais): 404 pra instância
+inexistente, no-op seguro numa instância sem `needsAttention`. Dados de
+teste limpos, confirmado 0 linhas residuais.
+
+**Confirmado em produção após o deploy**: container novo processou as
+mesmas 2 sessões problemáticas — 1 tentativa cada (não mais 150),
+`isPermanent=true`, mensagem clara de "parando de reconectar sozinho",
+sem loop. A instância do próprio usuário (que nunca teve o problema,
+só sofria o efeito colateral dos restarts) voltou a `online` sozinha
+no boot seguinte, sem intervenção manual.
+
+**Pendências conhecidas**:
+- [ ] As 2 instâncias que ficaram em `needsAttention` (`..._153452`,
+  `..._182084__msj80t2evfq3`) continuam paradas até o dono de cada uma
+  clicar "Tentar reconectar" ou remover/re-parear — ninguém foi
+  notificado proativamente (não existe hoje um mecanismo de avisar
+  "sua instância precisa de atenção" fora de abrir a tela de
+  Instâncias).
+- [ ] Lista de códigos permanentes (`403`/`440`/`500`) é um julgamento
+  baseado na documentação/experiência da comunidade Baileys, não uma
+  garantia formal do WhatsApp — pode precisar de ajuste se outro código
+  se revelar também permanente (ou se um desses 3 se revelar
+  recuperável sozinho em algum caso).
 
