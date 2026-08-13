@@ -616,7 +616,12 @@
   const app = document.getElementById('app');
 
   const state = {
+    // 'deal' (aba de Negócio) ou 'contact' (aba de Contato, HANDOFF Parte
+    // DE) — só um de dealId/contactId fica preenchido por vez, nunca os
+    // dois juntos.
+    entityType: null,
     dealId: null,
+    contactId: null,
     appToken: null,        // token de app (ver verifyAuth) — mandado em toda chamada de API
     ownerId: null,        // usuário do Bitrix (member_id + user id) — pode ter várias instâncias
     instances: [],        // instâncias de WhatsApp desse usuário
@@ -639,8 +644,12 @@
   // Lembra qual instância foi escolhida pra cada negócio (só importa quando
   // o usuário tem mais de uma) — assim reabrir a mesma conversa não obriga a
   // escolher de novo toda hora.
-  function instanceStorageKey(dealId) {
-    return `wa-instance-deal-${dealId}`;
+  // Genérico (era só "deal" antes) — agora também abre de dentro do card
+  // de Contato (HANDOFF Parte DE), precisa de uma chave própria pra não
+  // colidir com o mesmo ID numérico que, por coincidência, também exista
+  // como dealId em outro contexto.
+  function instanceStorageKey(entityType, id) {
+    return `wa-instance-${entityType}-${id}`;
   }
 
   // ---------------------------------------------------------
@@ -797,11 +806,16 @@
     bindMessagesInteractions();
     renderReplyPreview();
 
-    document.getElementById('refreshBtn').addEventListener('click', () => loadHistory(state.dealId));
+    document.getElementById('refreshBtn').addEventListener('click', () => loadHistory());
     document.getElementById('openCrmBtn').addEventListener('click', () => {
-      if (window.BX24) {
-        BX24.openPath('/crm/deal/details/' + state.dealId + '/');
-      }
+      if (!window.BX24) return;
+      // Abre o card certo dependendo de onde esta aba foi carregada (HANDOFF
+      // Parte DE) — antes sempre assumia Negócio, quebraria (URL com "null")
+      // se clicado dentro da aba de Contato.
+      const path = state.entityType === 'contact'
+        ? '/crm/contact/details/' + state.contactId + '/'
+        : '/crm/deal/details/' + state.dealId + '/';
+      BX24.openPath(path);
     });
     const instanceSelectEl = document.getElementById('instanceSelect');
     if (instanceSelectEl) {
@@ -1445,6 +1459,15 @@
   // ---------------------------------------------------------
   // Integração com o Bitrix24 (BX24)
   // ---------------------------------------------------------
+  // Devolve { entityType: 'deal'|'contact', id } — antes só existia a aba
+  // de Negócio (CRM_DEAL_DETAIL_TAB, tratava tudo como dealId direto);
+  // agora também abre de dentro do card de CONTATO
+  // (CRM_CONTACT_DETAIL_TAB, HANDOFF Parte DE — usuário perguntou "aonde
+  // está o dapZAP dentro do card" abrindo um Contato, não aparecia porque
+  // só existia o placement de Negócio). `placementInfo.placement` é o
+  // NOME do placement que o Bitrix usou pra abrir esta página — é isso
+  // que diferencia os dois contextos, `.options.ID` sozinho não diz qual
+  // tipo de entidade é.
   function initBx24() {
     return new Promise((resolve, reject) => {
       if (!window.BX24) {
@@ -1459,17 +1482,18 @@
 
         const placementInfo = BX24.placement.info();
         // Quando o app é aberto pelo menu lateral (placement DEFAULT),
-        // não existe um negócio no contexto — só dentro da aba do card.
+        // não existe negócio/contato no contexto — só dentro de uma aba de card.
         if (!placementInfo || placementInfo.placement === 'DEFAULT') {
           reject({ code: 'NO_PLACEMENT' });
           return;
         }
-        const dealId = placementInfo?.options?.ID;
-        if (!dealId) {
+        const id = placementInfo?.options?.ID;
+        if (!id) {
           reject({ code: 'NO_PLACEMENT' });
           return;
         }
-        resolve(dealId);
+        const entityType = placementInfo.placement === 'CRM_CONTACT_DETAIL_TAB' ? 'contact' : 'deal';
+        resolve({ entityType, id });
       });
     });
   }
@@ -1514,6 +1538,21 @@
     };
   }
 
+  // Versão pro card de CONTATO direto (HANDOFF Parte DE) — mais simples
+  // que loadDealContact: o contato JÁ é a entidade em contexto, sem
+  // precisar resolver um negócio no meio do caminho primeiro.
+  async function loadContactPhone(contactId) {
+    const contact = await callMethod('crm.contact.get', { id: contactId });
+    const phoneEntry = (contact.PHONE || [])[0];
+    if (!phoneEntry) {
+      throw { code: 'NO_PHONE' };
+    }
+    return {
+      phone: normalizePhone(phoneEntry.VALUE),
+      name: [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ') || null,
+    };
+  }
+
   function normalizePhone(raw) {
     // remove tudo que não é dígito e garante DDI 55 na frente
     let digits = (raw || '').replace(/\D/g, '');
@@ -1524,7 +1563,16 @@
   // ---------------------------------------------------------
   // Comunicação com o backend (gateway WhatsApp)
   // ---------------------------------------------------------
-  async function loadHistory(dealId) {
+  // Sem parâmetro (antes recebia dealId) — lê state.dealId direto. Sem
+  // isso, um chamador passando state.dealId===null (aba de Contato,
+  // HANDOFF Parte DE) faria encodeURIComponent(null) virar a STRING
+  // LITERAL "null" na query string — o backend trataria isso como um
+  // dealId verdadeiro (`if (dealId)` é true pra qualquer string não-vazia,
+  // inclusive "null") e salvaria lixo em conversations.deal_id. Monta o
+  // parâmetro dealId condicionalmente — omite por completo quando não há
+  // negócio no contexto (aba de Contato), em vez de mandar um valor
+  // "vazio" mal formado.
+  async function loadHistory() {
     renderState('loading');
     app.innerHTML = `
       <div class="state-screen">
@@ -1534,7 +1582,8 @@
       </div>`;
 
     try {
-      const res = await apiFetch(`${API_BASE}/history?session=${encodeURIComponent(state.session)}&dealId=${encodeURIComponent(dealId)}&phone=${encodeURIComponent(state.phone)}`);
+      const dealIdParam = state.dealId ? `&dealId=${encodeURIComponent(state.dealId)}` : '';
+      const res = await apiFetch(`${API_BASE}/history?session=${encodeURIComponent(state.session)}${dealIdParam}&phone=${encodeURIComponent(state.phone)}`);
       if (!res.ok) throw new Error('Falha ao carregar histórico');
       const data = await res.json();
       state.messages = data.messages || [];
@@ -1546,7 +1595,7 @@
       renderState('error', {
         title: 'Não foi possível carregar a conversa',
         desc: 'Verifique a conexão com o servidor de WhatsApp e tente novamente.',
-        retry: () => loadHistory(dealId),
+        retry: () => loadHistory(),
       });
     }
   }
@@ -1669,7 +1718,7 @@
 
       if (data.status === 'online') {
         stopQrPolling();
-        await loadHistory(state.dealId);
+        await loadHistory();
         return;
       }
 
@@ -1690,7 +1739,7 @@
   function switchInstance(newInstanceId) {
     if (!newInstanceId || newInstanceId === state.session) return;
     state.session = newInstanceId;
-    localStorage.setItem(instanceStorageKey(state.dealId), newInstanceId);
+    localStorage.setItem(instanceStorageKey(state.entityType, state.dealId || state.contactId), newInstanceId);
 
     stopQrPolling();
     if (state.socket) {
@@ -1704,18 +1753,23 @@
 
   async function boot() {
     try {
-      const dealId = await initBx24();
-      state.dealId = dealId;
+      // entityType 'deal' (aba de Negócio, sempre existiu) ou 'contact'
+      // (aba de Contato, HANDOFF Parte DE) — só um dos dois IDs fica
+      // preenchido, o outro permanece null (nunca os dois ao mesmo tempo).
+      const { entityType, id } = await initBx24();
+      state.entityType = entityType;
+      state.dealId = entityType === 'deal' ? id : null;
+      state.contactId = entityType === 'contact' ? id : null;
 
       state.ownerId = await resolveOwner();
       state.instances = await loadInstances(state.ownerId);
 
-      const remembered = localStorage.getItem(instanceStorageKey(dealId));
+      const remembered = localStorage.getItem(instanceStorageKey(entityType, id));
       const rememberedStillValid = state.instances.find((i) => i.id === remembered);
       state.session = rememberedStillValid ? remembered : state.instances[0]?.id || null;
       if (!state.session) throw new Error('nenhuma instância de WhatsApp disponível');
 
-      const { phone, name } = await loadDealContact(dealId);
+      const { phone, name } = entityType === 'deal' ? await loadDealContact(id) : await loadContactPhone(id);
       state.phone = phone;
       state.contactName = name;
 

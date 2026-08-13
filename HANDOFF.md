@@ -6897,3 +6897,84 @@ formatado corretamente com todos os campos, título ausente omitido sem
 deixar "null" no texto, subtítulo ausente idem, `ENTITY_ID`/
 `ENTITY_TYPE` corretos quando `dealId` presente.
 
+### Parte DE — DapZAP agora aparece também no card de CONTATO, não só Negócio (2026-08-13)
+
+Usuário perguntou "aonde está o dapZAP dentro do card" com print de um
+card de **Contato** (`/crm/contact/details/4359362/`, confirmado pela
+URL) — o app só existia como aba em card de **Negócio**
+(`CRM_DEAL_DETAIL_TAB`), nunca foi registrado pra Contato.
+
+**Investigação paralela, não confundir com esta correção**: o mesmo
+print inicial (antes de saber que era um Contato) parecia mostrar uma
+lista de **Smart Process Automation** ("Gerente De Marketing", com
+colunas CPF/NÚMERO DO PROCESSO) — levantei os 24 tipos de SPA
+configurados no portal via `crm.type.list` pra investigar, mas a URL
+real revelou que o card em questão era um Contato normal, não um SPA.
+Registrado aqui só porque a investigação de SPA aconteceu antes da
+resposta certa chegar — não afeta esta correção.
+
+Também nesta conversa, tratado em separado: pergunta sobre uma aba
+"Mensagem" NATIVA (dentro da barra de atividades do Bitrix, junto de
+Comentário/Tarefa/E-mail, vista numa integração de referência de
+outro produto) — isso é o mecanismo **Open Channels Connector**
+(`imconnector.*`/`imopenlines.*`) do Bitrix, uma integração de
+plataforma bem maior (registrar um canal de mensageria de verdade,
+não um placement de aba) — investigado e explicado ao usuário como
+proposta separada, sem decisão de implementação ainda.
+
+**Causa raiz confirmada**: `renderInstallPage()` (`src/server.js`) só
+chamava `placement.bind` com `PLACEMENT: 'CRM_DEAL_DETAIL_TAB'`.
+Adicionado o par `placement.unbind`/`placement.bind` com
+`PLACEMENT: 'CRM_CONTACT_DETAIL_TAB'` (confirmado o nome exato via
+documentação oficial do Bitrix antes de usar), mesmo `HANDLER`
+(`index.html`).
+
+**`public/index.html` precisou de mudança real, não só o placement**
+— o fluxo inteiro (`initBx24`, `boot`, `loadDealContact`,
+`instanceStorageKey`, botão "Abrir no CRM") assumia
+`placementInfo.options.ID` sempre sendo um `dealId`. Corrigido:
+- `initBx24()` agora devolve `{ entityType, id }` — `entityType`
+  ('deal'|'contact') vem de `placementInfo.placement`, não só da
+  presença de um ID (um Contato também tem `.options.ID`, só que é o
+  ID DELE, não de um negócio).
+- `loadContactPhone(contactId)` novo — mais simples que
+  `loadDealContact` (não precisa resolver negócio no meio, o contato
+  já É a entidade em contexto): `crm.contact.get` direto.
+- `state.entityType`/`state.contactId` novos — só um de
+  `dealId`/`contactId` fica preenchido por vez.
+- `instanceStorageKey(entityType, id)` — antes só `(dealId)`; sem
+  isso, um Contato e um Negócio com o MESMO número (coincidência de
+  ID) colidiriam na mesma chave de `localStorage`.
+- Botão "Abrir no CRM" — branch pro path certo (`/crm/deal/details/`
+  vs `/crm/contact/details/`) dependendo do `entityType`.
+
+**Bug real encontrado e corrigido no processo** (não existia ainda em
+produção, pego durante a implementação): `loadHistory(dealId)` montava
+a URL com `encodeURIComponent(dealId)` incondicional — se `dealId`
+fosse `null` (contexto de Contato, sem negócio), isso gerava a STRING
+LITERAL `"dealId=null"` na URL (não omite o parâmetro). O backend
+(`GET /history`) faz `if (dealId) { store.setDealForPhone(...) }` — a
+string `"null"` é uma string não-vazia, então seria tratada como
+verdadeira, salvando o LIXO `"null"` como se fosse um `deal_id` real
+em `conversations.deal_id`. Corrigido: `loadHistory()` sem parâmetro
+(lê `state.dealId` direto), monta o parâmetro condicionalmente — omite
+por completo quando não há negócio no contexto.
+
+**API não tem atalho pra registrar o placement remotamente**:
+confirmado testando `placement.bind` contra o webhook de entrada já
+configurado — devolveu `WRONG_AUTH_TYPE` ("Application context
+required"). Esse método exige o token OAuth do PRÓPRIO app local
+(obtido só via `BX24.init()` dentro de uma sessão de navegador
+autenticada) — e o sistema deliberadamente NUNCA persiste esse token
+(confirmado no próprio comentário do código, `src/server.js`: "AUTH_ID/
+REFRESH_ID... dão acesso ao portal e não podem ir pro log"). Único
+caminho real: reabrir `/install` de dentro do Bitrix (mesmo fluxo da
+instalação original) — feito pelo usuário depois do deploy.
+
+**Validação**: `node -c` (`server.js`) + `vm.Script` (`index.html`,
+1237 linhas). Testado isolado: distinção deal/contact via
+`placementInfo.placement` (9 casos, incluindo o CRÍTICO de
+`dealId=null` nunca aparecer na URL) + `loadContactPhone` (4 casos —
+contato completo, sem telefone lança erro, sem `LAST_NAME`, sem nome
+nenhum não quebra).
+

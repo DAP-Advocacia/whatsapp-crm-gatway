@@ -103,7 +103,7 @@ function renderInstallPage() {
 <html lang="pt-BR">
 <head><meta charset="UTF-8"><title>Instalando…</title></head>
 <body style="font-family:sans-serif;padding:24px;color:#222">
-  <p id="msg">Registrando a aba "DapZAP" nos cards de Negócio…</p>
+  <p id="msg">Registrando a aba "DapZAP" nos cards de Negócio e Contato…</p>
   <script src="https://api.bitrix24.com/api/v1/"></script>
   <script>
     BX24.init(function () {
@@ -120,29 +120,48 @@ function renderInstallPage() {
             el.textContent = 'Erro ao registrar a aba: ' + JSON.stringify(res.error());
             return;
           }
-          el.textContent = 'Aba registrada. Registrando o botão "DapZAP"…';
+          el.textContent = 'Aba registrada. Registrando a aba no card de Contato…';
 
-          // Item "Abrir WhatsApp" no menu do botão superior do card — abre a
-          // página-ponte /bridge, que resolve o telefone do contato do negócio
-          // e redireciona pro Chat já naquela conversa (ver public/bridge.html).
-          // O installFinish() fica no ÚLTIMO callback: encerrar antes deixaria
-          // a instalação "pronta" sem este placement registrado.
-          BX24.callMethod('placement.unbind', { PLACEMENT: 'CRM_DEAL_DETAIL_TOOLBAR' }, function () {
+          // Mesma aba, agora também no card de CONTATO (usuário perguntou
+          // "aonde está o dapZAP dentro do card" abrindo um Contato — não
+          // aparecia porque só existia CRM_DEAL_DETAIL_TAB, HANDOFF Parte
+          // DE). Mesmo HANDLER (index.html) — ele já sabe distinguir os
+          // dois contextos (ver placementInfo.placement em initBx24()).
+          BX24.callMethod('placement.unbind', { PLACEMENT: 'CRM_CONTACT_DETAIL_TAB' }, function () {
             BX24.callMethod('placement.bind', {
-              PLACEMENT: 'CRM_DEAL_DETAIL_TOOLBAR',
-              HANDLER: location.origin + '/bridge',
+              PLACEMENT: 'CRM_CONTACT_DETAIL_TAB',
+              HANDLER: location.origin + '/',
               TITLE: 'DapZAP'
-            }, function (res2) {
-              if (res2.error()) {
-                // Não aborta a instalação: a aba (recurso principal) já está
-                // registrada; este placement pode não existir em toda
-                // edição/plano do Bitrix. Só informa e finaliza mesmo assim.
-                el.textContent = 'Aba registrada; botão "DapZAP" indisponível neste portal (' + JSON.stringify(res2.error()) + '). Finalizando…';
-                BX24.installFinish();
-                return;
+            }, function (resContact) {
+              if (resContact.error()) {
+                el.textContent = 'Aba de Negócio registrada; aba de Contato indisponível neste portal (' + JSON.stringify(resContact.error()) + '). Registrando o botão "DapZAP"…';
+              } else {
+                el.textContent = 'Abas de Negócio e Contato registradas. Registrando o botão "DapZAP"…';
               }
-              el.textContent = 'Aba e botão "DapZAP" registrados! Finalizando…';
-              BX24.installFinish();
+
+              // Item "Abrir WhatsApp" no menu do botão superior do card — abre a
+              // página-ponte /bridge, que resolve o telefone do contato do negócio
+              // e redireciona pro Chat já naquela conversa (ver public/bridge.html).
+              // O installFinish() fica no ÚLTIMO callback: encerrar antes deixaria
+              // a instalação "pronta" sem este placement registrado.
+              BX24.callMethod('placement.unbind', { PLACEMENT: 'CRM_DEAL_DETAIL_TOOLBAR' }, function () {
+                BX24.callMethod('placement.bind', {
+                  PLACEMENT: 'CRM_DEAL_DETAIL_TOOLBAR',
+                  HANDLER: location.origin + '/bridge',
+                  TITLE: 'DapZAP'
+                }, function (res2) {
+                  if (res2.error()) {
+                    // Não aborta a instalação: a aba (recurso principal) já está
+                    // registrada; este placement pode não existir em toda
+                    // edição/plano do Bitrix. Só informa e finaliza mesmo assim.
+                    el.textContent = 'Abas registradas; botão "DapZAP" indisponível neste portal (' + JSON.stringify(res2.error()) + '). Finalizando…';
+                    BX24.installFinish();
+                    return;
+                  }
+                  el.textContent = 'Abas e botão "DapZAP" registrados! Finalizando…';
+                  BX24.installFinish();
+                });
+              });
             });
           });
         });

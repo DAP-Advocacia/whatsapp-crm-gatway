@@ -188,7 +188,9 @@ Isso inicia, na mesma porta:
 - API REST em `http://localhost:PORT/api/whatsapp/*` e `http://localhost:PORT/api/*` (contatos/listas/modelos)
 - WebSocket em `ws://localhost:PORT/api/whatsapp/stream`
 - Página de instalação do app Bitrix em `http://localhost:PORT/install`
-- Aba do chat em `http://localhost:PORT/` (placement `CRM_DEAL_DETAIL_TAB`)
+- Aba do chat em `http://localhost:PORT/` (placements `CRM_DEAL_DETAIL_TAB`
+  E `CRM_CONTACT_DETAIL_TAB` — mesma página, distingue os dois contextos
+  via `placementInfo.placement`, ver HANDOFF Parte DE)
 - `http://localhost:PORT/dashboard.html` — Análise de Conversas
 - `http://localhost:PORT/campaign.html` — Campanha (disparo em massa)
 - `http://localhost:PORT/contacts.html` — Contatos e listas
@@ -260,12 +262,21 @@ mudar — necessário sempre que o ngrok gratuito gerar uma URL nova.
 ### Como a instalação funciona
 
 1. Bitrix abre `POST /install` (ou `GET`, se você testar manualmente) num iframe.
-2. A página carrega o SDK `BX24`, chama `placement.unbind` (limpa reinstalações
-   antigas) e depois `placement.bind`, registrando a aba `CRM_DEAL_DETAIL_TAB`
-   ("WhatsApp") apontando para `location.origin + '/'`.
+2. A página carrega o SDK `BX24`, chama `placement.unbind`/`placement.bind`
+   DUAS vezes (limpa reinstalações antigas antes de cada uma) — registrando
+   a aba "DapZAP" em `CRM_DEAL_DETAIL_TAB` (card de Negócio) E
+   `CRM_CONTACT_DETAIL_TAB` (card de Contato, HANDOFF Parte DE), ambas
+   apontando pro MESMO `location.origin + '/'` — `public/index.html`
+   distingue os dois contextos via `placementInfo.placement` (ver
+   `initBx24()`), nunca dois handlers diferentes.
 3. Chama `BX24.installFinish()` para o Bitrix saber que terminou.
-4. Todo esse registro acontece **no navegador**, via `BX24` — o backend não precisa
-   extrair `AUTH_ID` do corpo do POST.
+4. Todo esse registro acontece **no navegador**, via `BX24` — o backend não
+   precisa extrair `AUTH_ID` do corpo do POST. **Sem atalho por API**:
+   `placement.bind` exige o contexto/token OAuth do PRÓPRIO app local
+   (confirmado retornando `WRONG_AUTH_TYPE` contra o webhook de entrada
+   genérico) — o sistema nunca persiste esse token de propósito, então
+   reativar/adicionar um placement novo sempre passa por reabrir esta
+   página de instalação de dentro do Bitrix.
 
 Só a aba do chat (`public/index.html`) é registrada como placement — todas as
 outras páginas (Análise de Conversas, Chat/inbox, Campanha, Contatos, Sites,
