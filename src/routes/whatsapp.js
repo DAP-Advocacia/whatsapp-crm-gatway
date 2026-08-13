@@ -18,6 +18,7 @@ const pageSessions = require('../pageSessions');
 const blockedOwners = require('../blockedOwners');
 const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
 const { ownerIdFor } = require('../auth');
+const actionLog = require('../actionLog');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
 // metadados de uma página raramente mudam num intervalo curto, e evita
@@ -317,8 +318,16 @@ function createWhatsappRouter({ sessions, broadcast }) {
       if (existing.length >= MAX_INSTANCES_PER_OWNER) {
         return res.status(400).json({ error: `Limite de ${MAX_INSTANCES_PER_OWNER} instâncias por usuário atingido — remova uma existente antes de criar outra.` });
       }
-      const id = await instancesStore.create(owner, (label || '').trim() || `Instância ${existing.length + 1}`);
+      const finalLabel = (label || '').trim() || `Instância ${existing.length + 1}`;
+      const id = await instancesStore.create(owner, finalLabel);
       sessions.get(id); // cria e inicia a sessão (gera QR)
+      // Ação registrada AQUI (criação da instância), não no evento de
+      // conexão real do Baileys — esse dispara em TODA reconexão
+      // automática (não só a primeira vez), o que pareceria "conectou
+      // instância nova" a cada queda de rede recuperada. POST /instances
+      // só roda uma vez por clique real em "+ Nova instância" (HANDOFF
+      // Parte DB).
+      actionLog.logAction(owner, 'instance_created', finalLabel);
       res.json({ ok: true, instanceId: id });
     } catch (err) {
       console.error('[instances] erro:', err.message);
@@ -521,6 +530,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
     try {
       const group = await gateway.createGroup(name.trim(), uniquePhones);
       await store.createGroupRecord(group.id, session, group.name, group.participantCount);
+      actionLog.logAction(req.ownerId, 'group_created', group.name);
       res.json({ ok: true, group });
     } catch (err) {
       console.error('[groups] erro ao criar grupo:', err.message);
@@ -726,6 +736,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
       maxDelayMs: delayOverride.maxDelayMs,
     }).catch((err) => console.error('[campaign] falha inesperada:', err.message));
 
+    actionLog.logAction(req.ownerId, 'campaign_created', name || `${uniqueRecipients.length} destinatário(s)`);
     res.json({ ok: true, campaignId, total: uniqueRecipients.length });
   });
 
@@ -838,6 +849,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
         minDelayMs: delayOverride.minDelayMs,
         maxDelayMs: delayOverride.maxDelayMs,
       });
+      actionLog.logAction(req.ownerId, 'campaign_created', name || `${uniqueRecipients.length} destinatário(s), agendada`);
       res.json({ ok: true, id, scheduledAt: scheduledDate.toISOString() });
     } catch (err) {
       console.error('[campaign:schedule] erro:', err.message);
@@ -1013,6 +1025,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
       // conversas (mesmo hub de WebSocket usado por mensagem/reação) — sem
       // isso a tag/linha de atribuição só atualizava ao trocar de tela.
       broadcast(session, phone, { type: 'assignment', assignedTo: assignedTo || null, assignedToName: finalAssignedToName });
+      // Só loga quando a pessoa atribui a CONVERSA A SI MESMA ("Atender") —
+      // atribuir a OUTRO alguém (delegado) ou desatribuir (assignedTo null)
+      // não é a ação confirmada com o usuário (HANDOFF Parte DB).
+      if (assignedTo && assignedTo === req.ownerId) {
+        actionLog.logAction(req.ownerId, 'conversation_assigned_self', phone);
+      }
       res.json({ ok: true });
     } catch (err) {
       console.error('[conversations:assign] erro:', err.message);
@@ -1619,8 +1637,11 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ---------------------------------------------------------------
   router.get('/admin/users/:ownerId', requireSuperAdmin, async (req, res) => {
     try {
-      const history = await pageSessions.getSessionHistory(req.params.ownerId);
-      res.json({ history });
+      const [history, actionHistory] = await Promise.all([
+        pageSessions.getSessionHistory(req.params.ownerId),
+        actionLog.getActionHistory(req.params.ownerId),
+      ]);
+      res.json({ history, actionHistory });
     } catch (err) {
       console.error('[admin] falha ao buscar histórico do usuário:', err.message);
       res.status(502).json({ error: err.message });

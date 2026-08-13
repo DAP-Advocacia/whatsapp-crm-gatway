@@ -1151,8 +1151,13 @@ acesso, tempo total (30d), página favorita e bloqueio.
   últimos 30d — frequência, não só tempo total —, mensagens enviadas,
   contatos cadastrados, campanhas criadas — este último aproximado por
   DONO da instância, não por quem de fato criou, ícone "ⓘ" explica) +
-  histórico completo de `page_sessions` (`GET /admin/users/:ownerId`),
-  mais recente primeiro. Botão **"Enviar mensagem no WhatsApp"**
+  **histórico de ações** paginado (HANDOFF Parte DC — instância
+  conectada, campanha criada, contato criado/importado, grupo criado,
+  conversa atribuída a si mesmo; tabela `action_log`; deliberadamente
+  SEM conteúdo digitado nem gravação de tela, decisão confirmada com o
+  usuário pelo risco de capturar dado sigiloso de cliente/caso) +
+  histórico de `page_sessions` paginado (HANDOFF Parte DB), mais
+  recente primeiro. Botão **"Enviar mensagem no WhatsApp"**
   (HANDOFF Parte CZ, some sem celular cadastrado) redireciona pra
   `/chat.html?session=<instância do próprio super admin>&phone=<celular
   normalizado>` — reaproveita o deep-link já existente em `chat.html`

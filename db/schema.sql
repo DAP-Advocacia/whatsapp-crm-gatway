@@ -448,6 +448,29 @@ create table if not exists notifications (
 create index if not exists idx_notifications_owner_created on notifications (owner_id, created_at desc);
 create index if not exists idx_notifications_owner_unread on notifications (owner_id, read);
 
+-- Histórico de AÇÕES reais por pessoa, pro Admin (modal Detalhado, tela
+-- Usuários, ver HANDOFF Parte DB) — deliberadamente SEM conteúdo digitado
+-- nem gravação de tela (decisão confirmada com o usuário: risco real de
+-- capturar dado sigiloso de cliente/caso, sendo escritório de
+-- advocacia/financeira). Só as 5 ações confirmadas: instância conectada,
+-- campanha criada/agendada, contato criado/importado, grupo criado,
+-- conversa atribuída a si mesmo. Mensagem enviada FICA DE FORA de
+-- propósito — já tem contagem separada (messagesSentLast30d,
+-- getUsabilityStatsByOwner em src/store.js); logar cada envio aqui
+-- inundaria o histórico e esconderia as ações mais raras/significativas.
+-- `detail` é texto livre JÁ FORMATADO no momento do registro (ex: "Grupo
+-- Comercial VIP" pra grupo criado) — decisão de exibição fica no
+-- momento em que a ação acontece, não recalculada depois.
+create table if not exists action_log (
+  id bigserial primary key,
+  owner_id text not null,
+  action text not null,
+  detail text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_action_log_owner_created on action_log (owner_id, created_at desc);
+
 -- Sugestões de melhoria enviadas pelos usuários (tela /suggestions.html) —
 -- visão de TIME (todo mundo vê todas, igual Análise de Conversas), não só
 -- as próprias. Ao marcar como lançada, uma notificação (tabela acima) é

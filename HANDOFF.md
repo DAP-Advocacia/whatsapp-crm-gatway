@@ -6789,3 +6789,78 @@ vazio, nome composto com hífen) + paginação (4 casos — múltiplas
 páginas, última parcial, página fora do range corrige, menos de 1
 página não mostra paginador).
 
+### Parte DC — Histórico de AÇÕES reais (não conteúdo digitado, decisão deliberada) + tabela `action_log` (2026-08-13)
+
+Usuário pediu, junto do pedido de paginação (Parte DB): "mais dados
+como o que ele digitou, fez ou visualizou no app em forma de vídeo
+espelhado. Trackeamento completo". Antes de implementar, levantei o
+risco real explicitamente via `AskUserQuestion`: capturar CONTEÚDO
+DIGITADO pode expor dado sigiloso de cliente/caso sem querer (é
+escritório de advocacia/financeira), e "vídeo espelhado" é construir
+uma ferramenta de gravação de tela do zero (projeto grande, não um
+ajuste). Usuário confirmou preferir só rastrear AÇÕES (quais
+funcionalidades usou), sem conteúdo digitado nem gravação de tela.
+
+**5 ações confirmadas** (perguntado em 2 rodadas por limite de opções
+do `AskUserQuestion`): instância conectada, campanha criada/agendada,
+contato criado/importado, grupo criado, conversa atribuída a si mesmo.
+"Sugestão enviada" foi oferecida e NÃO escolhida. Mensagem enviada
+fica DE FORA de propósito — já tem contagem separada
+(`messagesSentLast30d`, Parte DA); logar cada envio individual aqui
+inundaria o histórico.
+
+**Nuance resolvida sem precisar perguntar de novo** (informação já
+suficiente pra decidir): "instância conectada" é registrado no momento
+de CRIAR a instância (`POST /instances`), não no evento de conexão
+real do Baileys (`connection === 'open'`) — esse último dispara em
+TODA reconexão automática (não só a primeira vez), o que faria uma
+queda de rede recuperada parecer "conectou instância nova" repetido.
+`POST /instances` só roda uma vez por clique real em "+ Nova
+instância".
+
+**Nova tabela `action_log`** (`owner_id`, `action`, `detail` texto
+livre já formatado no momento do registro, `created_at`) — aplicada
+manualmente em produção (`db/schema.sql` não é aplicado
+automaticamente no boot, confirmado antes de qualquer coisa — mesma
+descoberta que já tinha sido feita indiretamente na Parte DA quando
+`contacts.session_id` acabou sendo `owner_id` de verdade; aqui
+confirmado de propósito antes de criar uma tabela nova). `CREATE TABLE
+IF NOT EXISTS`, seguro, confirmado com o usuário antes de tocar o
+banco.
+
+**`src/actionLog.js`** (novo) — `logAction(ownerId, action, detail)`
+fire-and-forget/best-effort (nunca bloqueia a ação real, mesma
+filosofia do sync automático de contato); `getActionHistory(ownerId)`,
+mesmo limite de 200 linhas de `getSessionHistory`.
+
+**7 pontos de instrumentação** (5 ações, 2 delas com mais de 1 rota):
+- `POST /instances` (`src/routes/whatsapp.js`) — `instance_created`.
+- `POST /groups` — `group_created`.
+- `POST /conversations/assign` — `conversation_assigned_self`, **só**
+  quando `assignedTo === req.ownerId` (atribuir a OUTRO alguém, ou
+  desatribuir, não é a ação confirmada).
+- `POST /campaign` e `POST /campaign/schedule` — `campaign_created`
+  (mesmo tipo pros dois, "agendada" só aparece no `detail` do segundo).
+- `POST /contacts` (`src/routes/crm.js`) — `contact_created`.
+- `POST /contacts/import-conversations` e `POST /contacts/import-csv`
+  — `contacts_imported`, 1 registro por LOTE (com contagem no
+  `detail`), não 1 por contato — evita inundar o histórico numa
+  importação de centenas.
+
+**Frontend** (`public/admin.html`): modal Detalhado reestruturado —
+dois containers SEPARADOS (`actionHistoryContainer`/
+`navHistoryContainer`), cada um com paginação própria e
+INDEPENDENTE (paginar um nunca afeta o outro). `renderPaginatedTable`
+novo, genérico (recebe colunas/callback de célula), reusado pelas duas
+tabelas em vez de duplicar a lógica de paginação (que antes só existia
+pra navegação, Parte DB). `ACTION_LABELS` traduz o tipo cru
+(`instance_created`) pro rótulo amigável ("Instância conectada").
+
+**Validação**: `vm.Script` (767 linhas). Testado isolado:
+`renderPaginatedTable` com mock de DOM (3 casos — duas tabelas com
+paginação independente confirmada, lista vazia, exatamente 1 página
+cheia). `logAction`/`getActionHistory` testados end-to-end contra o
+banco REAL de produção (registro de 3 ações de teste, leitura
+confirmando ordem decrescente por data, limpeza confirmada com 0
+linhas residuais).
+

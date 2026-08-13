@@ -3,6 +3,7 @@ const contacts = require('../contacts');
 const templates = require('../templates');
 const { parseContactsCsv } = require('../csvImport');
 const { requireSession } = require('../authz');
+const actionLog = require('../actionLog');
 
 const MAX_CSV_ROWS = 5000;
 
@@ -42,7 +43,9 @@ function createCrmRouter() {
     try {
       const clean = String(phone).replace(/\D/g, '');
       if (!clean) return res.status(400).json({ error: 'phone inválido' });
-      res.json(await contacts.upsertContact(req.ownerId, { name, phone: clean }));
+      const contact = await contacts.upsertContact(req.ownerId, { name, phone: clean });
+      actionLog.logAction(req.ownerId, 'contact_created', name || clean);
+      res.json(contact);
     } catch (err) {
       console.error('[contacts] erro:', err.message);
       res.status(502).json({ error: err.message });
@@ -77,7 +80,11 @@ function createCrmRouter() {
 
   router.post('/contacts/import-conversations', async (req, res) => {
     try {
-      await contacts.importFromConversations(req.ownerId);
+      const imported = await contacts.importFromConversations(req.ownerId);
+      // 1 registro por IMPORTAÇÃO (lote), não 1 por contato — logar cada
+      // contato individualmente inundaria o histórico numa importação de
+      // centenas (HANDOFF Parte DB).
+      actionLog.logAction(req.ownerId, 'contacts_imported', `${imported} contato(s) via conversas`);
       res.json({ ok: true, contacts: await contacts.listContacts(req.ownerId) });
     } catch (err) {
       console.error('[contacts:import] erro:', err.message);
@@ -98,6 +105,9 @@ function createCrmRouter() {
         return res.status(400).json({ error: `máximo de ${MAX_CSV_ROWS} linhas por arquivo` });
       }
       const imported = await contacts.importRows(req.ownerId, rows);
+      // 1 registro por IMPORTAÇÃO (lote), mesmo raciocínio de
+      // import-conversations acima (HANDOFF Parte DB).
+      actionLog.logAction(req.ownerId, 'contacts_imported', `${imported} contato(s) via CSV`);
       res.json({ ok: true, imported, skipped, contacts: await contacts.listContacts(req.ownerId) });
     } catch (err) {
       console.error('[contacts:import-csv] erro:', err.message);

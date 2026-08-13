@@ -1204,64 +1204,101 @@
       </div>
       <h3 style="font-size:13px; margin:0 0 10px; color:var(--text-muted);">Histórico de navegação neste app</h3>
     ` : '';
-    body.innerHTML = bitrixGrid + `<div class="skeleton-row">Carregando histórico…</div>`;
+    // Dois containers SEPARADOS (não um body.innerHTML só) — paginar um
+    // (ações ou navegação) nunca reseta/reescreve o outro, cada um mantém
+    // seu próprio estado independente.
+    body.innerHTML = bitrixGrid + `
+      <div id="actionHistoryContainer"><div class="skeleton-row">Carregando ações…</div></div>
+      <h3 style="font-size:13px; margin:16px 0 10px; color:var(--text-muted);">Histórico de navegação neste app</h3>
+      <div id="navHistoryContainer"><div class="skeleton-row">Carregando navegação…</div></div>
+    `;
+
+    // Rótulo amigável por tipo de ação (ver src/actionLog.js — 5 tipos
+    // confirmados com o usuário, HANDOFF Parte DB; conteúdo digitado e
+    // gravação de tela deliberadamente FORA de escopo, risco de capturar
+    // dado sigiloso de cliente/caso).
+    const ACTION_LABELS = {
+      instance_created: 'Instância conectada',
+      campaign_created: 'Campanha criada',
+      contact_created: 'Contato criado',
+      contacts_imported: 'Contatos importados',
+      group_created: 'Grupo criado',
+      conversation_assigned_self: 'Conversa atribuída',
+    };
 
     // Paginação client-side (mesmo padrão de contacts.html/usersSearch,
     // Parte CY) — histórico pode ter até 200 linhas (limite de
-    // getSessionHistory), usuário reportou rolagem longa sem corte
-    // (2026-08-13). Estado LOCAL a esta chamada de openUserDetail (não
-    // module-level) — cada pessoa aberta começa do zero na página 1, sem
-    // herdar a página em que ficou a pessoa anterior.
-    const HISTORY_PAGE_SIZE = 20;
-    let historyPage = 1;
+    // getSessionHistory/getActionHistory), usuário reportou rolagem longa
+    // sem corte (2026-08-13). Estado LOCAL a esta chamada de
+    // openUserDetail (não module-level) — cada pessoa aberta começa do
+    // zero na página 1, sem herdar a página em que ficou a pessoa
+    // anterior. Genérico (recebe as 3 colunas prontas) — reusado pelas
+    // duas tabelas (navegação e ações), que têm colunas diferentes.
+    const PAGE_SIZE = 20;
+    function renderPaginatedTable(containerId, rows, headers, rowToCells, emptyMessage, pageState) {
+      const container = document.getElementById(containerId);
+      if (!rows.length) {
+        container.innerHTML = `<div class="empty-state">${escapeHtml(emptyMessage)}</div>`;
+        return;
+      }
+      const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      if (pageState.page > totalPages) pageState.page = totalPages;
+      const start = (pageState.page - 1) * PAGE_SIZE;
+      const pageItems = rows.slice(start, start + PAGE_SIZE);
+      const prevId = `${containerId}Prev`;
+      const nextId = `${containerId}Next`;
 
-    function renderHistoryPage(history) {
-      const totalPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE));
-      if (historyPage > totalPages) historyPage = totalPages;
-      const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
-      const pageItems = history.slice(start, start + HISTORY_PAGE_SIZE);
-
-      const tableHtml = `
+      container.innerHTML = `
         <table class="admin-table">
-          <thead><tr><th>Página</th><th>Entrada</th><th>Duração</th></tr></thead>
+          <thead><tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
           <tbody>
-            ${pageItems.map((h) => `
-              <tr>
-                <td>${escapeHtml(formatPageName(h.page))}</td>
-                <td>${new Date(h.startedAt).toLocaleString('pt-BR')}</td>
-                <td>${formatDuration(h.durationSeconds)}</td>
-              </tr>
-            `).join('')}
+            ${pageItems.map((r) => `<tr>${rowToCells(r).map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}
           </tbody>
         </table>
         ${totalPages > 1 ? `
           <div class="pager">
-            <button type="button" class="btn secondary" id="historyPagePrev" ${historyPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
-            <span class="pager-info">Página ${historyPage} de ${totalPages} (${history.length} registro${history.length === 1 ? '' : 's'})</span>
-            <button type="button" class="btn secondary" id="historyPageNext" ${historyPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+            <button type="button" class="btn secondary" id="${prevId}" ${pageState.page <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+            <span class="pager-info">Página ${pageState.page} de ${totalPages} (${rows.length} registro${rows.length === 1 ? '' : 's'})</span>
+            <button type="button" class="btn secondary" id="${nextId}" ${pageState.page >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
           </div>
         ` : ''}
       `;
-      body.innerHTML = bitrixGrid + tableHtml;
 
-      const prevBtn = document.getElementById('historyPagePrev');
-      const nextBtn = document.getElementById('historyPageNext');
-      if (prevBtn) prevBtn.addEventListener('click', () => { historyPage--; renderHistoryPage(history); });
-      if (nextBtn) nextBtn.addEventListener('click', () => { historyPage++; renderHistoryPage(history); });
+      const prevBtn = document.getElementById(prevId);
+      const nextBtn = document.getElementById(nextId);
+      if (prevBtn) prevBtn.addEventListener('click', () => { pageState.page--; renderPaginatedTable(containerId, rows, headers, rowToCells, emptyMessage, pageState); });
+      if (nextBtn) nextBtn.addEventListener('click', () => { pageState.page++; renderPaginatedTable(containerId, rows, headers, rowToCells, emptyMessage, pageState); });
     }
 
     try {
       const res = await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(ownerId)}`);
       if (!res.ok) throw new Error('falha ao carregar histórico');
       const data = await res.json();
-      const history = data.history || [];
-      if (!history.length) {
-        body.innerHTML = bitrixGrid + `<div class="empty-state">Nenhuma navegação registrada ainda.</div>`;
-        return;
-      }
-      renderHistoryPage(history);
+
+      renderPaginatedTable(
+        'actionHistoryContainer',
+        data.actionHistory || [],
+        ['Ação', 'Detalhe', 'Quando'],
+        (a) => [
+          escapeHtml(ACTION_LABELS[a.action] || a.action),
+          escapeHtml(a.detail || '—'),
+          new Date(a.createdAt).toLocaleString('pt-BR'),
+        ],
+        'Nenhuma ação registrada ainda.',
+        { page: 1 }
+      );
+
+      renderPaginatedTable(
+        'navHistoryContainer',
+        data.history || [],
+        ['Página', 'Entrada', 'Duração'],
+        (h) => [escapeHtml(formatPageName(h.page)), new Date(h.startedAt).toLocaleString('pt-BR'), formatDuration(h.durationSeconds)],
+        'Nenhuma navegação registrada ainda.',
+        { page: 1 }
+      );
     } catch (err) {
-      body.innerHTML = bitrixGrid + `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      document.getElementById('actionHistoryContainer').innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      document.getElementById('navHistoryContainer').innerHTML = '';
     }
   }
 
