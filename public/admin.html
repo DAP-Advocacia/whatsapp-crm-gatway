@@ -293,6 +293,20 @@
   /* ======================================================
      Tabela de presença / cadastro
      ====================================================== */
+  /* Estilo base de campo de formulário (mesma paleta escura do resto do
+     app) — faltava por completo neste arquivo, então o navegador aplicava
+     o estilo PADRÃO (fundo branco) no #usersSearch, destoando do resto da
+     tela. Usuário reportou com print (2026-08-13). Mesmos valores de
+     contacts.html/etc, `select` incluído por consistência mesmo sem
+     nenhum <select> nesta tela hoje (evita o mesmo problema se um for
+     adicionado depois). */
+  select, input[type="text"], input[type="search"], textarea{
+    width: 100%; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 9px; color: var(--text); font-family: inherit; font-size: 13px;
+    padding: 9px 11px; outline: none;
+  }
+  select:focus, input:focus, textarea:focus{ border-color: var(--gold-dim); }
+
   .admin-table{ width:100%; border-collapse:collapse; font-size:13px; }
   .admin-table th{
     text-align:left; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
@@ -667,7 +681,10 @@
       <h2 id="userDetailTitle" style="margin-bottom:4px;">Histórico</h2>
       <p id="userDetailSubtitle" class="panel-hint" style="margin-bottom:16px;"></p>
       <div id="userDetailBody"></div>
-      <button class="action-link" id="userDetailCloseBtn" style="margin-top:16px;">Fechar</button>
+      <div class="modal-actions" style="justify-content:space-between; margin-top:16px;">
+        <button class="btn" id="userDetailSendMsgBtn" hidden>Enviar mensagem no WhatsApp</button>
+        <button class="action-link" id="userDetailCloseBtn">Fechar</button>
+      </div>
     </div>
   </div>
 
@@ -1113,6 +1130,17 @@
     return `<div class="bitrix-detail-field"><div class="field-label">${escapeHtml(label)}</div><div class="field-value">${value}</div></div>`;
   }
 
+  // Bitrix costuma guardar celular SEM o código do país (DDD + número, 10
+  // ou 11 dígitos) — mesmo critério já usado em src/routes/leads.js pra
+  // telefone vindo de fonte externa: detecta por TAMANHO, nunca por já
+  // começar com "55" (DDD 55 é Rio Grande do Sul, número real — checar
+  // prefixo daria falso positivo, ver comentário original em leads.js).
+  function normalizeBrazilPhone(raw) {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return null;
+    return digits.length <= 11 ? `55${digits}` : digits;
+  }
+
   async function openUserDetail(ownerId) {
     const user = usersRows.find((u) => u.ownerId === ownerId);
     const modal = document.getElementById('userDetailModal');
@@ -1121,6 +1149,14 @@
     document.getElementById('userDetailSubtitle').textContent = 'Cadastro completo do Bitrix + histórico de navegação neste app.';
     body.innerHTML = `<div class="skeleton-row">Carregando…</div>`;
     modal.classList.add('open');
+
+    // "Enviar mensagem" só faz sentido com um celular pra mandar — some
+    // (hidden) sem nenhum, em vez de mostrar desabilitado sem explicação
+    // (nem todo cadastro do Bitrix tem esse campo preenchido).
+    const sendMsgBtn = document.getElementById('userDetailSendMsgBtn');
+    const normalizedPhone = user ? normalizeBrazilPhone(user.mobile) : null;
+    sendMsgBtn.hidden = !normalizedPhone;
+    sendMsgBtn.dataset.phone = normalizedPhone || '';
 
     // Grid de cadastro do Bitrix — monta ANTES do fetch de histórico (não
     // depende da rede, já vem de usersRows/loadUsers), pra aparecer mesmo
@@ -1173,6 +1209,33 @@
 
   document.getElementById('userDetailCloseBtn').addEventListener('click', () => {
     document.getElementById('userDetailModal').classList.remove('open');
+  });
+
+  // Redireciona pra /chat.html na conversa com o celular desta pessoa —
+  // reaproveita o deep-link JÁ existente (?session=X&phone=Y, ver boot()
+  // em chat.html, usado hoje por notifications.html) em vez de duplicar
+  // UI de envio/histórico dentro do modal. Usa uma instância PRÓPRIA do
+  // super admin logado (o funcionário não tem instância dele) — a
+  // primeira ONLINE, se houver, senão a primeira disponível (chat.html
+  // deixa trocar de instância depois de qualquer forma, via instanceSelect).
+  // GET /instances sempre garante ao menos 1 (ensureDefault), nunca lista
+  // vazia.
+  document.getElementById('userDetailSendMsgBtn').addEventListener('click', async (e) => {
+    const phone = e.currentTarget.dataset.phone;
+    if (!phone) return;
+    e.currentTarget.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(myOwnerId)}`);
+      if (!res.ok) throw new Error('falha ao buscar suas instâncias');
+      const data = await res.json();
+      const instances = data.instances || [];
+      const chosen = instances.find((i) => i.status === 'online') || instances[0];
+      if (!chosen) throw new Error('nenhuma instância disponível');
+      window.location.href = `/chat.html?session=${encodeURIComponent(chosen.id)}&phone=${encodeURIComponent(phone)}`;
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+      e.currentTarget.disabled = false;
+    }
   });
 
   document.getElementById('usersBody').addEventListener('click', async (e) => {
@@ -1327,9 +1390,15 @@
     }
   });
 
+  // Guardado pra montar o link "Enviar mensagem" no modal Detalhado (ver
+  // openUserDetail) — precisa saber de QUAL instância de WhatsApp o PRÓPRIO
+  // super admin logado vai mandar a mensagem (o funcionário visto no modal
+  // não tem instância própria).
+  let myOwnerId = null;
+
   async function init() {
     try {
-      await resolveOwner();
+      myOwnerId = await resolveOwner();
 
       // Guarda de tela: se este ownerId não for super admin, GET /admin/*
       // já devolveria 403 — mas checamos whoami primeiro pra não deixar a

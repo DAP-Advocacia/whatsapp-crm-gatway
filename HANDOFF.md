@@ -6639,3 +6639,52 @@ como os itens acima; o sistema já rastreia visita por página/duração/
 dentro de cada página, contagem de mensagens enviadas, frequência de
 sessões, etc.).
 
+### Parte CZ — Estilo de input faltando + botão "Enviar mensagem" no modal Detalhado, redireciona pro Chat (2026-08-13)
+
+**Campo de busca com estilo padrão do navegador**: usuário reportou com
+print — `#usersSearch` (Parte CY) aparecia com fundo branco, destoando
+da paleta escura do resto da tela. Causa: `admin.html` nunca teve
+estilo base pra `input`/`select`/`textarea` (só copiado `.btn`/`.pager`/
+`.modal` antes, não isso). Corrigido com o mesmo bloco de
+`contacts.html` (`select, input[type="text"], input[type="search"],
+textarea{...}`) — sem inventar nada novo, replicando o padrão já
+estabelecido.
+
+**Botão "Enviar mensagem no WhatsApp" no modal Detalhado**: usuário
+pediu poder mandar mensagem pro funcionário direto do modal, dando 2
+exemplos — chat embutido no modal, OU redirecionar pra aba Chat.
+Confirmado com o usuário (via `AskUserQuestion`, depois de eu descobrir
+que `chat.html` JÁ tem um mecanismo de deep-link `?session=X&phone=Y`
+no `boot()` — usado hoje só por `notifications.html`): redirecionar,
+não embutir (reaproveita toda a UI de envio/histórico já existente,
+sem duplicar nada).
+
+Duas decisões técnicas resolvidas sem precisar perguntar (informação
+já suficiente pra decidir, não é julgamento do usuário):
+- **De qual instância enviar**: o funcionário visto no modal não tem
+  instância própria — usa uma do PRÓPRIO super admin logado (`GET
+  /instances?owner=<próprio ownerId>`, que já garante ≥1 via
+  `ensureDefault`). Escolhe a primeira ONLINE, senão a primeira
+  disponível (usuário pode trocar de instância depois de qualquer
+  forma, `instanceSelect` já existe em `chat.html`).
+- **Formato do telefone**: `PERSONAL_MOBILE` do Bitrix costuma vir SEM
+  o código do país (DDD + número, 10-11 dígitos) — mesmo problema já
+  resolvido em `src/routes/leads.js` pra telefone de fonte externa.
+  Reaproveitado o MESMO critério exato (detecta por TAMANHO ≤11
+  dígitos, nunca por já começar com "55" — DDD 55 é Rio Grande do Sul,
+  checar prefixo daria falso positivo).
+
+Botão fica `hidden` (não desabilitado) quando o funcionário não tem
+celular cadastrado no Bitrix — sem explicação nenhuma seria confuso
+mostrar desabilitado.
+
+`myOwnerId` (novo, guardado no boot via `resolveOwner()` — antes o
+retorno era descartado, `await resolveOwner();` sem atribuição).
+
+**Validação**: `vm.Script` (672 linhas). Testado isolado:
+`normalizeBrazilPhone` (8 casos — formatação com parênteses/espaço,
+já-com-DDI não duplica, fixo de 10 dígitos, DDD 55 sem DDI ainda ganha
+prefixo corretamente, vazio/null/undefined, escolha de instância
+online-primeiro, fallback sem nenhuma online, lista vazia não lança
+erro).
+

@@ -1148,7 +1148,12 @@ acesso, tempo total (30d), página favorita e bloqueio.
   comercial, cidade, nascimento, data de admissão, criado no Bitrix,
   último login NO BITRIX — distinto do último acesso a ESTE app) +
   histórico completo de `page_sessions` (`GET /admin/users/:ownerId`),
-  mais recente primeiro.
+  mais recente primeiro. Botão **"Enviar mensagem no WhatsApp"**
+  (HANDOFF Parte CZ, some sem celular cadastrado) redireciona pra
+  `/chat.html?session=<instância do próprio super admin>&phone=<celular
+  normalizado>` — reaproveita o deep-link já existente em `chat.html`
+  (usado hoje também por `notifications.html`), sem UI de chat duplicada
+  dentro do modal.
 - **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
   **inteiro** (tabela `blocked_owners`) — `POST
   /admin/users/:ownerId/block`|`unblock`. Verificado dentro de
