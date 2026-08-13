@@ -6541,3 +6541,101 @@ porque não receberam nenhuma mensagem nova ainda desde a correção (não
 funcionando, resolve sozinho quando cada uma receber uma mensagem
 real). Não tratar como pendência residual.
 
+### Parte CY — Paginação/busca em Usuários, tooltip por data nos gráficos, ESC em todos os modais do Admin + `confirmDialog` que nunca existiu (2026-08-13)
+
+**Paginação + busca na tabela de Usuários** (`public/admin.html`):
+usuário reportou (print) 789 usuários numa lista contínua, sem corte
+nem filtro. Mesmo padrão client-side já usado em `contacts.html`
+(`CONTACTS_PAGE_SIZE`/`contactsPage`) — `GET /admin/users` já traz TUDO
+numa chamada só, corte só na hora de renderizar. `USERS_PAGE_SIZE = 20`,
+busca por nome/e-mail/cargo (match parcial, case-insensitive). Testado
+isolado: 7 casos (40 páginas pra 789 usuários, última página parcial,
+busca por cargo, case-insensitive, página corrigida quando busca reduz
+o total, sem resultado não quebra, campos null não lançam erro).
+
+**Tooltip "por data" nos 2 gráficos de barra**: usuário pediu ver, ao
+passar o mouse, a quantidade de visitas/duração por dia — dado que
+NÃO existia (o backend só agregava o TOTAL do período de 30 dias, sem
+separar por dia). Nova função `getDailyBreakdownByPage(sinceDate)`
+(`src/pageSessions.js`) — query própria (`group by page, date_trunc('day',
+started_at)`), formato `{ [page]: [{date, visits, durationSeconds}] }`.
+Exposta em `GET /admin/usage-metrics` como `dailyByPage` (campo novo,
+não altera nada existente na resposta). Tooltip via atributo `title`
+nativo do navegador (mesmo mecanismo já usado no `.bar-label` pro nome
+completo da página) — `buildDailyTooltip()`, mais recente primeiro.
+
+**Bug de fuso horário achado e corrigido no processo**: `date` de
+`getDailyBreakdownByPage` é sempre exatamente meia-noite UTC
+(`date_trunc('day', ...)` no Postgres) — formatar com `toLocaleDateString('pt-BR')`
+sem forçar fuso (comportamento padrão, usa o fuso LOCAL do navegador)
+mostraria o dia ANTERIOR pra qualquer fuso atrás de UTC (Brasil =
+UTC-3): meia-noite UTC de 12/08 se torna 21h de 11/08 no horário local,
+exibindo "11/08". Descoberto pelo próprio teste isolado (script de
+teste devolveu datas 1 dia atrasadas, investigado antes de assumir que
+era erro do teste). Corrigido com `formatDayOnly()`, formatador
+dedicado que força `timeZone: 'UTC'` — usado só pra este tipo de valor
+("dia" puro, sem hora real); não alterado `formatDate()` genérico
+(usado em timestamps de ponto-no-tempo reais — `lastAccess`,
+`LAST_LOGIN` — onde o fuso LOCAL do usuário é o comportamento correto).
+
+**ESC não fechava NENHUM modal do Admin — causa raiz + bug adicional
+mais grave achado no processo**: usuário reportou com print que o
+modal "Detalhado" não fechava com ESC. Investigação: o resto do
+sistema (11 telas) já tem um listener global `keydown` que fecha
+qualquer `.overlay.open` — funciona porque cada modal controla
+visibilidade via CSS (`.overlay{display:none}` / `.overlay.open{display:flex}`).
+`admin.html` nunca teve esse listener NEM o CSS `.overlay`/`.overlay.open`
+— o modal "Detalhado" controlava visibilidade via `style.display`
+inline, e o próprio arquivo não tinha listener de ESC nenhum. Corrigido
+implementando o padrão completo (CSS + listener), igual ao resto do
+sistema.
+
+No processo, achado um bug bem mais grave: `window.confirmDialog` era
+CHAMADO em 3 lugares (`Revogar`, `Reativar`, `Marcar sugestão como
+lançada`) mas **nunca definido** em `admin.html` — nenhuma das 11 telas
+que definem essa função localmente incluíam `admin.html` na lista.
+Clicar em qualquer um desses 3 botões lançaria `TypeError:
+window.confirmDialog is not a function`, deixando bloqueio de acesso e
+triagem de sugestões **completamente quebrados em produção**, sem
+nenhum aviso visível (a exceção acontece só depois do clique, dentro de
+uma função assíncrona — não aparece nada na tela, só no console do
+navegador). Não determinado desde quando isso estava quebrado (essas 3
+funcionalidades são de sessões anteriores — Parte CL/CO). Corrigido
+implementando `confirmDialog` (mesma implementação de `contacts.html`,
+cria o próprio DOM na primeira chamada).
+
+**Modal "Detalhado" expandido**: usuário pediu modal maior + cadastro
+completo do Bitrix (não só histórico de navegação). `.user-detail-modal`
+(720px, contra 420px do modal padrão). Grid de campos novo, ANTES do
+histórico: cargo, e-mail, celular (`PERSONAL_MOBILE`), telefone
+comercial (`WORK_PHONE`), cidade (`PERSONAL_CITY`), nascimento
+(`PERSONAL_BIRTHDAY`), admissão (`UF_EMPLOYMENT_DATE` — distinto de
+"criado no Bitrix", que é a conta, não a contratação), último login NO
+BITRIX (`LAST_LOGIN` — distinto do último acesso a ESTE app, que já
+aparecia na tabela). `listEmployees()` (`src/bitrixHierarchy.js`)
+ampliado com esses 6 campos + correção de passagem: nome combinado
+ignorava `SECOND_NAME` (nome do meio, comum em nome brasileiro) — agora
+inclui. `GET /admin/users` (`src/routes/whatsapp.js`) reconstrói
+manualmente o objeto de resposta — precisou adicionar os 6 campos novos
+lá também, senão nunca chegariam ao frontend mesmo já vindo de
+`listEmployees()`. Deliberadamente fora do escopo: campos técnicos sem
+valor pra exibição humana (`XML_ID`, `TIMESTAMP_X`, `UF_USR_*`
+customizados sem label, `USER_TYPE`) e `PERSONAL_GENDER` (sensível, não
+pedido explicitamente).
+
+**Validação**: `vm.Script` no bloco principal (620 linhas). Testado
+isolado: grid de campos do Bitrix (5 casos, incluindo escape XSS-safe
+de valor com caracteres especiais e reconfirmação de que
+nascimento/admissão não sofrem o shift de fuso), `confirmDialog`+ESC
+com mock de DOM mínimo (8 casos — abrir/confirmar/cancelar, ESC como
+"Cancelar", ESC fechando OUTRO modal além do confirmDialog, tecla que
+não é Escape não fecha nada).
+
+**Pendência sinalizada, não implementada nesta sessão**: usuário pediu
+"mais rastreamento de usabilidade" — pedido amplo, aguardando
+esclarecimento de escopo antes de implementar (não é um ajuste pequeno
+como os itens acima; o sistema já rastreia visita por página/duração/
+última página favorita — "mais o quê" precisa de definição, ex: ações
+dentro de cada página, contagem de mensagens enviadas, frequência de
+sessões, etc.).
+

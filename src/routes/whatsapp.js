@@ -1569,6 +1569,16 @@ function createWhatsappRouter({ sessions, broadcast }) {
           photo: e.photo,
           workPosition: e.workPosition,
           dateRegister: e.dateRegister,
+          // Campos ampliados do Bitrix (2026-08-13, HANDOFF Parte CY) — só
+          // usados no modal "Detalhado" (openUserDetail, admin.html), a
+          // tabela principal continua mostrando só os campos de sempre.
+          mobile: e.mobile,
+          workPhone: e.workPhone,
+          city: e.city,
+          birthday: e.birthday,
+          lastLoginBitrix: e.lastLoginBitrix,
+          employmentDate: e.employmentDate,
+          departmentIds: e.departmentIds,
           isOnline,
           currentPage: presenceRow?.lastPage || null,
           lastAccess: lastAccessMap.get(ownerId) || null,
@@ -1613,9 +1623,14 @@ function createWhatsappRouter({ sessions, broadcast }) {
   router.get('/admin/usage-metrics', requireSuperAdmin, async (req, res) => {
     try {
       const days = Number(req.query.days) || ADMIN_USAGE_WINDOW_DAYS;
-      const [presenceRows, usage] = await Promise.all([
+      const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+      const [presenceRows, usage, dailyByPageMap] = await Promise.all([
         presence.listPresence(),
-        pageSessions.getUsageSince(new Date(Date.now() - days * 24 * 60 * 60 * 1000)),
+        pageSessions.getUsageSince(sinceDate),
+        // Detalhamento por dia, só pro tooltip dos 2 gráficos (ver
+        // getDailyBreakdownByPage) — query separada de getUsageSince
+        // porque o agrupamento por dia muda o group by inteiro.
+        pageSessions.getDailyBreakdownByPage(sinceDate),
       ]);
 
       const onlineNow = presenceRows.filter(
@@ -1632,6 +1647,9 @@ function createWhatsappRouter({ sessions, broadcast }) {
         topPage,
         mostVisitedPages: usage.mostVisitedPages.slice(0, 15),
         mostTimeSpentPages: usage.mostTimeSpentPages.slice(0, 15),
+        // { [page]: [{date, visits, durationSeconds}, ...] } — Map não
+        // serializa em JSON.stringify (vira {}), precisa virar objeto plano.
+        dailyByPage: Object.fromEntries(dailyByPageMap),
       });
     } catch (err) {
       console.error('[admin] falha ao calcular métricas de uso:', err.message);

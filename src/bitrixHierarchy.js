@@ -210,12 +210,23 @@ async function getSubordinates(managerOwnerId) {
 // baixo de sobra pra não justificar a complexidade de um cache de horas.
 // null = BITRIX_HR_WEBHOOK_URL não configurado ou falha ao consultar —
 // quem chama decide como comunicar isso (ver GET /admin/employees).
+//
+// Campos ampliados (2026-08-13, HANDOFF Parte CY) — usuário pediu "todos os
+// dados do Bitrix" no modal "Detalhado" do Admin; antes só extraía 6 campos
+// de um payload de user.get bem mais rico (confirmado via teste real contra
+// o Bitrix, sessão 2026-08-12: XML_ID, PERSONAL_MOBILE, PERSONAL_CITY,
+// WORK_PHONE, PERSONAL_BIRTHDAY, LAST_LOGIN, UF_EMPLOYMENT_DATE, entre
+// outros). Deliberadamente NÃO inclui campos técnicos sem valor pra exibir
+// a um humano (XML_ID, TIMESTAMP_X, UF_USR_* customizados sem label,
+// USER_TYPE) nem PERSONAL_GENDER (sensível, não pedido explicitamente).
 async function listEmployees() {
   const users = await callBitrixHRAll('user.get', { FILTER: { ACTIVE: true } });
   if (!users) return null;
   return users.map((u) => ({
     id: String(u.ID),
-    name: [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
+    // SECOND_NAME (nome do meio) fica de fora do nome combinado antes —
+    // comum em nome brasileiro, corrigido junto com a ampliação de campos.
+    name: [u.NAME, u.SECOND_NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
     workPosition: u.WORK_POSITION || null,
     email: u.EMAIL || null,
     photo: u.PERSONAL_PHOTO || null,
@@ -223,6 +234,16 @@ async function listEmployees() {
     // "Criado em" na tela de Usuários do Admin (ver HANDOFF Parte CO) —
     // data de registro da conta no próprio Bitrix, não deste app.
     dateRegister: u.DATE_REGISTER || null,
+    mobile: u.PERSONAL_MOBILE || null,
+    workPhone: u.WORK_PHONE || null,
+    city: u.PERSONAL_CITY || null,
+    birthday: u.PERSONAL_BIRTHDAY || null,
+    // Último login NO PRÓPRIO Bitrix — diferente do último acesso a ESTE
+    // app (lastAccess, via page_sessions), que é outra coisa.
+    lastLoginBitrix: u.LAST_LOGIN || null,
+    // Data de admissão (RH) — diferente de dateRegister (criação da CONTA
+    // no Bitrix, que pode ter sido bem depois da contratação de verdade).
+    employmentDate: u.UF_EMPLOYMENT_DATE || null,
   }));
 }
 

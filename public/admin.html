@@ -301,6 +301,15 @@
   .admin-table td{ padding:11px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
   .admin-table tr:last-child td{ border-bottom:none; }
   .admin-table tr:hover td{ background: var(--surface-2); }
+  /* Reaproveita os mesmos nomes/visual de .pager/.pager-info/.btn.secondary
+     já usados em contacts.html (Parte CY) — paginação client-side da tabela
+     de Usuários, 789 linhas sem isso, tudo numa lista só. */
+  .btn{ background: var(--gold); color:#1a1408; border:none; border-radius:9px; padding:8px 14px; font-size:12.5px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .btn:hover{ filter:brightness(1.08); }
+  .btn.secondary{ background:var(--surface-2); color:var(--text); border:1px solid var(--border); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .pager{ display:flex; align-items:center; justify-content:center; gap:14px; padding-top:14px; margin-top:4px; border-top:1px solid var(--border); }
+  .pager-info{ font-size:11.5px; color:var(--text-faint); white-space:nowrap; }
   /* Larguras proporcionais explícitas — sem isto, com o #app mais largo
      (1180px, ver acima), o navegador jogava o espaço extra quase todo pra
      coluna de ações (badges/tempo/texto curto do meio ficavam "flutuando"
@@ -388,6 +397,34 @@
   .action-link.danger{ color:var(--red); }
   .action-link.danger:hover{ color:#e88b83; }
   .actions-cell{ display:flex; gap:10px; flex-wrap:wrap; }
+
+  /* ======================================================
+     Modal "Detalhado" — padrão .overlay/.overlay.open/.modal já usado no
+     resto do sistema (chat.html/contacts.html/etc, ver HANDOFF Parte CY)
+     faltava por completo aqui; o modal controlava visibilidade via
+     style.display inline, por isso o listener global de ESC (que só olha
+     pra .overlay.open) nunca fechava este modal específico — usuário
+     reportou (2026-08-13).
+     ====================================================== */
+  .overlay{
+    position: fixed; inset: 0; background: rgba(10,8,5,.6);
+    display: none; align-items: center; justify-content: center; z-index: 80; padding: 20px;
+  }
+  .overlay.open{ display: flex; }
+  .modal{
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 22px; width: 100%; max-width: 420px; max-height: 84vh; overflow-y: auto;
+  }
+  .modal h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 14px; }
+  .modal-actions{ display:flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  /* Maior que o .modal padrão — usuário pediu explicitamente "modal maior
+     e com mais informações" pro cadastro completo do Bitrix (2026-08-13). */
+  .user-detail-modal{ max-width: 720px; }
+  .bitrix-detail-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 20px; margin-bottom:20px; }
+  .bitrix-detail-field{ font-size:12.5px; }
+  .bitrix-detail-field .field-label{ color:var(--text-faint); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:2px; }
+  .bitrix-detail-field .field-value{ color:var(--text); }
+  @media (max-width: 560px){ .bitrix-detail-grid{ grid-template-columns:1fr; } }
 
   /* ======================================================
      Kanban de Sugestões
@@ -594,6 +631,7 @@
   <div class="panel">
     <h2>Usuários <span class="panel-count" id="usersCount">—</span></h2>
     <p class="panel-hint">Cadastro do Bitrix cruzado com uso real do app — inclusive quem nunca abriu nada ainda. "Revogar" bloqueia o acesso ao app inteiro, verificado na hora (não precisa esperar o token expirar).</p>
+    <input type="search" id="usersSearch" placeholder="Buscar por nome, e-mail ou cargo…" style="margin-bottom:12px">
     <table class="admin-table" id="usersTable">
       <thead>
         <tr><th>Usuário</th><th>Conta</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
@@ -602,6 +640,7 @@
         <tr><td colspan="7" class="skeleton-row">Carregando…</td></tr>
       </tbody>
     </table>
+    <div id="usersPager"></div>
   </div>
 
   <div class="panel">
@@ -623,11 +662,12 @@
     </div>
   </div>
 
-  <div id="userDetailModal" class="overlay" style="position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; align-items:center; justify-content:center; z-index:80;">
-    <div style="background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; max-width:520px; width:90%; max-height:80vh; overflow-y:auto;">
-      <h2 id="userDetailTitle" style="margin-bottom:14px;">Histórico</h2>
+  <div id="userDetailModal" class="overlay">
+    <div class="modal user-detail-modal">
+      <h2 id="userDetailTitle" style="margin-bottom:4px;">Histórico</h2>
+      <p id="userDetailSubtitle" class="panel-hint" style="margin-bottom:16px;"></p>
       <div id="userDetailBody"></div>
-      <button class="action-link" id="userDetailCloseBtn" style="margin-top:14px;">Fechar</button>
+      <button class="action-link" id="userDetailCloseBtn" style="margin-top:16px;">Fechar</button>
     </div>
   </div>
 
@@ -810,6 +850,56 @@
   function escapeHtml(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // Substitui confirm() nativo do navegador — mesmo visual/mecanismo já
+  // usado em contacts.html/etc (regra do projeto: nunca alert()/confirm()
+  // nativo). window.confirmDialog estava sendo CHAMADO em 3 lugares deste
+  // arquivo (Revogar/Reativar/Marcar lançada) mas NUNCA DEFINIDO — bug real
+  // encontrado nesta sessão (2026-08-13): clicar em qualquer um desses
+  // botões lançaria TypeError, deixando a funcionalidade de bloqueio/
+  // triagem de sugestões quebrada em produção sem nenhum aviso visível.
+  var __confirmResolve = null;
+  window.confirmDialog = function (message) {
+    return new Promise(function (resolve) {
+      var overlay = document.getElementById('__confirmOverlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'overlay';
+        overlay.id = '__confirmOverlay';
+        overlay.innerHTML =
+          '<div class="modal" style="max-width:340px;text-align:center;">' +
+            '<h3 id="__confirmMsg" style="font-weight:500;"></h3>' +
+            '<div class="modal-actions" style="justify-content:center;">' +
+              '<button class="btn secondary" id="__confirmCancel">Cancelar</button>' +
+              '<button class="btn" id="__confirmOk">Confirmar</button>' +
+            '</div>' +
+          '</div>';
+        document.body.appendChild(overlay);
+        overlay.querySelector('#__confirmOk').addEventListener('click', function () { __finishConfirm(true); });
+        overlay.querySelector('#__confirmCancel').addEventListener('click', function () { __finishConfirm(false); });
+      }
+      overlay.querySelector('#__confirmMsg').textContent = message;
+      overlay.classList.add('open');
+      __confirmResolve = resolve;
+    });
+  };
+  function __finishConfirm(result) {
+    var overlay = document.getElementById('__confirmOverlay');
+    if (overlay) overlay.classList.remove('open');
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
+  }
+
+  // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o
+  // confirmDialog, que conta como "Cancelar". Faltava por completo neste
+  // arquivo (só o userDetailModal existia, e controlava visibilidade via
+  // style.display, não a classe .open que este listener procura) —
+  // usuário reportou com print (2026-08-13).
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
+    if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+  });
+
   function initials(name) {
     if (!name) return '?';
     const parts = name.trim().split(/\s+/);
@@ -836,7 +926,41 @@
     if (!iso) return '—';
     return new Date(iso).toLocaleDateString('pt-BR');
   }
-  function renderBarChart(containerId, rows, valueKey, formatFn) {
+  // `date` de getDailyBreakdownByPage (src/pageSessions.js) é sempre
+  // exatamente meia-noite UTC (date_trunc('day', ...) no Postgres) — usar
+  // formatDate() genérico aqui (que aplica o fuso LOCAL do navegador via
+  // toLocaleDateString sem timeZone) mostraria o dia ANTERIOR pra qualquer
+  // fuso atrás de UTC (Brasil = UTC-3): meia-noite UTC de 12/08 vira 21h de
+  // 11/08 no horário local, exibindo "11/08". Formatador dedicado — força
+  // UTC na exibição pra bater com o dia real que o backend agrupou, sem
+  // alterar formatDate() (usado em outros lugares pra timestamps de
+  // ponto-no-tempo reais, onde exibir no fuso local do usuário é correto).
+  function formatDayOnly(dateStr) {
+    return new Date(dateStr).toLocaleDateString('pt-BR', { timeZone: 'UTC' });
+  }
+
+  // Tooltip nativo do navegador (atributo title, mesmo mecanismo já usado
+  // no .bar-label pro nome completo da página) — usuário pediu "por data a
+  // qtd de visitas" ao passar o mouse (sessão 2026-08-13). `dailyByPage`
+  // vem de GET /admin/usage-metrics (ver getDailyBreakdownByPage,
+  // src/pageSessions.js) — [{date, visits, durationSeconds}], já ordenado
+  // por data. Mais recente primeiro (reverse) fica mais útil de ler que
+  // ordem crescente. `valueKey` decide se mostra visitas ou duração,
+  // mesmo eixo que o gráfico já está exibindo (não mistura os dois).
+  function buildDailyTooltip(page, dailyByPage, valueKey) {
+    const days = dailyByPage?.[page];
+    if (!days || !days.length) return `${page}\n(sem detalhamento por dia ainda)`;
+    const lines = [...days].reverse().map((d) => {
+      const label = formatDayOnly(d.date);
+      const value = valueKey === 'visits'
+        ? `${d.visits} visita${d.visits === 1 ? '' : 's'}`
+        : formatDuration(d.durationSeconds);
+      return `${label}: ${value}`;
+    });
+    return `${page}\n${lines.join('\n')}`;
+  }
+
+  function renderBarChart(containerId, rows, valueKey, formatFn, dailyByPage) {
     const el = document.getElementById(containerId);
     if (!rows.length) {
       el.innerHTML = `<div class="empty-state">Sem dados nos últimos 30 dias ainda.</div>`;
@@ -844,8 +968,8 @@
     }
     const max = Math.max(...rows.map((r) => r[valueKey])) || 1;
     el.innerHTML = rows.map((r) => `
-      <div class="bar-row">
-        <div class="bar-label" title="${escapeHtml(r.page)}">${escapeHtml(r.page)}</div>
+      <div class="bar-row" title="${escapeHtml(buildDailyTooltip(r.page, dailyByPage, valueKey))}">
+        <div class="bar-label">${escapeHtml(r.page)}</div>
         <div class="bar-track"><div class="bar-fill" style="width:${(r[valueKey] / max) * 100}%"></div></div>
         <div class="bar-value">${formatFn(r[valueKey])}</div>
       </div>
@@ -861,14 +985,21 @@
       document.getElementById('metricActiveUsers').textContent = String(data.activeUsers);
       document.getElementById('metricTotalTime').textContent = formatDuration(data.totalSecondsAllUsers);
       document.getElementById('metricTopPage').textContent = data.topPage || '—';
-      renderBarChart('barVisits', data.mostVisitedPages, 'visits', (v) => `${v} visita${v === 1 ? '' : 's'}`);
-      renderBarChart('barDuration', data.mostTimeSpentPages, 'durationSeconds', formatDuration);
+      renderBarChart('barVisits', data.mostVisitedPages, 'visits', (v) => `${v} visita${v === 1 ? '' : 's'}`, data.dailyByPage);
+      renderBarChart('barDuration', data.mostTimeSpentPages, 'durationSeconds', formatDuration, data.dailyByPage);
     } catch (err) {
       console.error('[admin] erro ao carregar métricas de uso:', err.message);
     }
   }
 
   let usersRows = [];
+  // Paginação/busca client-side — mesmo padrão de contacts.html
+  // (CONTACTS_PAGE_SIZE/contactsPage/renderContactsTable): GET /admin/users
+  // já traz TUDO numa chamada só (789 linhas hoje), sem paginação de
+  // servidor — corta só na hora de renderizar. Usuário reportou com print
+  // (2026-08-13): lista inteira numa rolagem só, sem filtro nenhum.
+  const USERS_PAGE_SIZE = 20;
+  let usersPage = 1;
 
   async function loadUsers() {
     try {
@@ -887,17 +1018,40 @@
     }
   }
 
+  // Busca por nome, e-mail OU cargo (workPosition) — os 3 campos visíveis
+  // na célula "Usuário"/"Conta" da tabela, mesmo critério de match parcial
+  // (includes, case-insensitive) já usado em contactSearch.
+  function usersSearchTerm() {
+    return (document.getElementById('usersSearch')?.value || '').trim().toLowerCase();
+  }
+
   function renderUsers() {
+    const term = usersSearchTerm();
+    const filtered = term
+      ? usersRows.filter((u) =>
+          (u.name || '').toLowerCase().includes(term) ||
+          (u.email || '').toLowerCase().includes(term) ||
+          (u.workPosition || '').toLowerCase().includes(term)
+        )
+      : usersRows;
+
     const body = document.getElementById('usersBody');
     const count = document.getElementById('usersCount');
+    const pager = document.getElementById('usersPager');
     count.textContent = String(usersRows.length);
 
-    if (!usersRows.length) {
-      body.innerHTML = `<tr><td colspan="7" class="empty-state">Nenhum usuário encontrado.</td></tr>`;
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="7" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca.' : 'Nenhum usuário encontrado.'}</td></tr>`;
+      pager.innerHTML = '';
       return;
     }
 
-    body.innerHTML = usersRows.map((u) => {
+    const totalPages = Math.max(1, Math.ceil(filtered.length / USERS_PAGE_SIZE));
+    if (usersPage > totalPages) usersPage = totalPages;
+    const start = (usersPage - 1) * USERS_PAGE_SIZE;
+    const pageItems = filtered.slice(start, start + USERS_PAGE_SIZE);
+
+    body.innerHTML = pageItems.map((u) => {
       const photoCell = u.photo
         ? `<img class="avatar-thumb" src="${escapeHtml(u.photo)}" alt="">`
         : `<span class="avatar-fallback">${escapeHtml(initials(u.name))}</span>`;
@@ -932,25 +1086,73 @@
         </tr>
       `;
     }).join('');
+
+    pager.innerHTML = totalPages > 1 ? `
+      <div class="pager">
+        <button type="button" class="btn secondary" id="usersPagePrev" ${usersPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+        <span class="pager-info">Página ${usersPage} de ${totalPages} (${filtered.length} usuário${filtered.length === 1 ? '' : 's'})</span>
+        <button type="button" class="btn secondary" id="usersPageNext" ${usersPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+      </div>
+    ` : '';
+
+    const prevBtn = document.getElementById('usersPagePrev');
+    const nextBtn = document.getElementById('usersPageNext');
+    if (prevBtn) prevBtn.addEventListener('click', () => { usersPage--; renderUsers(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { usersPage++; renderUsers(); });
+  }
+
+  document.getElementById('usersSearch').addEventListener('input', () => { usersPage = 1; renderUsers(); });
+
+  // "Data-só" do Bitrix (PERSONAL_BIRTHDAY/UF_EMPLOYMENT_DATE) vem sempre
+  // com hora "T00:00:00+00:00" (meia-noite UTC) — mesmo problema de fuso já
+  // corrigido em formatDayOnly (ver comentário lá): sem forçar UTC na
+  // exibição, mostraria o dia ANTERIOR pra fuso atrás de UTC (Brasil).
+  // LAST_LOGIN, diferente, vem com hora REAL (ponto-no-tempo de verdade) —
+  // usa formatDate normal, fuso local do navegador é o certo aí.
+  function bitrixField(label, value) {
+    return `<div class="bitrix-detail-field"><div class="field-label">${escapeHtml(label)}</div><div class="field-value">${value}</div></div>`;
   }
 
   async function openUserDetail(ownerId) {
     const user = usersRows.find((u) => u.ownerId === ownerId);
     const modal = document.getElementById('userDetailModal');
     const body = document.getElementById('userDetailBody');
-    document.getElementById('userDetailTitle').textContent = user?.name || 'Histórico';
+    document.getElementById('userDetailTitle').textContent = user?.name || 'Detalhado';
+    document.getElementById('userDetailSubtitle').textContent = 'Cadastro completo do Bitrix + histórico de navegação neste app.';
     body.innerHTML = `<div class="skeleton-row">Carregando…</div>`;
-    modal.style.display = 'flex';
+    modal.classList.add('open');
+
+    // Grid de cadastro do Bitrix — monta ANTES do fetch de histórico (não
+    // depende da rede, já vem de usersRows/loadUsers), pra aparecer mesmo
+    // se o histórico falhar/demorar. "—" pra qualquer campo que o Bitrix
+    // não tenha preenchido pra esta pessoa (comum: nem todo cargo/cidade
+    // é obrigatório no cadastro).
+    const bitrixGrid = user ? `
+      <div class="bitrix-detail-grid">
+        ${bitrixField('Cargo', escapeHtml(user.workPosition || '—'))}
+        ${bitrixField('E-mail', escapeHtml(user.email || '—'))}
+        ${bitrixField('Celular', escapeHtml(user.mobile || '—'))}
+        ${bitrixField('Telefone comercial', escapeHtml(user.workPhone || '—'))}
+        ${bitrixField('Cidade', escapeHtml(user.city || '—'))}
+        ${bitrixField('Data de nascimento', user.birthday ? formatDayOnly(user.birthday) : '—')}
+        ${bitrixField('Data de admissão', user.employmentDate ? formatDayOnly(user.employmentDate) : '—')}
+        ${bitrixField('Criado no Bitrix em', user.dateRegister ? formatDate(user.dateRegister) : '—')}
+        ${bitrixField('Último login no Bitrix', user.lastLoginBitrix ? formatDate(user.lastLoginBitrix) : '—')}
+      </div>
+      <h3 style="font-size:13px; margin:0 0 10px; color:var(--text-muted);">Histórico de navegação neste app</h3>
+    ` : '';
+    body.innerHTML = bitrixGrid + `<div class="skeleton-row">Carregando histórico…</div>`;
+
     try {
       const res = await apiFetch(`${API_BASE}/admin/users/${encodeURIComponent(ownerId)}`);
       if (!res.ok) throw new Error('falha ao carregar histórico');
       const data = await res.json();
       const history = data.history || [];
       if (!history.length) {
-        body.innerHTML = `<div class="empty-state">Nenhuma navegação registrada ainda.</div>`;
+        body.innerHTML = bitrixGrid + `<div class="empty-state">Nenhuma navegação registrada ainda.</div>`;
         return;
       }
-      body.innerHTML = `
+      body.innerHTML = bitrixGrid + `
         <table class="admin-table">
           <thead><tr><th>Página</th><th>Entrada</th><th>Duração</th></tr></thead>
           <tbody>
@@ -965,12 +1167,12 @@
         </table>
       `;
     } catch (err) {
-      body.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      body.innerHTML = bitrixGrid + `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }
   }
 
   document.getElementById('userDetailCloseBtn').addEventListener('click', () => {
-    document.getElementById('userDetailModal').style.display = 'none';
+    document.getElementById('userDetailModal').classList.remove('open');
   });
 
   document.getElementById('usersBody').addEventListener('click', async (e) => {

@@ -1103,7 +1103,11 @@ esconder/mostrar do link.
 tempo total do time, página mais acessada) + 2 gráficos de barra
 horizontal (páginas mais acessadas por contagem de visitas; onde o time
 passa mais tempo por duração real) — via `GET /admin/usage-metrics?days=`,
-alimentado por `page_sessions` (ver seção "Usuários" abaixo).
+alimentado por `page_sessions` (ver seção "Usuários" abaixo). Passar o
+mouse sobre uma barra mostra um tooltip com o detalhamento DIA A DIA
+dos últimos 30 dias (`dailyByPage` na resposta, `getDailyBreakdownByPage`
+em `src/pageSessions.js`, HANDOFF Parte CY) — diferente do valor
+agregado ao lado da barra, que é só o total do período.
 
 ### Usuários (tabela única + trackeamento real)
 
@@ -1135,8 +1139,16 @@ acesso, tempo total (30d), página favorita e bloqueio.
   registrada nunca incluir o tempo "esquecido" até o job rodar.
   `sendBeacon` não permite header de `Authorization`; a rota de
   fechamento aceita o token no próprio body por isso.
-- **Detalhado**: histórico completo de `page_sessions` de uma pessoa
-  (`GET /admin/users/:ownerId`), mais recente primeiro.
+- **Paginação + busca** (client-side, `public/admin.html`, HANDOFF Parte
+  CY): `GET /admin/users` traz TUDO numa chamada só (nenhuma paginação
+  de servidor); corte só na hora de renderizar, 20 por página. Busca
+  filtra por nome, e-mail OU cargo (match parcial, case-insensitive).
+- **Detalhado**: modal expandido (720px, HANDOFF Parte CY) com cadastro
+  COMPLETO do Bitrix pra aquela pessoa (cargo, e-mail, celular, telefone
+  comercial, cidade, nascimento, data de admissão, criado no Bitrix,
+  último login NO BITRIX — distinto do último acesso a ESTE app) +
+  histórico completo de `page_sessions` (`GET /admin/users/:ownerId`),
+  mais recente primeiro.
 - **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
   **inteiro** (tabela `blocked_owners`) — `POST
   /admin/users/:ownerId/block`|`unblock`. Verificado dentro de
@@ -1144,16 +1156,22 @@ acesso, tempo total (30d), página favorita e bloqueio.
   é cortado (403) na próxima chamada, mesmo com um token já emitido
   antes do bloqueio — não espera o token expirar. Um super admin nunca
   consegue bloquear o próprio `ownerId` (trava contra ficar trancado
-  fora por engano).
+  fora por engano). Confirmação sempre via `confirmDialog` (nunca
+  `confirm()` nativo, regra do projeto) — `admin.html` chamava essa
+  função em 3 lugares sem nunca defini-la (bug real corrigido na Parte
+  CY, deixava Revogar/Reativar/Marcar sugestão como lançada quebrados).
 - **Editar**: só abre um modal com o motivo do bloqueio (`reason`) — não
   existe um cadastro de usuário próprio neste sistema pra editar de fato
   (nome, permissão), a identidade sempre vem do Bitrix.
 - **Funcionários (Bitrix)**: cargo (`WORK_POSITION`), foto
   (`PERSONAL_PHOTO`), e-mail, data de criação (`DATE_REGISTER`, "—" se o
-  Bitrix não devolver esse campo pra aquele usuário) — mesmo webhook
-  `BITRIX_HR_WEBHOOK_URL` da hierarquia automática (§14). Sem a variável
-  configurada, a lista fica vazia com um aviso explícito na tela (não um
-  erro nem um vazio silencioso).
+  Bitrix não devolver esse campo pra aquele usuário), celular
+  (`PERSONAL_MOBILE`), telefone comercial (`WORK_PHONE`), cidade
+  (`PERSONAL_CITY`), nascimento (`PERSONAL_BIRTHDAY`), admissão
+  (`UF_EMPLOYMENT_DATE`), último login no Bitrix (`LAST_LOGIN`) — mesmo
+  webhook `BITRIX_HR_WEBHOOK_URL` da hierarquia automática (§14). Sem a
+  variável configurada, a lista fica vazia com um aviso explícito na
+  tela (não um erro nem um vazio silencioso).
 
 ### Sugestões — Kanban (3 colunas) restrito a super admin
 

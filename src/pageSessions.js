@@ -130,6 +130,46 @@ async function getUsageSince(sinceDate) {
   };
 }
 
+// Detalhamento DIA A DIA por página — usado só pelo tooltip dos 2 gráficos
+// de barra do Admin (ver GET /admin/usage-metrics), separado de
+// getUsageSince (que só soma o TOTAL do período, sem quebrar por data) —
+// usuário pediu pra ver "por data a qtd de visitas" ao passar o mouse
+// (sessão 2026-08-13). Query própria (não reaproveita o resultado de
+// getUsageSince) porque o agrupamento por dia muda o group by inteiro —
+// tentar derivar isso do agregado já feito não seria possível (a soma já
+// perdeu a granularidade de dia). `date_trunc('day', started_at)` no fuso
+// do banco (UTC) — mesmo padrão de qualquer outro corte por dia já usado
+// no projeto, sem tentar converter fuso aqui (isso é decisão de exibição,
+// não de armazenamento).
+async function getDailyBreakdownByPage(sinceDate) {
+  const { rows } = await pool.query(
+    `select page,
+            date_trunc('day', started_at) as day,
+            count(*)::int as visits,
+            extract(epoch from sum(coalesce(ended_at, last_ping_at) - started_at))::bigint as "durationSeconds"
+     from page_sessions
+     where started_at >= $1
+     group by page, day
+     order by page, day`,
+    [sinceDate]
+  );
+
+  // Agrupa em { [page]: [{date, visits, durationSeconds}, ...] } — formato
+  // já pronto pro frontend indexar por página sem precisar reagrupar de
+  // novo no cliente.
+  const byPage = new Map();
+  for (const row of rows) {
+    const list = byPage.get(row.page) || [];
+    list.push({
+      date: row.day.toISOString().slice(0, 10), // "YYYY-MM-DD", sem hora
+      visits: row.visits,
+      durationSeconds: Number(row.durationSeconds) || 0,
+    });
+    byPage.set(row.page, list);
+  }
+  return byPage;
+}
+
 // Histórico completo de UMA pessoa, mais recente primeiro — pro botão
 // "Detalhado" na tabela de Usuários do Admin. Limitado a 200 linhas (não
 // paginado ainda — volume baixo o suficiente pra não justificar
@@ -161,5 +201,6 @@ module.exports = {
   getLastAccess,
   getLastAccessByOwners,
   getUsageSince,
+  getDailyBreakdownByPage,
   getSessionHistory,
 };
