@@ -59,4 +59,33 @@ async function logStatusToTimeline(dealId, text) {
   });
 }
 
-module.exports = { callBitrix, logMessageToTimeline, logStatusToTimeline };
+// Resumo de IA da conversa (title/subtitle/summary — ver
+// summarizeConversation em src/openai.js) na timeline do Negócio, mesmo
+// mecanismo de logMessageToTimeline/logStatusToTimeline acima — pedido do
+// usuário (2026-08-13, com print da tela de resumo do Chat): "esse resumo
+// da conversa deve ir para o card do bitrix". Chamado automaticamente
+// TODA VEZ que um resumo novo é gerado (POST /conversations/summary,
+// decisão confirmada com o usuário — não é um botão separado "Enviar pro
+// Bitrix"), então um resumo recalculado várias vezes no mesmo dia cria
+// vários comentários na timeline (aceito — reflete quando cada versão do
+// resumo foi gerada, mesma natureza de "log" que já existe pra mensagem/
+// status, não é editar um campo único).
+async function logConversationSummaryToTimeline(dealId, { title, subtitle, summary }) {
+  if (!dealId) return;
+  const lines = [
+    '[Resumo IA da conversa no WhatsApp]',
+    title ? `*${title}*` : null,
+    subtitle || null,
+    '',
+    summary,
+  ].filter((l) => l !== null);
+  await callBitrix('crm.timeline.comment.add', {
+    fields: {
+      ENTITY_ID: dealId,
+      ENTITY_TYPE: 'deal',
+      COMMENT: lines.join('\n'),
+    },
+  });
+}
+
+module.exports = { callBitrix, logMessageToTimeline, logStatusToTimeline, logConversationSummaryToTimeline };

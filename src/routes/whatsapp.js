@@ -1,6 +1,6 @@
 const express = require('express');
 const store = require('../store');
-const { logMessageToTimeline } = require('../bitrix');
+const { logMessageToTimeline, logConversationSummaryToTimeline } = require('../bitrix');
 const { saveMedia, getSignedMediaUrl } = require('../media');
 const { computeMetrics, computeTeamMetrics, getOwnNumbersBySession } = require('../metrics');
 const { createCampaign, getCampaign, runCampaign } = require('../campaigns');
@@ -1212,6 +1212,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
       const messages = await store.getHistory(session, phone);
       const result = await summarizeConversation({ contactName, messages });
       await store.setConversationSummary(session, phone, result);
+      // Automático, toda vez que um resumo novo é gerado (decisão
+      // confirmada com o usuário, 2026-08-13) — best-effort, igual
+      // logMessageToTimeline: uma falha aqui (webhook indisponível, deal
+      // sem card, etc.) nunca deve impedir o resumo de ser salvo/devolvido.
+      store.getDealForPhone(session, phone)
+        .then((dealId) => logConversationSummaryToTimeline(dealId, result))
+        .catch((err) => console.error('[conversations:summary] falha ao logar na timeline do Bitrix:', err.message));
       res.json({ ...result, updatedAt: new Date().toISOString() });
     } catch (err) {
       console.error('[conversations:summary] erro:', err.message);

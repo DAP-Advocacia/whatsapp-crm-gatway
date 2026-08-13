@@ -482,6 +482,12 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   si usa — resolvido chamando o mapeamento LID→telefone interno do próprio
   Baileys (`sock.signalRepository.lidMapping.getPNForLID`, `_resolveLidPhone` em
   `src/whatsapp.js`), senão o check "lida" desses contatos nunca atualizava.
+- **Resumo de IA na timeline do Bitrix** (HANDOFF Parte DD): toda vez que o
+  resumo de uma conversa é gerado/recalculado (botão no painel do Chat), o
+  mesmo comentário (título/subtítulo/resumo) é postado automaticamente na
+  timeline do Negócio (`logConversationSummaryToTimeline`, `src/bitrix.js`,
+  mesmo `crm.timeline.comment.add` de cima) — best-effort, sem `dealId`
+  simplesmente não posta nada.
   Causa raiz **separada** do mesmo sintoma: um sufixo de dispositivo no JID
   (`":0"`, `":12"`...) sobrevivia na extração do telefone e nunca batia com
   o telefone salvo — corrigido em `_jidToPhone` (§19, bug 19).

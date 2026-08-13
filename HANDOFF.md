@@ -6864,3 +6864,36 @@ banco REAL de produção (registro de 3 ações de teste, leitura
 confirmando ordem decrescente por data, limpeza confirmada com 0
 linhas residuais).
 
+### Parte DD — Resumo de IA da conversa agora vai automaticamente pro card do Bitrix (2026-08-13)
+
+Usuário reportou com print (painel de resumo do Chat) — "esse resumo
+da conversa deve ir para o card do bitrix". Investigado o mecanismo já
+existente pra esse tipo de sincronização: `logMessageToTimeline`/
+`logStatusToTimeline` (`src/bitrix.js`) já postam comentário na
+timeline do Negócio via `crm.timeline.comment.add` — mesmo lugar onde
+mensagem/status de entrega já aparecem hoje. Confirmado com o usuário
+o momento do envio (automático a cada resumo gerado, não um botão
+"Enviar pro Bitrix" separado).
+
+`logConversationSummaryToTimeline(dealId, {title, subtitle, summary})`
+novo, mesmo padrão dos outros dois — comentário formatado (`*título*`
+em negrito, subtítulo, resumo completo), campos ausentes (title/
+subtitle null) omitidos sem deixar rastro de "null" no texto. Chamado
+dentro de `POST /conversations/summary` (`src/routes/whatsapp.js`),
+`dealId` resolvido via `store.getDealForPhone(session, phone)` (não
+recebido no body — a rota não tinha isso antes). Best-effort, mesma
+filosofia dos outros logs de timeline: uma falha aqui (webhook fora,
+negócio sem card) nunca impede o resumo de ser salvo/devolvido pro
+frontend.
+
+**Efeito colateral aceito, não é bug**: resumo recalculado várias vezes
+no mesmo dia cria vários comentários na timeline (reflete quando cada
+versão foi gerada — mesma natureza de "log" que mensagem/status já
+têm, não é um campo único que se sobrescreve).
+
+**Validação**: `node -c`. Testado isolado (mock de `callBitrix`, sem
+webhook real): 5 casos — `dealId` null nunca chama a API, comentário
+formatado corretamente com todos os campos, título ausente omitido sem
+deixar "null" no texto, subtítulo ausente idem, `ENTITY_ID`/
+`ENTITY_TYPE` corretos quando `dealId` presente.
+
