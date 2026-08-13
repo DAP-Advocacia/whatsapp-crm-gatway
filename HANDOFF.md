@@ -6978,3 +6978,28 @@ instalação original) — feito pelo usuário depois do deploy.
 contato completo, sem telefone lança erro, sem `LAST_NAME`, sem nome
 nenhum não quebra).
 
+### Parte DF — Paginação por coluna no Kanban de Notificações (2026-08-13)
+
+Usuário reportou com print — coluna "Lidas" com 58 itens numa lista só,
+rolagem longa. Mesmo padrão já usado 3x nesta sessão (`contacts.html`,
+tabela de Usuários e os 2 históricos do Admin) — `KANBAN_PAGE_SIZE =
+10` (menor que os 20 de tabela, cards ocupam mais espaço vertical que
+linha de tabela), estado (`kanbanPage`) por COLUNA (`unread`/`read`
+independentes — avançar uma nunca afeta a outra), sobrevive a um
+recarregar de dados (`load()`, não reseta pra 1 à toa) — só corrige
+(`Math.min`) se a página atual ficar fora do intervalo novo (lista
+encolheu, ex: várias notificações marcadas de volta como não-lidas).
+`items` (array completo, usado também pelo Calendário) continua
+intocado — a paginação corta só na hora de RENDERIZAR o Kanban, nunca
+o array fonte.
+
+`.pager`/`.pager-info` (mesmo nome de classe já usado em
+`contacts.html`/`admin.html`, valores mais compactos — cabe numa
+coluna estreita de Kanban, não a largura inteira da página).
+
+**Validação**: `vm.Script` (455 linhas do bloco principal). Testado
+isolado: 5 casos — 58 itens vira 6 páginas (mesmo número do print),
+última página parcial, colunas independentes (avançar "read" não
+afeta "unread"), lista encolhendo corrige a página sem ficar vazia,
+lista vazia não quebra.
+

@@ -291,6 +291,14 @@
   .btn:hover{ filter: brightness(1.08); }
   .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
   .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter:none; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; filter:none; }
+  /* Paginação por coluna do Kanban — usuário reportou coluna "Lidas" com
+     rolagem longa (58 itens numa lista só, print 2026-08-13). Mesmo nome
+     de classe já usado em contacts.html/admin.html (.pager/.pager-info),
+     valores mais compactos aqui — cabe numa coluna estreita de Kanban,
+     não a largura inteira da página. */
+  .pager{ display:flex; align-items:center; justify-content:center; gap:10px; padding-top:10px; margin-top:6px; border-top:1px solid var(--border); }
+  .pager-info{ font-size:11px; color:var(--text-faint); white-space:nowrap; }
 
   .overlay{
     position: fixed; inset: 0; background: rgba(10,8,5,.6);
@@ -966,6 +974,15 @@
     { key: 'read', title: 'Lidas' },
   ];
 
+  // Paginação client-side por coluna (mesmo padrão de contacts.html/
+  // admin.html) — usuário reportou coluna "Lidas" com rolagem longa (58
+  // itens, print 2026-08-13). Estado por coluna sobrevive a um recarregar
+  // de dados (load()) — só corrige (Math.min) se a página atual ficar
+  // fora do intervalo novo, nunca reseta pra 1 à toa (perderia o lugar de
+  // quem estava vendo a página 3, por exemplo).
+  const KANBAN_PAGE_SIZE = 10;
+  const kanbanPage = { unread: 1, read: 1 };
+
   function renderKanban() {
     const byStatus = {
       unread: items.filter((i) => !i.read),
@@ -976,6 +993,11 @@
       <div class="kanban-board">
         ${KANBAN_COLUMNS.map((col) => {
           const list = byStatus[col.key] || [];
+          const totalPages = Math.max(1, Math.ceil(list.length / KANBAN_PAGE_SIZE));
+          if (kanbanPage[col.key] > totalPages) kanbanPage[col.key] = totalPages;
+          const page = kanbanPage[col.key];
+          const start = (page - 1) * KANBAN_PAGE_SIZE;
+          const pageItems = list.slice(start, start + KANBAN_PAGE_SIZE);
           return `
             <div class="kanban-col" data-col="${col.key}">
               <div class="kanban-col-head">
@@ -983,8 +1005,15 @@
                 <span class="kanban-count">${list.length}</span>
               </div>
               <div class="kanban-cards">
-                ${list.length ? list.map((item) => renderCard(item)).join('') : '<p class="kanban-empty">Nenhuma</p>'}
+                ${pageItems.length ? pageItems.map((item) => renderCard(item)).join('') : '<p class="kanban-empty">Nenhuma</p>'}
               </div>
+              ${totalPages > 1 ? `
+                <div class="pager">
+                  <button type="button" class="btn secondary" data-kanban-prev="${col.key}" ${page <= 1 ? 'disabled' : ''}>&larr;</button>
+                  <span class="pager-info">${page}/${totalPages}</span>
+                  <button type="button" class="btn secondary" data-kanban-next="${col.key}" ${page >= totalPages ? 'disabled' : ''}>&rarr;</button>
+                </div>
+              ` : ''}
             </div>
           `;
         }).join('')}
@@ -992,6 +1021,12 @@
     `;
 
     bindCardActions(kanbanView);
+    kanbanView.querySelectorAll('[data-kanban-prev]').forEach((btn) => {
+      btn.addEventListener('click', () => { kanbanPage[btn.dataset.kanbanPrev]--; renderKanban(); });
+    });
+    kanbanView.querySelectorAll('[data-kanban-next]').forEach((btn) => {
+      btn.addEventListener('click', () => { kanbanPage[btn.dataset.kanbanNext]++; renderKanban(); });
+    });
   }
 
   // ---------------- Calendário ----------------
