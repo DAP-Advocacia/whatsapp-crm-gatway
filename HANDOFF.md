@@ -6531,3 +6531,13 @@ confortável.
 arquivos (`chat.html`: 2425 linhas; `admin.html`: 458 linhas) — sem
 erro de sintaxe.
 
+**Confirmado pelo usuário em produção (2026-08-13)**: filtro
+"Pendentes" e layout do Admin, visualmente ok. Os 5 nomes ausentes da
+Parte CT: confirmado no banco que **1 das 5** ganhou nome
+(conversation `77941`, "Daniel Costa") — a que o usuário efetivamente
+testou mandando/recebendo mensagem; as outras 4 continuam sem nome,
+porque não receberam nenhuma mensagem nova ainda desde a correção (não
+é falha — é exatamente o comportamento esperado, mecanismo confirmado
+funcionando, resolve sozinho quando cada uma receber uma mensagem
+real). Não tratar como pendência residual.
+
