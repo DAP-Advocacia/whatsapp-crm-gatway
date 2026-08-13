@@ -1546,11 +1546,18 @@ function createWhatsappRouter({ sessions, broadcast }) {
       }
 
       const ownerIds = employees.map((e) => ownerIdFor(e.id));
-      const [presenceRows, lastAccessMap, usage, blocked] = await Promise.all([
+      const sinceDate = new Date(Date.now() - ADMIN_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      const [presenceRows, lastAccessMap, usage, blocked, activeDaysByOwner, usabilityByOwner] = await Promise.all([
         presence.listPresence(),
         pageSessions.getLastAccessByOwners(ownerIds),
-        pageSessions.getUsageSince(new Date(Date.now() - ADMIN_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000)),
+        pageSessions.getUsageSince(sinceDate),
         blockedOwners.listBlocked(),
+        // Rastreamento de usabilidade ampliado (2026-08-13, HANDOFF Parte
+        // CZ) — frequência de acesso (dias distintos, não só tempo total).
+        pageSessions.getActiveDaysByOwner(sinceDate),
+        // Mensagens enviadas (30d), contatos cadastrados, campanhas criadas
+        // (aproximado por DONO da instância — ver getUsabilityStatsByOwner).
+        store.getUsabilityStatsByOwner(sinceDate),
       ]);
 
       const presenceByOwner = new Map(presenceRows.map((r) => [r.ownerId, r]));
@@ -1562,6 +1569,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
         const isOnline = !!presenceRow && Date.now() - new Date(presenceRow.lastSeenAt).getTime() < ADMIN_ONLINE_THRESHOLD_MS;
         const favoritePage = usage.favoritePageByOwner.get(ownerId);
         const blockedRow = blockedByOwner.get(ownerId);
+        const usability = usabilityByOwner.get(ownerId);
         return {
           ownerId,
           name: e.name,
@@ -1586,6 +1594,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
           favoritePage: favoritePage?.page || null,
           isBlocked: !!blockedRow,
           blockedReason: blockedRow?.reason || null,
+          // Rastreamento de usabilidade ampliado (2026-08-13, HANDOFF Parte
+          // CZ) — só usados no modal "Detalhado", mesma decisão dos campos
+          // do Bitrix acima (tabela principal não muda).
+          activeDaysLast30d: activeDaysByOwner.get(ownerId) || 0,
+          messagesSentLast30d: usability?.messagesSent || 0,
+          contactsTotal: usability?.contactsTotal || 0,
+          campaignsTotal: usability?.campaignsTotal || 0,
         };
       });
 

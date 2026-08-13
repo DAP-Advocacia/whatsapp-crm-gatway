@@ -1175,6 +1175,16 @@
         ${bitrixField('Criado no Bitrix em', user.dateRegister ? formatDate(user.dateRegister) : '—')}
         ${bitrixField('Último login no Bitrix', user.lastLoginBitrix ? formatDate(user.lastLoginBitrix) : '—')}
       </div>
+      <h3 style="font-size:13px; margin:16px 0 10px; color:var(--text-muted);">Atividade no app (últimos 30 dias)</h3>
+      <div class="bitrix-detail-grid">
+        ${bitrixField('Dias ativos', `${user.activeDaysLast30d ?? 0} de 30`)}
+        ${bitrixField('Mensagens enviadas', String(user.messagesSentLast30d ?? 0))}
+        ${bitrixField('Contatos cadastrados', String(user.contactsTotal ?? 0))}
+        ${bitrixField(
+          'Campanhas criadas',
+          `${user.campaignsTotal ?? 0} <span title="Aproximado: contado por INSTÂNCIA, não por quem de fato clicou — se um delegado criar numa instância de outra pessoa, conta pro dono da instância." style="cursor:help; color:var(--text-faint);">ⓘ</span>`
+        )}
+      </div>
       <h3 style="font-size:13px; margin:0 0 10px; color:var(--text-muted);">Histórico de navegação neste app</h3>
     ` : '';
     body.innerHTML = bitrixGrid + `<div class="skeleton-row">Carregando histórico…</div>`;

@@ -6688,3 +6688,64 @@ prefixo corretamente, vazio/null/undefined, escolha de instância
 online-primeiro, fallback sem nenhuma online, lista vazia não lança
 erro).
 
+### Parte DA — Rastreamento de usabilidade ampliado: mensagens enviadas, contatos, campanhas (aproximado), dias ativos (2026-08-13)
+
+Usuário pediu "mais rastreamento de usabilidade" (pedido amplo, Parte
+CY) — pedi recomendação minha primeiro em vez de implementar às
+cegas; recomendei 3 itens fáceis de justificar (todos já calculáveis a
+partir de dado que JÁ existe, sem instrumentar nada novo no frontend)
+e disse explicitamente o que NÃO recomendava (clique-a-clique dentro de
+página, device/localização — alto custo, baixo valor pro objetivo real
+aqui, que é entender adoção, não debugar problema técnico). Usuário
+confirmou os 3 + pediu "e mais" — acrescentei contatos cadastrados
+(mesma régua: dado que já existe, só falta agregar).
+
+**Armadilha real evitada antes de escrever qualquer query**: `contacts`
+em `db/schema.sql` mostra a coluna como `session_id`, mas o
+`schema.sql` está DESATUALIZADO nesse ponto — uma migração renomeou
+pra `owner_id` (documentado no topo de `src/contacts.js`, não
+propagado pro `schema.sql`). Se eu tivesse escrito a query direto
+contra o `schema.sql` sem checar o código real primeiro, teria usado a
+coluna errada. `campaigns`, checado em seguida, NÃO sofreu a mesma
+migração — continua por `session_id` (instância), não por pessoa.
+
+**Limitação real, confirmada com o usuário antes de implementar**:
+campanhas não registram quem de fato criou, só a instância — contado
+por aproximação (DONO da instância, via join com `instances`). Se um
+delegado criar campanha na instância de outra pessoa, conta pro dono,
+não pra quem clicou. Mensagens/contatos/dias ativos não têm essa
+imprecisão (são exatos). Usuário confirmou aceitar a aproximação, com
+ressalva visível na tela (ícone "ⓘ" com tooltip explicando).
+
+**Implementação**:
+- `src/store.js`: `getUsabilityStatsByOwner(sinceDate)` — 3 queries
+  paralelas (mensagens enviadas via join
+  `conversation_assignment_history`+`messages` por PERÍODO de
+  atribuição, mesma lógica de correção já usada em
+  `getAssignmentPeriods` mas em SQL puro em vez de JS, sem escopo de
+  `sessionIds` — o Admin precisa ver TODO o universo, não só quem tem
+  acesso a alguma instância; contatos por `owner_id` direto; campanhas
+  por dono da instância via join), devolve `Map<ownerId, {messagesSent,
+  contactsTotal, campaignsTotal}>`.
+- `src/pageSessions.js`: `getActiveDaysByOwner(sinceDate)` — dias
+  DISTINTOS de acesso (`count(distinct date_trunc('day', started_at))`)
+  — diferente de tempo TOTAL (já existia): alguém com 3h concentradas
+  num dia só é diferente de alguém com 3h em 15 dias diferentes, o
+  total sozinho não distingue os dois casos.
+- `GET /admin/users` (`src/routes/whatsapp.js`): expõe os 4 campos
+  novos (`activeDaysLast30d`, `messagesSentLast30d`, `contactsTotal`,
+  `campaignsTotal`) — só usados no modal Detalhado, tabela principal
+  sem mudança.
+- `public/admin.html`: nova seção "Atividade no app (últimos 30 dias)"
+  dentro do modal Detalhado, mesmo grid visual do cadastro do Bitrix.
+
+**Validação**: `vm.Script` (682 linhas). Testado contra dados REAIS de
+produção antes do frontend (não só mock) — confirmado owner `183168`
+(usuário, teste real desta sessão) com `activeDaysLast30d: 2` batendo
+exatamente com os 2 dias de uso real, `contactsTotal: 5`/`campaignsTotal: 5`
+coerentes com o histórico conhecido. Lógica de merge das 3 fontes
+testada isolada (5 casos — merge com dado nas 3 fontes, owner só numa
+fonte (zeros nas outras), owner ausente em tudo (undefined, não
+quebra), duas fontes não se sobrescrevem, múltiplos owners isolados
+sem contaminação cruzada).
+

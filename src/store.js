@@ -463,6 +463,59 @@ async function getAssignmentPeriods(sessionIds) {
   });
 }
 
+// Métricas de uso "de verdade" por pessoa, pro Admin (tela Usuários, ver
+// HANDOFF Parte CZ) — diferente de getAssignmentPeriods (escopado a
+// sessionIds específicos, carrega mensagens inteiras em memória, pensado
+// pro Painel de atendimento de UM time), aqui é agregação SQL pura, SEM
+// escopo de sessionIds (o Admin precisa ver TODO o universo de
+// funcionários, não só quem tem acesso a alguma instância).
+//
+// Mensagens enviadas: junta conversation_assignment_history com messages
+// por período (mesma lógica de "quem estava atendendo quando a mensagem
+// foi enviada" já usada em getAssignmentPeriods, só que em SQL em vez de
+// JS) — não é só "quem é o dono da conversa hoje", é o histórico real de
+// quem atendeu cada trecho.
+//
+// Contatos/campanhas: contatos já é por owner_id direto (ver
+// src/contacts.js, migração documentada lá). Campanhas é por session_id
+// (INSTÂNCIA, não pessoa) — sem registro de quem de fato criou, só a
+// instância; aproximado atribuindo ao DONO da instância via join com
+// `instances` (usuário confirmado aceitar essa aproximação, HANDOFF Parte
+// CZ — pode distorcer se um delegado criar numa instância de outra
+// pessoa, caso raro).
+async function getUsabilityStatsByOwner(sinceDate) {
+  const [messagesSent, contactCounts, campaignCounts] = await Promise.all([
+    pool.query(
+      `select h.assigned_to as "ownerId", count(*)::int as sent
+       from conversation_assignment_history h
+       join messages m on m.conversation_id = h.conversation_id
+         and m.direction = 'out'
+         and m.created_at >= h.started_at
+         and m.created_at < coalesce(h.ended_at, now())
+         and m.created_at >= $1
+       group by h.assigned_to`,
+      [sinceDate]
+    ),
+    pool.query(`select owner_id as "ownerId", count(*)::int as total from contacts group by owner_id`),
+    pool.query(
+      `select i.owner_id as "ownerId", count(*)::int as total
+       from campaigns c
+       join instances i on i.id = c.session_id
+       group by i.owner_id`
+    ),
+  ]);
+
+  const byOwner = new Map();
+  const ensure = (ownerId) => {
+    if (!byOwner.has(ownerId)) byOwner.set(ownerId, { messagesSent: 0, contactsTotal: 0, campaignsTotal: 0 });
+    return byOwner.get(ownerId);
+  };
+  for (const r of messagesSent.rows) ensure(r.ownerId).messagesSent = r.sent;
+  for (const r of contactCounts.rows) ensure(r.ownerId).contactsTotal = r.total;
+  for (const r of campaignCounts.rows) ensure(r.ownerId).campaignsTotal = r.total;
+  return byOwner;
+}
+
 // Lista as conversas de uma ou mais sessões (instâncias), mais recente
 // primeiro, para a tela Chat (public/chat.html) — nome do contato (se
 // cadastrado em `contacts`), prévia da última mensagem e tags aplicadas.
@@ -666,6 +719,7 @@ module.exports = {
   setConversationArchived,
   assignConversation,
   getAssignmentPeriods,
+  getUsabilityStatsByOwner,
   moveConversationToInstance,
   setConversationNotifications,
   getConversationNotifPrefs,

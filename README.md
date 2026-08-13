@@ -1147,6 +1147,10 @@ acesso, tempo total (30d), página favorita e bloqueio.
   COMPLETO do Bitrix pra aquela pessoa (cargo, e-mail, celular, telefone
   comercial, cidade, nascimento, data de admissão, criado no Bitrix,
   último login NO BITRIX — distinto do último acesso a ESTE app) +
+  seção **"Atividade no app"** (HANDOFF Parte DA: dias ativos nos
+  últimos 30d — frequência, não só tempo total —, mensagens enviadas,
+  contatos cadastrados, campanhas criadas — este último aproximado por
+  DONO da instância, não por quem de fato criou, ícone "ⓘ" explica) +
   histórico completo de `page_sessions` (`GET /admin/users/:ownerId`),
   mais recente primeiro. Botão **"Enviar mensagem no WhatsApp"**
   (HANDOFF Parte CZ, some sem celular cadastrado) redireciona pra

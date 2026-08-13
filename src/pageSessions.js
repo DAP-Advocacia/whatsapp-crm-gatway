@@ -170,6 +170,22 @@ async function getDailyBreakdownByPage(sinceDate) {
   return byPage;
 }
 
+// Dias DISTINTOS de acesso por pessoa no período — diferente de
+// totalSecondsLast30d (tempo TOTAL, ver getUsageSince), isto mede
+// FREQUÊNCIA de hábito: alguém com 3h concentradas num único dia é
+// diferente de alguém com 3h espalhadas em 15 dias — o total sozinho não
+// distingue os dois casos. Pro Admin (tela Usuários, HANDOFF Parte CZ).
+async function getActiveDaysByOwner(sinceDate) {
+  const { rows } = await pool.query(
+    `select owner_id as "ownerId", count(distinct date_trunc('day', started_at))::int as "activeDays"
+     from page_sessions
+     where started_at >= $1
+     group by owner_id`,
+    [sinceDate]
+  );
+  return new Map(rows.map((r) => [r.ownerId, r.activeDays]));
+}
+
 // Histórico completo de UMA pessoa, mais recente primeiro — pro botão
 // "Detalhado" na tabela de Usuários do Admin. Limitado a 200 linhas (não
 // paginado ainda — volume baixo o suficiente pra não justificar
@@ -202,5 +218,6 @@ module.exports = {
   getLastAccessByOwners,
   getUsageSince,
   getDailyBreakdownByPage,
+  getActiveDaysByOwner,
   getSessionHistory,
 };
