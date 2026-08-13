@@ -6749,3 +6749,13 @@ fonte (zeros nas outras), owner ausente em tudo (undefined, não
 quebra), duas fontes não se sobrescrevem, múltiplos owners isolados
 sem contaminação cruzada).
 
+**Correção rápida, mesma sessão**: usuário perguntou "cadê o botão de
+enviar mensagem" depois de ver a tabela principal (o botão só existe
+dentro do modal Detalhado, Parte CZ — não na listagem). Na investigação,
+medido contra o Bitrix real: **só 114 de 791 pessoas (14%) têm celular
+cadastrado** — a decisão original (botão `hidden` sem nenhum) deixaria
+86% do universo sem NENHUM sinal do recurso existir. Usuário confirmou
+preferir botão sempre visível, desabilitado (`disabled`, não `hidden`)
+com `title` explicando o motivo ("Sem celular cadastrado no Bitrix pra
+esta pessoa") quando não há celular.
+

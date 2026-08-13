@@ -682,7 +682,7 @@
       <p id="userDetailSubtitle" class="panel-hint" style="margin-bottom:16px;"></p>
       <div id="userDetailBody"></div>
       <div class="modal-actions" style="justify-content:space-between; margin-top:16px;">
-        <button class="btn" id="userDetailSendMsgBtn" hidden>Enviar mensagem no WhatsApp</button>
+        <button class="btn" id="userDetailSendMsgBtn">Enviar mensagem no WhatsApp</button>
         <button class="action-link" id="userDetailCloseBtn">Fechar</button>
       </div>
     </div>
@@ -1150,12 +1150,18 @@
     body.innerHTML = `<div class="skeleton-row">Carregando…</div>`;
     modal.classList.add('open');
 
-    // "Enviar mensagem" só faz sentido com um celular pra mandar — some
-    // (hidden) sem nenhum, em vez de mostrar desabilitado sem explicação
-    // (nem todo cadastro do Bitrix tem esse campo preenchido).
+    // "Enviar mensagem" precisa de um celular pra mandar — SEMPRE visível
+    // (decisão revista, 2026-08-13: usuário confirmou querer ver que o
+    // recurso existe mesmo sem dado, não escondido sem aviso — medido
+    // nesta sessão que só 114 de 791 pessoas no Bitrix têm celular
+    // cadastrado, 86% ficariam sem NENHUM sinal do recurso se ficasse
+    // hidden). Desabilitado (não hidden) + title explicando o motivo
+    // quando não há celular.
     const sendMsgBtn = document.getElementById('userDetailSendMsgBtn');
     const normalizedPhone = user ? normalizeBrazilPhone(user.mobile) : null;
-    sendMsgBtn.hidden = !normalizedPhone;
+    sendMsgBtn.hidden = false;
+    sendMsgBtn.disabled = !normalizedPhone;
+    sendMsgBtn.title = normalizedPhone ? '' : 'Sem celular cadastrado no Bitrix pra esta pessoa';
     sendMsgBtn.dataset.phone = normalizedPhone || '';
 
     // Grid de cadastro do Bitrix — monta ANTES do fetch de histórico (não
