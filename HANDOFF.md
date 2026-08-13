@@ -6759,3 +6759,33 @@ preferir botão sempre visível, desabilitado (`disabled`, não `hidden`)
 com `title` explicando o motivo ("Sem celular cadastrado no Bitrix pra
 esta pessoa") quando não há celular.
 
+### Parte DB — Nome de página sem "/"/".html" em 4 lugares + paginação no histórico de navegação (2026-08-13)
+
+Usuário reportou 2 ajustes: (1) "página favorita" mostrando o path cru
+(`/dashboard.html`); (2) histórico de navegação (modal Detalhado) sem
+paginação, rolagem longa.
+
+**Nome de página**: `formatPageName(page)` novo (`public/admin.html`)
+— tira `/` inicial e `.html` final. Achado ao investigar: o mesmo
+problema aparecia em MAIS 3 lugares além do que o usuário apontou
+(card "Página mais acessada" no topo, rótulo dos 2 gráficos de barra,
+primeira linha do tooltip por dia da Parte CY, coluna "Página" do
+histórico dentro do modal) — corrigido nos 4+1 lugares de uma vez com
+o mesmo formatador, em vez de só o ponto reportado (ficaria
+inconsistente: "dashboard" num lugar, "/dashboard.html" em outro).
+Cuidado: a CHAVE de `dailyByPage[page]` (lookup no objeto que vem do
+backend) continua usando o `page` CRU — só a EXIBIÇÃO passa por
+`formatPageName`, nunca a chave de busca.
+
+**Paginação do histórico**: mesmo padrão client-side já usado 2x nesta
+sessão (`contacts.html`/tabela de Usuários) — `HISTORY_PAGE_SIZE = 20`,
+estado (`historyPage`) LOCAL a cada chamada de `openUserDetail` (não
+module-level) — abrir o Detalhado de outra pessoa sempre começa na
+página 1, nunca herda a página de quem foi visto antes.
+
+**Validação**: `vm.Script` (730 linhas). Testado isolado:
+`formatPageName` (7 casos — com/sem barra inicial, null/undefined/
+vazio, nome composto com hífen) + paginação (4 casos — múltiplas
+páginas, última parcial, página fora do range corrige, menos de 1
+página não mostra paginador).
+
