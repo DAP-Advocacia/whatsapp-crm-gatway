@@ -7106,3 +7106,74 @@ dealId)` / `(phone, text, replyTo)`), não assumida.
 em ~30s numa aba aberta; WhatsApp chegando de fato no celular de um
 funcionário de teste com celular cadastrado no Bitrix).
 
+### Parte DH — Deploy automático não disparava (token do GitHub expirado no EasyPanel) + `DB_POOL_MAX` configurável (2026-08-17)
+
+Ao publicar a Parte DG, o deploy automático (webhook GitHub→EasyPanel)
+não rebuildou — investigado a fundo via API do GitHub, não só pelo
+painel:
+
+- Confirmado que o webhook existe, está `active`, escuta `push`, e a
+  URL bate com o painel. Um **ping** de teste (`POST .../pings`) teve
+  sucesso (200 OK, 0.26s) — **não era problema de rede/firewall/SSL**.
+- Porém o histórico de `deliveries` do webhook estava **vazio para
+  eventos de push** desde a criação (31/07) — o GitHub nunca tentou
+  entregar nenhum push a ele, nem sucesso nem erro. Descartado
+  problema de branch (commit confirmado em `origin/main`, que é a
+  `default_branch` real do repositório).
+- **Causa raiz real**, achada ao tentar o deploy manual pelo painel:
+  erro *"Cannot find public repository and your Github token is
+  invalid"*. Confirmado na conta do usuário: os dois Personal Access
+  Tokens existentes (`Teste`, que tinha o escopo `repo` entre muitos
+  outros excessivos, e `Portfolio`) estavam **expirados desde
+  07/08/2026** — 10 dias antes desta sessão. Corrigido gerando um
+  token novo (classic, escopo `repo` apenas, sem expiração) e
+  colando na config de Source/Git do Service no EasyPanel.
+- Esclarecido pro usuário: um Personal Access Token de conta pessoal
+  funciona normalmente para repositórios de uma organização da qual
+  o usuário é membro com permissão — não existe um "token separado
+  da organização" para esse uso; o token herda as permissões que a
+  conta já tem nos repositórios (a própria organização DAP Advocacia
+  já tinha "Allow access via personal access token (classic)"
+  habilitado, confirmado no print do usuário).
+- **Efeito colateral que atrasou a confirmação**: no meio da
+  correção, o GitHub entrou em *"Partial System Outage"* real
+  (confirmado via `githubstatus.com/api/v2/status.json`,
+  `indicator: "major"`) — nem a geração de token nem o deploy
+  funcionariam de forma confiável enquanto durou. Distinguido
+  corretamente de "o usuário está demorando" — parado de insistir em
+  ações que dependiam do GitHub até o indicador normalizar.
+
+**`DB_POOL_MAX` (escalabilidade)**: no meio da espera pelo deploy, o
+usuário perguntou sobre escalabilidade (não cair instâncias + volume
+de mensagens simultâneas). Diagnóstico dado sem mudança de código
+imediata — dois gargalos reais identificados:
+1. Pool do Postgres sem `max` explícito em `src/db.js` (usava o
+   default do `pg`, 10) — compartilhado por toda a aplicação.
+2. Processo Node único, sem cluster, 1 réplica no Swarm — todas as
+   sessões WhatsApp de todos os usuários vivem na memória dele; se o
+   processo cai, todas caem juntas (a reconexão automática por
+   sessão, já robusta, só ajuda DEPOIS que o processo volta).
+
+Implementado agora só o ajuste de baixo risco: `max` do Pool passou a
+ser configurável via `DB_POOL_MAX` (env, opcional), com fallback pro
+mesmo valor de sempre (10) se não definida — não muda nada pra quem
+não configurar. Motivo de ser env em vez de hardcoded: ajustar sem
+precisar de rebuild, só trocar a variável no EasyPanel e reiniciar.
+Deixado claro que isso **não substitui** confirmar o teto real de
+conexões do pooler no painel do Supabase antes de subir o valor — um
+`DB_POOL_MAX` alto além do que o Supabase aceita quebra do mesmo jeito
+que um valor fixo errado quebraria.
+
+A reestruturação maior (múltiplas réplicas do processo, que exigiria
+sticky sessions ou repensar onde as sessões WhatsApp vivem) foi
+deliberadamente **não** implementada agora — avaliado que é trabalho
+de dias, com risco real de regressão na reconexão automática que já
+funciona bem hoje, e só vale o custo se o volume real justificar (não
+como reação a um pico hipotético). `.env.example`/README (tabela de
+variáveis) atualizados com `DB_POOL_MAX`.
+
+**Validação**: `node -c src/db.js` + teste isolado dos 3 casos da
+lógica de fallback (env vazia/não definida → 10; env com valor válido
+→ usa esse valor; env com valor não-numérico → `NaN || 10` cai em 10,
+nunca quebra com config malformada).
+
