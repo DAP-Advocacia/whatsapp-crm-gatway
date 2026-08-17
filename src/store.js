@@ -320,6 +320,22 @@ async function listNotifications(ownerId) {
   return rows;
 }
 
+// Só as N mais recentes NÃO LIDAS — pro toast em tempo real (HANDOFF Parte
+// DG), reaproveitando o heartbeat de 30s que já roda em toda tela. O
+// frontend decide o que é "novo" comparando IDs (não timestamp — nunca
+// comparar relógio do client com o do servidor, mesma regra já seguida em
+// outras partes desta base de código), então esta query só precisa
+// devolver uma amostra pequena e recente, não todo o histórico.
+async function listLatestUnreadNotifications(ownerId, limit = 5) {
+  const { rows } = await pool.query(
+    `select id, title, body, target, created_at as "createdAt"
+     from notifications where owner_id = $1 and read = false
+     order by created_at desc limit $2`,
+    [ownerId, limit]
+  );
+  return rows;
+}
+
 async function countUnreadNotifications(ownerId) {
   const { rows } = await pool.query(
     `select count(*)::int as count from notifications where owner_id = $1 and read = false`,
@@ -727,6 +743,7 @@ module.exports = {
   setConversationSummary,
   addNotification,
   listNotifications,
+  listLatestUnreadNotifications,
   countUnreadNotifications,
   getNotificationOwner,
   markNotificationRead,

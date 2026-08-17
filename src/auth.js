@@ -44,6 +44,20 @@ function ownerIdFor(bitrixUserId) {
   return `${BITRIX_MEMBER_ID}_${bitrixUserId}`;
 }
 
+// Inversa de ownerIdFor — extrai o ID numérico puro do Bitrix a partir de
+// um ownerId composto (ex: pra buscar o cadastro de UMA pessoa específica
+// via user.get, sem precisar carregar o universo inteiro de funcionários
+// só pra achar uma). `BITRIX_MEMBER_ID` é fixo (single-tenant, sem
+// underscore — confirmado, é um hash hex), então tirar esse prefixo
+// conhecido da frente nunca é ambíguo. `null` se o ownerId não seguir o
+// formato esperado (ex: um ownerId de outro member_id, não deveria
+// acontecer neste portal single-tenant, mas não lança erro).
+function bitrixUserIdFromOwnerId(ownerId) {
+  const prefix = `${BITRIX_MEMBER_ID}_`;
+  if (!ownerId || !ownerId.startsWith(prefix)) return null;
+  return ownerId.slice(prefix.length);
+}
+
 function sign(payloadB64) {
   return crypto.createHmac('sha256', AUTH_TOKEN_SECRET).update(payloadB64).digest('base64url');
 }
@@ -109,4 +123,4 @@ async function requireAuth(req, res, next) {
   next();
 }
 
-module.exports = { verifyBitrixToken, ownerIdFor, issueAppToken, issueApiToken, verifyAppToken, requireAuth, TOKEN_TTL_MS };
+module.exports = { verifyBitrixToken, ownerIdFor, bitrixUserIdFromOwnerId, issueAppToken, issueApiToken, verifyAppToken, requireAuth, TOKEN_TTL_MS };

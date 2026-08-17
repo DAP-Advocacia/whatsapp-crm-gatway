@@ -7003,3 +7003,106 @@ isolado: 5 casos — 58 itens vira 6 páginas (mesmo número do print),
 afeta "unread"), lista encolhendo corrige a página sem ficar vazia,
 lista vazia não quebra.
 
+### Parte DG — Toast de notificação em tempo real (14 telas) + WhatsApp automático ao lançar sugestão (2026-08-17)
+
+Origem: usuário viu no Kanban de Sugestões (Parte DF) uma sugestão
+pendente pedindo "depois de adicionar o contato, poder chamar o
+cliente por aqui mesmo" — investigado e confirmado que não existia
+esse botão, mas o usuário esclareceu que a sugestão REAL era outra
+(backfill de histórico ao conectar instância pela primeira vez), já
+implementada e validada em sessão anterior (ver Parte CR). Sugestão
+marcada como lançada + respondida via `POST /suggestions/1/respond` +
+`POST /suggestions/1/release`. Isso por si só já dispara uma
+notificação pro autor (`store.addNotification`, dentro de `release`,
+já existia) — usuário então pediu 2 canais NOVOS pra essa notificação
+chegar de forma mais visível: (1) um toast em tempo real dentro do
+próprio app, sem esperar o usuário abrir a tela de Notificações; (2)
+uma mensagem de WhatsApp de verdade pro celular de quem sugeriu, além
+do aviso dentro do app.
+
+**1. Toast em tempo real** — decisão confirmada: reaproveitar o
+heartbeat de 30s que já roda em toda tela (Opção A), não abrir um
+WebSocket dedicado só pra isso (Opção B, mais robusto porém mais caro
+de manter só pra um aviso que já tolera até 30s de atraso).
+
+- `GET /notifications/latest-unread?owner=...` (nova,
+  `src/routes/whatsapp.js`) — devolve só as 5 mais recentes NÃO lidas
+  (`store.listLatestUnreadNotifications`, `src/store.js`), não o
+  histórico completo — o frontend só precisa comparar IDs contra o que
+  já viu, não reler tudo a cada 30s.
+- `checkNewNotifications()` — inserida em **todas as 14 telas** que já
+  chamam `startPresenceHeartbeat()`, chamada dentro do mesmo `send()`
+  de sempre (nenhum timer novo). "Novo" é decidido comparando **ID**
+  contra um `Set` guardado em `sessionStorage` (nunca timestamp de
+  client vs. servidor — mesma regra já seguida em outras partes desta
+  base). Primeira checagem da aba/sessão (`sessionStorage.getItem(...)
+  === null`, nunca setada — diferente de já setada com array vazio)
+  marca tudo que já está não lido como "visto" **sem** mostrar toast —
+  sem isso, abrir o app com notificações acumuladas disparava uma
+  enxurrada de uma vez só. `sessionStorage` (não `localStorage`) de
+  propósito: sobrevive a navegar entre as 13 telas na mesma aba, mas
+  reseta numa aba nova.
+- As 14 telas **não eram idênticas** — descoberto por grep sistemático
+  antes de editar, não durante: 3 grupos de prefixo de URL
+  (`${API_BASE}/presence/heartbeat` — `admin.html`,
+  `campaign-metrics.html`, `campaign-schedule.html`, `chat.html`,
+  `instances.html`, `notifications.html`; `${API_BASE}/whatsapp/presence/heartbeat`
+  — `campaign.html`, `contacts.html`, `faq.html`, `lead-metrics.html`,
+  `settings.html`, `sites.html`, `suggestions.html`;
+  `${window.location.origin}/api/whatsapp/presence/heartbeat` —
+  só `dashboard.html`), e a variável que guarda o `ownerId` também
+  varia: a maioria usa `myOwnerId` (variável de módulo já existente),
+  `chat.html` usa `state.ownerId`, e 4 telas (`faq.html`,
+  `lead-metrics.html`, `settings.html`, `dashboard.html`) **não
+  guardavam** o `ownerId` em nenhuma variável de módulo antes disso —
+  só existia dentro do escopo local de `resolveOwner()`/`verifyAuth()`.
+  Adicionada `let myOwnerId = null;` + atribuição no boot (`init()`,
+  ou dentro do callback do `BX24.init` em `dashboard.html`) nessas 4,
+  sem tocar em mais nada do fluxo de autenticação existente.
+
+**2. WhatsApp automático ao lançar sugestão** — decisão confirmada:
+reaproveita o MESMO mecanismo de envio já usado pelo botão "Enviar
+mensagem" do Admin (Parte CZ), não um canal novo.
+
+- `getEmployeePhone(bitrixUserId)` (nova, `src/bitrixHierarchy.js`) —
+  celular de UMA pessoa via `user.get` com `{ID: x}` (fora de
+  `FILTER`), sem paginar o universo inteiro de funcionários
+  (`listEmployees`) só pra achar uma. Testado contra o Bitrix real via
+  SSH antes de assumir o formato: `user.get` com `{ID: x}` devolve
+  **array** mesmo pra 1 resultado (`[0].PERSONAL_MOBILE`), igual
+  qualquer outra chamada de `user.get`.
+- `bitrixUserIdFromOwnerId(ownerId)` (nova, `src/auth.js`) — inversa
+  de `ownerIdFor`: extrai o ID numérico puro removendo o prefixo
+  `${BITRIX_MEMBER_ID}_` conhecido. Como `BITRIX_MEMBER_ID` é
+  constante fixa (single-tenant), nunca é ambíguo.
+- `sendReleaseWhatsAppMessage()` (nova, dentro de
+  `src/routes/suggestions.js`, chamada em `POST /:id/release`,
+  best-effort — nunca bloqueia a resposta nem lança erro pra fora):
+  resolve o celular de quem SUGERIU (`released.ownerId`), mas usa uma
+  instância do PRÓPRIO super admin que clicou "lançar"
+  (`req.ownerId`) — quem sugere não tem instância própria.
+  `sessions.listActive()` + `getActiveGateway()` (nunca
+  `sessions.get()`) — se a instância do releaser não estiver online
+  agora, desiste em silêncio, nunca força reconectar. Telefone do
+  Bitrix normalizado com o mesmo critério já usado em
+  `src/routes/leads.js`/`public/admin.html` (detecta DDI faltando por
+  TAMANHO — ≤11 dígitos — nunca por já começar com "55", que é
+  também DDD do Rio Grande do Sul).
+- `createSuggestionsRouter` passou a receber `{ sessions }`
+  (`src/server.js` atualizado).
+
+**Validação**: `vm.Script` nas 14 telas + `node -c` nos 6 arquivos de
+backend alterados. Dois testes isolados: `checkNewNotifications` (6
+casos, incluindo a checagem silenciosa da primeira vez e o caso
+principal — notificação genuinamente nova gera exatamente 1 toast) e
+`sendReleaseWhatsAppMessage` (7 casos, incluindo o crítico — instância
+própria offline nunca força reconectar — e o de isolamento — nunca usa
+instância de OUTRO owner que porventura esteja online em memória).
+Confirmado manualmente que `store.addMessage`/`gateway.sendMessage`
+são chamados com a assinatura real (`(sessionId, phone, message,
+dealId)` / `(phone, text, replyTo)`), não assumida.
+
+**Pendente**: testar em produção o fluxo completo (toast aparecendo
+em ~30s numa aba aberta; WhatsApp chegando de fato no celular de um
+funcionário de teste com celular cadastrado no Bitrix).
+

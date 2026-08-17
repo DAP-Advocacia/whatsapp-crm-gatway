@@ -589,6 +589,23 @@ function createWhatsappRouter({ sessions, broadcast }) {
     }
   });
 
+  // ---------------------------------------------------------------
+  // GET /notifications/latest-unread?owner=...
+  // Toast em tempo real (HANDOFF Parte DG) — reaproveita o heartbeat de
+  // 30s já disparado em toda tela (não é um canal push dedicado). O
+  // frontend decide o que é "novo" comparando IDs contra um Set já visto
+  // (sessionStorage, sobrevive a navegar entre as 13 telas na mesma aba) —
+  // nunca comparando timestamp de client com o do servidor.
+  // ---------------------------------------------------------------
+  router.get('/notifications/latest-unread', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    try {
+      res.json({ notifications: await store.listLatestUnreadNotifications(req.query.owner, 5) });
+    } catch (err) {
+      console.error('[notifications:latest-unread] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   router.post('/notifications/read-all', requireOwnerMatch((req) => req.body?.owner), async (req, res) => {
     try {
       await store.markAllNotificationsRead(req.body.owner);

@@ -247,4 +247,16 @@ async function listEmployees() {
   }));
 }
 
-module.exports = { getSubordinates, ensureHierarchyCacheFresh, refreshHierarchyCache, listEmployees };
+// Celular de UMA pessoa específica, por ID numérico do Bitrix — sem
+// paginar o universo inteiro de funcionários (listEmployees) só pra achar
+// uma. Usado pra mandar WhatsApp automático quando uma sugestão é lançada
+// (ver POST /suggestions/:id/release, HANDOFF Parte DG). `user.get` aceita
+// `ID` direto (fora de FILTER) pra buscar 1 usuário só — mesmo método,
+// forma de chamada diferente de listEmployees/callBitrixHRAll.
+async function getEmployeePhone(bitrixUserId) {
+  const users = await callBitrixHR('user.get', { ID: bitrixUserId });
+  if (!users || !users.length) return null;
+  return users[0].PERSONAL_MOBILE || null;
+}
+
+module.exports = { getSubordinates, ensureHierarchyCacheFresh, refreshHierarchyCache, listEmployees, getEmployeePhone };

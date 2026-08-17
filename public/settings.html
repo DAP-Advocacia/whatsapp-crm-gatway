@@ -732,6 +732,10 @@
   }
 
   let appToken = null;
+  // Guardado no boot (ver init()) — usado pelo toast de notificação em
+  // tempo real (checkNewNotifications, HANDOFF Parte DG). Esta tela não
+  // guardava o ownerId em nenhuma variável de módulo antes disso.
+  let myOwnerId = null;
 
   async function verifyAuth() {
     if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
@@ -803,6 +807,35 @@
       navigator.sendBeacon('/api/whatsapp/page-session/close', JSON.stringify({ sessionId: pageSessionId, token: appToken }));
     } catch {}
   });
+  // Toast de notificação em tempo real (HANDOFF Parte DG) — reaproveita o
+  // heartbeat de 30s já disparado abaixo, sem canal push dedicado. "Novo"
+  // é decidido comparando IDs contra um Set já visto (sessionStorage —
+  // sobrevive a navegar entre as 13 telas na mesma aba, reseta numa aba
+  // nova), NUNCA comparando timestamp de client com o de servidor. Primeira
+  // checagem desta aba/sessão (`raw === null`) marca tudo que já está não
+  // lido como "visto" SEM mostrar toast — sem isso, abrir o app com várias
+  // notificações acumuladas disparava vários toasts de uma vez.
+  const SEEN_NOTIF_KEY = 'seenNotifIds';
+  function checkNewNotifications() {
+    if (!myOwnerId) return;
+    apiFetch(`${API_BASE}/whatsapp/notifications/latest-unread?owner=${encodeURIComponent(myOwnerId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const raw = sessionStorage.getItem(SEEN_NOTIF_KEY);
+        const isFirstCheck = raw === null;
+        const seen = new Set(raw ? JSON.parse(raw) : []);
+        (data.notifications || []).forEach((n) => {
+          if (!seen.has(n.id)) {
+            if (!isFirstCheck && window.showToast) window.showToast(n.title, 'info', n.target);
+            seen.add(n.id);
+          }
+        });
+        sessionStorage.setItem(SEEN_NOTIF_KEY, JSON.stringify([...seen].slice(-50)));
+      })
+      .catch(() => {});
+  }
+
   function startPresenceHeartbeat() {
     if (heartbeatStarted) return;
     heartbeatStarted = true;
@@ -820,6 +853,7 @@
           body: JSON.stringify({ sessionId: pageSessionId }),
         }).catch(() => {});
       }
+      checkNewNotifications();
     };
     send();
     setInterval(send, 30000);
@@ -1144,7 +1178,7 @@
 
   async function init() {
     try {
-      await resolveOwner();
+      myOwnerId = await resolveOwner();
       startPresenceHeartbeat();
       revealAdminNavItemIfSuperAdmin();
       await load();

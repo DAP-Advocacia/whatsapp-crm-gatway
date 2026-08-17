@@ -1,10 +1,56 @@
 const express = require('express');
 const suggestions = require('../suggestions');
 const store = require('../store');
+const instancesStore = require('../instances');
 const { requireSuperAdmin } = require('../adminAuth');
+const { bitrixUserIdFromOwnerId } = require('../auth');
+const { getEmployeePhone } = require('../bitrixHierarchy');
 
 const MAX_TEXT_LENGTH = 2000;
 const MAX_RESPONSE_LENGTH = 2000;
+
+// Celular do Bitrix costuma vir SEM o código do país (DDD + número, 10-11
+// dígitos) — mesmo critério já usado em public/admin.html/src/routes/leads.js
+// pra telefone de fonte externa: detecta por TAMANHO, nunca por já começar
+// com "55" (DDD 55 é Rio Grande do Sul, checar prefixo daria falso positivo).
+function normalizeBrazilPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length <= 11 ? `55${digits}` : digits;
+}
+
+// Best-effort, chamado dentro de POST /:id/release (usuário pediu, além
+// da notificação já existente dentro do app, uma mensagem de WhatsApp de
+// verdade pra quem sugeriu — HANDOFF Parte DG). Usa uma instância do
+// PRÓPRIO super admin que clicou "lançar" (releaserOwnerId) — quem
+// sugeriu não tem instância própria. Nunca lança erro pra fora nem cria
+// uma sessão nova só pra isto (sessions.listActive()/getActiveGateway(),
+// nunca sessions.get()) — sem celular cadastrado, sem instância PRÓPRIA
+// do releaser online agora, ou qualquer outra falha, simplesmente desiste
+// em silêncio; a notificação dentro do app já aconteceu de qualquer forma.
+async function sendReleaseWhatsAppMessage(released, releaserOwnerId, sessions) {
+  try {
+    const bitrixUserId = bitrixUserIdFromOwnerId(released.ownerId);
+    if (!bitrixUserId) return;
+    const rawPhone = await getEmployeePhone(bitrixUserId);
+    const phone = normalizeBrazilPhone(rawPhone);
+    if (!phone) return;
+
+    const myInstances = await instancesStore.listByOwner(releaserOwnerId);
+    if (!myInstances.length) return;
+    const myInstanceIds = new Set(myInstances.map((i) => i.id));
+    const active = sessions.listActive().filter((s) => myInstanceIds.has(s.sessionId) && s.status === 'online');
+    if (!active.length) return;
+
+    const sessionId = active[0].sessionId;
+    const gateway = sessions.getActiveGateway(sessionId);
+    const text = `🎉 Sua sugestão foi implementada!\n\n"${released.text}"` + (released.response ? `\n\n${released.response}` : '');
+    const message = await gateway.sendMessage(phone, text, null);
+    await store.addMessage(sessionId, phone, message, null);
+  } catch (err) {
+    console.error('[suggestions:release] falha ao mandar WhatsApp (best-effort, não afeta a resposta):', err.message);
+  }
+}
 
 /**
  * Sugestões de melhoria (tela `public/suggestions.html`) — montado em
@@ -16,7 +62,7 @@ const MAX_RESPONSE_LENGTH = 2000;
  * mudou porque a triagem passou a viver dentro do Admin (ver HANDOFF
  * Parte CO).
  */
-function createSuggestionsRouter() {
+function createSuggestionsRouter({ sessions }) {
   const router = express.Router();
 
   router.get('/', async (req, res) => {
@@ -103,6 +149,10 @@ function createSuggestionsRouter() {
         body: released.text,
         target: null,
       });
+      // Best-effort, não bloqueia a resposta (ver função no topo do
+      // arquivo) — mensagem de WhatsApp de verdade, além da notificação
+      // dentro do app acima.
+      sendReleaseWhatsAppMessage(released, req.ownerId, sessions);
       res.json(released);
     } catch (err) {
       console.error('[suggestions:release] erro:', err.message);

@@ -687,7 +687,7 @@ app.use('/api/whatsapp', requireAuth, createWhatsappRouter({ sessions, broadcast
 app.use('/api', requireAuth, createCrmRouter());
 app.use('/api/lead-forms', requireAuth, createLeadFormsRouter());
 app.use('/api/ab-tests', requireAuth, createAbTestsRouter());
-app.use('/api/suggestions', requireAuth, createSuggestionsRouter());
+app.use('/api/suggestions', requireAuth, createSuggestionsRouter({ sessions }));
 app.use('/api/settings', requireAuth, createSettingsRouter());
 
 // ---------------------------------------------------------------

@@ -1255,11 +1255,19 @@ que sumia ao recarregar a página.
   no topo da página — o botão de permissão nativa morava dentro do dropdown
   antigo, mudou de lugar pra cá.
 - **Badge do sino**: número de não lidas, buscado uma vez por página
-  (`GET /notifications/unread-count`) logo depois do login em todas as 8
+  (`GET /notifications/unread-count`) logo depois do login em todas as
   páginas. Só o Chat atualiza esse número **ao vivo** (soma +1 sozinho quando
-  chega mensagem nova pelo WebSocket que já tem aberto) — as outras 7 páginas
+  chega mensagem nova pelo WebSocket que já tem aberto) — as outras páginas
   mostram a contagem de quando a página carregou, sem atualização em tempo
   real (limitação aceitável; ver §20).
+- **Toast em tempo real** (HANDOFF Parte DG): além do badge estático acima,
+  as **14 páginas** que rodam o heartbeat de presença (`startPresenceHeartbeat`,
+  a cada 30s) também chamam `checkNewNotifications()` no mesmo ciclo —
+  reaproveita o heartbeat existente, sem WebSocket dedicado. Compara **ID**
+  (não timestamp) contra um `Set` guardado em `sessionStorage` pra decidir o
+  que é "novo"; se algo novo chegou, mostra `showToast(title, 'info', target)`
+  — clicável, navega pra conversa (`target`) se houver uma. Usa
+  `GET /notifications/latest-unread` (abaixo), não a lista completa.
 - Sem exclusão permanente — "marcar como lida" cobre o caso de uso de "limpar",
   mesma filosofia de arquivar conversa (esconder, não apagar).
 
@@ -1285,6 +1293,16 @@ restrita.
   publicada na FAQ (abaixo). Resposta e "lançada" são independentes: dá
   pra responder ("não vamos fazer isso porque...") sem nunca marcar como
   lançada.
+- **WhatsApp automático ao lançar** (HANDOFF Parte DG): `POST /:id/release`
+  também tenta mandar uma mensagem de WhatsApp de verdade pro celular de
+  quem sugeriu (cadastro do Bitrix, `PERSONAL_MOBILE` via `user.get`),
+  além da notificação dentro do app acima — reaproveita o mesmo mecanismo
+  de envio do botão "Enviar mensagem" do Admin (§14.5), usando uma
+  instância do **próprio admin que lançou** (quem sugere não tem
+  instância própria). Best-effort: sem celular cadastrado, ou sem
+  instância do releaser online agora, desiste em silêncio (nunca força
+  reconectar) — a notificação dentro do app já aconteceu de qualquer
+  forma.
 - **FAQ pública** (`/faq.html`, `GET /api/suggestions/faq`): lista em
   acordeão só as sugestões que já têm resposta, mais antigas primeiro,
   visível a **qualquer** usuário autenticado (não só admin) — mas
@@ -1369,7 +1387,8 @@ revelar que o recurso existe).
 | `groups` | POST | Body `{ session, name, phones:[...] }`. Cria um grupo de verdade no WhatsApp (`sock.groupCreate`) — usado em `contacts.html` e no botão "Novo grupo" do Chat (§9). |
 | `contacts/groups?session=&phone=` | GET | Lista os grupos da instância dos quais esse telefone é participante (`{ groups: [{id, name}] }`) — usado em "grupos em comum" no painel de contato do Chat (§9). Uma chamada ao WhatsApp por grupo da instância; best-effort com participantes `@lid` sem telefone resolvido. |
 | `notifications?owner=` | GET | Lista o histórico de notificações do dono, mais recentes primeiro, limit 500 — usado pela Central de Notificações (§15). |
-| `notifications/unread-count?owner=` | GET | `{ count }` — usado pelo badge do sino nas 8 páginas. |
+| `notifications/unread-count?owner=` | GET | `{ count }` — usado pelo badge do sino nas páginas. |
+| `notifications/latest-unread?owner=` | GET | `{ notifications: [{id,title,body,target,createdAt}] }` — só as 5 mais recentes NÃO lidas, usado pelo toast em tempo real (`checkNewNotifications`, ver §15, HANDOFF Parte DG). Deliberadamente pequeno, não é o histórico completo. |
 | `notifications/read-all` | POST | Body `{ owner }`. Marca todas as notificações do dono como lidas. |
 | `notifications/:id/read` | POST | Body `{ read }`. Marca uma notificação como lida/não lida — posse conferida pelo próprio registro no banco (`requireResourceOwner`), não por um `owner` que o client mande. |
 | `media/:filename` | GET | Redireciona (302) pra uma signed URL de curta duração do bucket privado `media` (§7). Qualquer usuário autenticado deste portal pode pedir qualquer arquivo — não é restrito por dono da conversa. |
