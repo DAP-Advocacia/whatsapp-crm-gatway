@@ -697,8 +697,8 @@
         <h2 class="section-title">O que já está construído e rodando.</h2>
         <p class="lede">Fatos de arquitetura — não projeções. Tudo abaixo já está implementado e em uso interno.</p>
         <div class="fact-strip">
-          <div class="fact"><div class="fact-num">13</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões e aparência</div></div>
-          <div class="fact"><div class="fact-num">24</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de atribuição de atendente…)</div></div>
+          <div class="fact"><div class="fact-num">14</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões, FAQ, administração e aparência</div></div>
+          <div class="fact"><div class="fact-num">28</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de atribuição de atendente…)</div></div>
           <div class="fact"><div class="fact-num">1</div><div class="fact-label">Ponto único de trabalho — nenhuma equipe precisa sair do Bitrix24</div></div>
           <div class="fact"><div class="fact-num">0</div><div class="fact-label">Custo de licença por número de WhatsApp conectado</div></div>
         </div>
@@ -735,6 +735,14 @@
               <div class="risk-severity">Severidade baixa · ajuste operacional</div>
             </div>
           </div>
+          <div class="risk">
+            <div class="risk-flag med"></div>
+            <div>
+              <h3>Margem de CPU para o crescimento planejado</h3>
+              <p>Com 136 conexões ativas hoje, indo para 500 até o fim do mês, o volume de mensagens não é problema (folga grande). O que exige atenção é o número de conexões simultâneas: o servidor atual tem só 2 vCPUs, e o tempo de reconexão de todas as instâncias após um deploy sobe de ~35 minutos (hoje) para ~2h05 (com 500) — o intervalo escalonado entre cada sessão reconectando, que evita sobrecarregar o WhatsApp de uma vez, cresce na mesma proporção do número de conexões. Não bloqueia o crescimento, mas pede um upgrade de servidor (2→4 vCPUs) antes de bater a meta.</p>
+              <div class="risk-severity">Severidade média · recomendado resolver antes de atingir 500 conexões</div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -744,6 +752,10 @@
         <div class="eyebrow">08 · Próximos passos</div>
         <h2 class="section-title">O que vem a seguir.</h2>
         <div class="roadmap">
+          <div class="road">
+            <div class="road-when">Curto prazo</div>
+            <div><h3>Upgrade de servidor: 2 → 4 vCPUs</h3><p>Ação mais simples e de maior efeito para sustentar o crescimento de 136 para 500 conexões — resolve a margem de CPU descrita na seção de riscos, sem exigir mudança de código.</p></div>
+          </div>
           <div class="road">
             <div class="road-when">Curto prazo</div>
             <div><h3>Investigar a causa raiz da queda de sessões em deploy</h3><p>Escalonar a reconexão (uma instância por vez) reduziu, mas não eliminou quedas de sessão durante um deploy — falta confirmar se o WhatsApp reage ao ritmo de novas conexões ou a outro fator (ex: IP de origem), pra fechar o risco descrito acima de vez.</p></div>

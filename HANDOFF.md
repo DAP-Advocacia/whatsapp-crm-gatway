@@ -7202,3 +7202,68 @@ GitHub) — mesmo com o token corrigido agora, o deploy automático via
 webhook continua não disparando sozinho enquanto essa flag não virar
 `true`. Ainda não corrigido nesta sessão.
 
+### Parte DJ — Auditoria de segurança contra checklist genérico + análise de capacidade (136→500 conexões) + apresentação atualizada (2026-08-17)
+
+Usuário mandou um carrossel genérico de boas práticas de segurança
+backend (5 imagens, 20 itens: autenticação, proteção de dados,
+validação de entrada, segurança de API, infraestrutura) e pediu pra
+verificar item a item se estava implementado neste projeto — não uma
+auditoria abstrata, conferência real contra o código.
+
+**Resultado da auditoria** (evidência por item, não achismo):
+✅ autorização (`requireAuth`/`requireSuperAdmin`/`requireOwnerMatch`),
+prevenção de SQL injection (100% parametrizado), prevenção de XSS
+(`escapeHtml` em 258 pontos), validação de upload (tamanho + whitelist
+de mimetype em `src/publicAssets.js`), secrets (`.env` nunca
+commitado, confirmado no histórico do git). ⚠️ CORS implementado mas
+condicional a `ALLOWED_ORIGINS` estar configurada. ❌ real e acionável:
+rate limiting, versionamento de API, exposição de erro interno. N/A:
+hash de senha (não há senha própria, auth delegada ao Bitrix), MFA.
+
+**Corrigido na mesma sessão** (`src/server.js`):
+- `express-rate-limit`, 600 req/min por IP em toda `/api` — número
+  calculado com margem pro próprio heartbeat de presença das 14 telas
+  (testado: 500 req/min de uso legítimo passam, excedente de 600 é
+  bloqueado com 429). Confirmado que `app.use('/api', ...)` não casa
+  com `/api-docs` (teste real, não suposição — prefixo de segmento,
+  não substring).
+- Middleware de erro de última linha, depois de todas as rotas —
+  protege só contra erro que ESCAPA de tratamento (no Express 4, isso
+  é erro síncrono num handler não-async, ou `next(err)` explícito).
+  Deliberadamente **não** tocou nas ~108 respostas de erro já
+  existentes (mensagens de negócio escritas de propósito) — risco real
+  de quebrar uma mensagem da qual o frontend dependa do texto,
+  reescrever isso é trabalho maior que ficou de fora por ora.
+- Versionamento de API avaliado e descartado: sem consumidor externo
+  hoje que se beneficie disso.
+
+**Análise de capacidade** (números reais fornecidos pelo usuário: 136
+conexões em 22 dias, 416k mensagens, meta de 500 até o fim do mês):
+volume de mensagens tem folga grande (~22/min hoje, ~80/min projetado
+com 500 — bem abaixo do rate limit de 600/min acima). O eixo real de
+atenção é conexão simultânea, não mensagem — dois números medidos
+direto na VPS via SSH: `SESSION_STAGGER_MS=15000` (confirmado no
+código) faz o tempo de reconexão pós-deploy ir de ~35min (136×15s)
+pra ~2h05 (500×15s); `nproc`=2 (só 2 vCPUs) é a margem mais apertada
+pra manter 500 sockets Baileys simultâneos. Recomendação priorizada:
+(1) upgrade de VPS 2→4 vCPUs, (2) confirmar teto do Supabase e subir
+`DB_POOL_MAX`, (3) reavaliar `SESSION_STAGGER_MS` com mais CPU
+disponível — nesta ordem, não simultâneo.
+
+**Apresentação corrigida** (`public/apresentacao.html`, pedido do
+usuário: "a apresentação dentro do sistema está atualizada?"):
+- Contagem de telas 13→14 (inconsistência interna: a seção de módulos
+  já listava 14 cards, só o "fact-strip" dizia 13) e lista de nomes
+  atualizada (faltavam Admin e FAQ).
+- Contagem de tabelas 24→28 (contado direto em `db/schema.sql`).
+- Novo item na seção de Riscos: margem de CPU pro crescimento
+  136→500, com os mesmos 2 números medidos acima (severidade média,
+  mesmo padrão visual dos outros 3 riscos já existentes).
+- Novo item no Roadmap (Curto prazo): "Upgrade de servidor: 2→4
+  vCPUs", inserido antes do item já existente de investigar queda de
+  sessão em deploy (que continua não resolvido — confirmado no
+  HANDOFF, nunca foi marcado como concluído).
+
+**Validação**: `vm.Script` no JS embutido + contagem de tags `<div>`
+abertas/fechadas balanceada (170/170) depois das edições.
+
