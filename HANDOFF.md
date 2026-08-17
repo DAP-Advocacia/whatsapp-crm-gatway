@@ -7177,3 +7177,28 @@ lógica de fallback (env vazia/não definida → 10; env com valor válido
 → usa esse valor; env com valor não-numérico → `NaN || 10` cai em 10,
 nunca quebra com config malformada).
 
+**Deploy confirmado em produção** (mesmo dia, depois do outage do
+GitHub melhorar parcialmente — componente "Git Operations" foi de
+`major_outage` pra `degraded_performance` por volta das 17h40 UTC):
+token novo salvo em `Settings > Server > Github` do EasyPanel (achado
+via busca na documentação oficial, `easypanel.io/docs/code-sources/
+github` — não fica dentro do projeto nem do service, é config de
+servidor), deploy manual disparado de novo e desta vez completou com
+sucesso. Confirmado via `docker exec` + grep **do conteúdo real**, não
+só do status verde do painel: `notifications/latest-unread` presente
+em `src/routes/whatsapp.js`, `checkNewNotifications` presente em
+`admin.html`/`dashboard.html`/`suggestions.html`, `DB_POOL_MAX`
+presente em `src/db.js`, container confirmado novo (`Up 3 minutes` no
+momento da checagem). **Nota de processo**: o comando de verificação
+usado ao longo desta investigação tinha um erro — checava
+`checkNewNotifications` em `src/routes/whatsapp.js`, string que só
+existe no FRONTEND, nunca no backend (o backend só tem o comentário
+"toast em tempo real", não o nome da função) — corrigido para checar
+`notifications/latest-unread` (a rota em si) nesse arquivo.
+
+**Pendência que ainda ficou aberta**: `"autoDeploy": false` no Project
+Schema do EasyPanel (visto ao investigar onde ficava a config do
+GitHub) — mesmo com o token corrigido agora, o deploy automático via
+webhook continua não disparando sozinho enquanto essa flag não virar
+`true`. Ainda não corrigido nesta sessão.
+

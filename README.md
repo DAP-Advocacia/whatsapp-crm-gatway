@@ -1846,12 +1846,39 @@ replicada manualmente em todas.
   sessão ficou 41h em loop de `403 (forbidden)` — risco de ban do número.
   Falta um backoff exponencial e tratamento específico para `403` (que costuma
   significar rejeição daquela conexão, não instabilidade de rede).
-- **12 vulnerabilidades no `npm audit`** (1 low, 2 moderate, 9 high), em boa
-  parte arrastadas por dependências antigas do Baileys. Não rodar
-  `npm audit fix --force` sem testar — aplica breaking changes.
+- **5 vulnerabilidades no `npm audit`** (1 low, 3 moderate, 1 high — número
+  atualizado em 2026-08-17; a maior parte das 12 anteriores já foi resolvida
+  por atualizações de dependência ao longo do tempo). A restante é em `uuid`,
+  via dependência transitiva do `exceljs`. Não rodar `npm audit fix --force`
+  sem testar — aplica breaking change (trocaria a versão do `exceljs`).
 - ~~`scheduled_campaigns` guarda mídia anexada como base64 direto na tabela~~ —
   **resolvido**: a mídia sobe pro Storage já na hora de agendar, só o caminho
   fica na tabela (`media_url`) — ver §13.
+- ~~Sem rate limiting em nenhuma rota~~ — **resolvido** (2026-08-17): `POST
+  /api/*` (todo o backend) passou a ter um limite de 600 requisições/minuto
+  por IP (`express-rate-limit`, `src/server.js`), retornando `429` só ao
+  exceder. O número é deliberadamente generoso, calculado com margem pro
+  próprio tráfego legítimo do app (heartbeat de 30s em até 14 telas
+  simultâneas, várias pessoas atrás do mesmo IP corporativo) — protege
+  contra abuso claro sem afetar uso humano normal. `/api-docs` não é afetado.
+- ~~Erros internos não tratados podiam vazar detalhe técnico pro cliente~~ —
+  **parcialmente resolvido** (2026-08-17): adicionado um middleware de
+  última linha em `src/server.js` (depois de todas as rotas) que responde
+  genérico a qualquer erro que escape sem tratamento. **Limitação real**:
+  no Express 4 (versão usada aqui), isso só entra em ação para erro
+  SÍNCRONO num handler não-`async`, ou se algum código chamar `next(err)`
+  explicitamente — nenhuma das ~108 respostas de erro já existentes
+  (`res.status(...).json({ error: err.message })`, escritas de propósito
+  como mensagens de negócio: "sessão não encontrada", "imagem maior que
+  6MB") foi tocada nem passa por este middleware, continuam expondo
+  `err.message` como sempre. Decisão deliberada (ver HANDOFF Parte DI): não
+  reescrever os 108 pontos de uma vez, risco real de quebrar uma mensagem
+  da qual o frontend dependa do texto.
+- **Versionamento de API avaliado e descartado por ora**: hoje o único
+  consumidor das rotas é o próprio frontend deste projeto (mesmo
+  repositório, atualizado junto a cada deploy) — não há terceiro externo
+  dependendo de uma versão antiga que se beneficiaria de `/api/v1/...`.
+  Reavaliar se algum consumidor externo passar a existir.
 
 ---
 

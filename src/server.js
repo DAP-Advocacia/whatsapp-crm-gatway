@@ -17,6 +17,7 @@ const http = require('http');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 const { WebSocketServer } = require('ws');
 const { URL } = require('url');
 const swaggerUi = require('swagger-ui-express');
@@ -65,6 +66,26 @@ app.use(
     origin: ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : true,
   })
 );
+
+// Limite por IP em toda a API — protege contra abuso claro (script
+// martelando requisições), sem afetar uso humano normal. O número é
+// deliberadamente generoso, calculado com margem pro próprio tráfego
+// legítimo deste app: cada tela aberta dispara heartbeat + page-session
+// ping + checagem de notificação a cada 30s (até 3 requisições/ciclo,
+// ver startPresenceHeartbeat nas 14 telas) — alguém com várias abas
+// abertas, ou várias pessoas atrás do MESMO IP corporativo (rede única de
+// escritório), pode legitimamente gerar várias centenas de
+// requisições/minuto sem que isso seja abuso. `standardHeaders`/
+// `legacyHeaders` só controlam quais headers de rate-limit são expostos
+// na resposta, não afetam o limite em si.
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600, // por IP, por minuto
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'muitas requisições, aguarde um momento e tente de novo' },
+});
+app.use('/api', apiLimiter);
 
 // `no-cache` (não `no-store`): o navegador ainda pode GUARDAR o arquivo, mas é
 // OBRIGADO a revalidar com o servidor (If-Modified-Since/ETag, automático via
@@ -742,6 +763,22 @@ server.on('upgrade', async (request, socket, head) => {
       }
     });
   });
+});
+
+// Rede de segurança de ÚLTIMA LINHA — não substitui os try/catch já
+// existentes em cada rota (essas continuam respondendo com err.message
+// direto, são mensagens de negócio escritas de propósito: "sessão não
+// encontrada", "imagem maior que 6MB" etc., úteis pro usuário). Isto aqui
+// só entra em ação quando um erro ESCAPA de tudo isso sem ser tratado —
+// no Express 4 (a versão usada aqui), isso só acontece de fato com um erro
+// SÍNCRONO num handler não-async, ou se algum código chamar `next(err)`
+// explicitamente (nenhum lugar faz isso hoje). PRECISA ficar depois de
+// TODAS as rotas — é isso que o marca como error handler pro Express
+// (assinatura de 4 parâmetros, não 3).
+app.use((err, req, res, next) => {
+  console.error('[server] erro não tratado chegou até a última linha de defesa:', err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'erro interno — já foi registrado, tente de novo em um momento' });
 });
 
 server.listen(PORT, () => {
