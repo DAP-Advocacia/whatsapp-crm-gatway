@@ -7641,3 +7641,83 @@ reproduzido com dados sintéticos batendo os números exatos
 observados em produção (789 total, 10 online, busca "han" → 1) antes
 de considerar a correção pronta.
 
+### Parte DO — Seção "Admin" separada na sidebar + nome do contato na lista de disparo (2026-08-18)
+
+**1) Nova seção "Admin" na sidebar, separada de Workspace/Configuração**
+— usuário pediu explicitamente que "Auditoria de Conversas" e "Admin"
+(que hoje moram em Workspace e Configuração, respectivamente) fossem
+isolados numa seção própria, deixando claro que ali fica o que é
+restrito. Confirmado com pergunta de esclarecimento: os 2 itens
+juntos na seção nova (não só Auditoria de Conversas sozinha).
+
+Replicado manualmente nas 16 telas com sidebar (mesmo padrão de
+inserção repetida já usado no resto do projeto — sem componente
+compartilhado): `<div class="nav-section" id="navSectionAdmin">`
+nova, com os 2 `<a>` que antes viviam em Workspace/Configuração
+movidos pra dentro dela. A seção em si também precisa ficar
+**escondida até que pelo menos 1 dos 2 itens seja revelado** — sem
+isso o rótulo "Admin" apareceria vazio (sem nenhum item visível
+dentro) pra quem não tem acesso a nada ali. Resolvido com uma função
+nova, `revealAdminSectionIfAnyItemVisible()`, chamada depois de CADA
+um dos 2 fetches de whoami revelar seu item (não espera os 2 —
+`Promise.all` faria a seção nunca aparecer se um dos 2 fetches
+falhasse por qualquer motivo).
+
+3 variações reais entre as 16 telas (nenhuma nova — mesmos 3 eixos já
+mapeados nas Partes DG/DK/DM, mas de novo precisaram ser respeitados
+um a um):
+- **14 telas "padrão"** usam `revealAdminNavItemIfSuperAdmin()` — a
+  mesma função, chamando a nova `revealAdminSectionIfAnyItemVisible()`
+  dentro de cada um dos 2 `.then()`.
+- **`admin.html`** não usa essa função — já confirma super admin de
+  forma síncrona no boot (`init()`) e sabe que super admin sempre tem
+  acesso à Auditoria também, revelando os 2 itens direto; só precisou
+  de mais 1 linha ali pra também remover o `hidden` da seção nova.
+- **`conversation-analysis.html`**: o item "Auditoria de Conversas"
+  desta própria página já vinha (e continua) SEM `hidden` — é a
+  página em que você já está, sempre visível. Por isso a `<div
+  class="nav-section" id="navSectionAdmin">` aqui **não tem `hidden`**
+  no HTML (diferente das outras 15) — teria um item visível dentro de
+  uma seção escondida esperando um JS que nunca ia revelá-la.
+- **`onboarding.html`**: sem nenhuma lógica de autenticação (decisão
+  antiga, tela puramente estática) — a seção nova fica `hidden` pra
+  sempre, igual os 2 itens já ficavam antes de existir esta seção.
+
+**2) Nome do contato não aparecia na lista de disparo de campanha**
+— usuário reportou visualmente (print do modal "Nova lista" em
+`contacts.html`, todos os contatos aparecendo só como telefone
+repetido duas vezes). Investigado antes de mudar qualquer UI: o
+próprio checkbox da lista JÁ mostra o nome quando ele existe
+(`c.name ? nome : telefone` — não era bug de exibição). O problema
+real é a fonte: `importFromConversations` (botão "Importar de
+conversas", `src/contacts.js`) sempre criava o contato **sem nome**,
+mesmo a coluna `conversations.push_name` já existindo e sendo
+preenchida automaticamente há tempos (nome que o próprio contato
+define no WhatsApp dele, chega em toda mensagem — comentário já
+existia em `db/schema.sql`, mecanismo maduro em `src/whatsapp.js`,
+inclusive já tratando o caso de histórico/backfill não trazer
+`pushName` na mensagem em si). Corrigido o `SELECT`/`INSERT` de
+`importFromConversations` pra trazer `push_name` como `name`, com
+`coalesce(contacts.name, excluded.name)` no `ON CONFLICT` — só
+preenche quem **ainda não tem** nome, nunca sobrescreve uma edição
+manual feita em Contatos (`updateContact`). Como a função já era
+idempotente (`on conflict`), reexecutar a importação (clicar de novo
+em "Importar de conversas") corrige retroativamente quem já tinha
+sido importado sem nome antes desta correção — não precisou de
+migração/script separado.
+
+**Validação**: sidebar — `vm.Script` + balanceamento de `<a>` +
+checagem de que os 2 itens ficam DENTRO da nova seção (não soltos)
+em todas as 16 telas; `chat.html`/`sites.html` reportam o mesmo
+desbalanceamento de `<a>` (23/22) já confirmado pré-existente em
+`git show HEAD` (Parte DK), não uma regressão desta mudança. Contato
+— testado contra o **banco real** (não mock): contato novo ganha o
+`push_name` da conversa, contato já existente sem nome ganha nome ao
+reimportar (correção retroativa), contato com nome editado
+manualmente nunca é sobrescrito, resultado idempotente numa segunda
+execução — 5 casos, limpeza confirmada sem resíduo.
+
+**Pendente**: deploy em produção (autoDeploy continua `false`,
+precisa de clique manual). Teste visual em produção da seção "Admin"
+revelando/escondendo corretamente conforme o acesso de cada pessoa.
+

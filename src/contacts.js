@@ -48,17 +48,28 @@ async function deleteContact(id, ownerId) {
   return rowCount > 0;
 }
 
-// Cria um contato (sem nome) para cada conversa que QUALQUER instância deste
-// dono já tem e que ainda não virou contato — forma rápida de começar a
-// lista de contatos a partir de quem já conversou pelo WhatsApp, em qualquer
-// uma das instâncias do usuário.
+// Cria um contato para cada conversa que QUALQUER instância deste dono já
+// tem e que ainda não virou contato — forma rápida de começar a lista de
+// contatos a partir de quem já conversou pelo WhatsApp, em qualquer uma das
+// instâncias do usuário. Nome vem de `conversations.push_name` (o próprio
+// contato definiu no WhatsApp dele, chega sozinho em toda mensagem — ver
+// db/schema.sql) — antes esta função criava sempre SEM nome, obrigando a
+// pessoa a abrir cada contato na lista de disparo de campanha e adivinhar
+// quem era só pelo telefone (usuário reportou, HANDOFF Parte DO). Reexecutar
+// esta importação (idempotente) preenche retroativamente o nome de quem já
+// tinha sido importado sem nome antes desta correção, sem precisar de
+// migração separada. `coalesce(contacts.name, excluded.name)` só preenche se
+// o contato AINDA não tiver nome — nunca sobrescreve edição manual feita na
+// tela de Contatos (updateContact).
 async function importFromConversations(ownerId) {
   const { rowCount } = await pool.query(
-    `insert into contacts (owner_id, phone, deal_id)
-     select $1, phone, deal_id from conversations
+    `insert into contacts (owner_id, phone, name, deal_id)
+     select $1, phone, push_name, deal_id from conversations
      where session_id in (select id from instances where owner_id = $1)
      on conflict (owner_id, phone)
-     do update set deal_id = coalesce(contacts.deal_id, excluded.deal_id)`,
+     do update set
+       name = coalesce(contacts.name, excluded.name),
+       deal_id = coalesce(contacts.deal_id, excluded.deal_id)`,
     [ownerId]
   );
   return rowCount;

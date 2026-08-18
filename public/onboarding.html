@@ -391,17 +391,6 @@
       <span class="nav-label">FAQ</span>
       <span class="nav-tip">FAQ</span>
     </a>
-    <!-- Escondido por padrão — só revelado por JS (ver GET
-         /conversation-analysis/whoami) depois de confirmar acesso (super
-         admin ou grant explícito, ver HANDOFF Parte DK). A proteção real
-         está na API (requireConversationAnalysisAccess em toda rota do
-         router dedicado); isto é só pra não anunciar a existência da
-         tela pra quem não tem acesso. -->
-    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
-      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
-      <span class="nav-label">Auditoria de Conversas</span>
-      <span class="nav-tip">Auditoria de Conversas</span>
-    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -419,6 +408,26 @@
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
       <span class="nav-label">Apresentação</span>
       <span class="nav-tip">Apresentação</span>
+    </a>
+   </div>
+   <!-- Seção separada de Workspace/Configuração — reúne as 2 telas de
+        acesso restrito do sistema (super admin, ou grant explícito no
+        caso da Auditoria). A SEÇÃO inteira fica escondida — esta tela
+        não tem NENHUMA lógica de autenticação/API (decisão deliberada,
+        ver HANDOFF), então nada aqui é revelado nunca, igual já era
+        pros 2 itens antes de existir esta seção (HANDOFF Parte DO). -->
+   <div class="nav-section" id="navSectionAdmin" hidden>
+    <div class="nav-section-label">Admin</div>
+    <!-- Escondido por padrão — só revelado por JS (ver GET
+         /conversation-analysis/whoami) depois de confirmar acesso (super
+         admin ou grant explícito, ver HANDOFF Parte DK). A proteção real
+         está na API (requireConversationAnalysisAccess em toda rota do
+         router dedicado); isto é só pra não anunciar a existência da
+         tela pra quem não tem acesso. -->
+    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
+      <span class="nav-label">Auditoria de Conversas</span>
+      <span class="nav-tip">Auditoria de Conversas</span>
     </a>
     <!-- Escondido por padrão — só revelado por JS (ver GET /admin/whoami)
          depois de confirmar que este ownerId está em SUPER_ADMIN_OWNER_IDS.

@@ -473,15 +473,6 @@
       <span class="nav-label">FAQ</span>
       <span class="nav-tip">FAQ</span>
     </a>
-    <!-- Escondido por padrão — mesmo padrão de navAdminItem, só revelado
-         por JS depois de GET /api/conversation-analysis/whoami confirmar
-         acesso (super admin ou grant explícito). A proteção real está na
-         API (requireConversationAnalysisAccess em toda rota do router). -->
-    <a href="/conversation-analysis.html" class="nav-item active" id="navConversationAnalysisItem">
-      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
-      <span class="nav-label">Auditoria de Conversas</span>
-      <span class="nav-tip">Auditoria de Conversas</span>
-    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -499,6 +490,25 @@
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
       <span class="nav-label">Apresentação</span>
       <span class="nav-tip">Apresentação</span>
+    </a>
+   </div>
+   <!-- Seção separada de Workspace/Configuração — reúne as 2 telas de
+        acesso restrito do sistema (super admin, ou grant explícito no
+        caso da Auditoria). SEM hidden aqui (diferente das outras 15
+        telas): o item Auditoria de Conversas logo abaixo é o desta
+        própria página, já vem sempre visível/ativo — a seção que o
+        contém não pode ficar escondida esperando um JS que nunca vai
+        escondê-lo (HANDOFF Parte DO). -->
+   <div class="nav-section" id="navSectionAdmin">
+    <div class="nav-section-label">Admin</div>
+    <!-- Escondido por padrão — mesmo padrão de navAdminItem, só revelado
+         por JS depois de GET /api/conversation-analysis/whoami confirmar
+         acesso (super admin ou grant explícito). A proteção real está na
+         API (requireConversationAnalysisAccess em toda rota do router). -->
+    <a href="/conversation-analysis.html" class="nav-item active" id="navConversationAnalysisItem">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
+      <span class="nav-label">Auditoria de Conversas</span>
+      <span class="nav-tip">Auditoria de Conversas</span>
     </a>
     <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>

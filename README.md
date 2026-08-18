@@ -290,12 +290,18 @@ retrátil (botão circular dourado na borda, mesmo estilo nas 13 páginas que a 
 (aberta/fechada) fica em `localStorage`. Os itens "Sites" e "Métricas de Sites"
 aparecem como um grupo só ("Landing Page", com "Métricas LP" recolhível por uma
 seta — estado também em `localStorage`, chave `navGroupLPOpen`) — ver §11.5/§11.6.
-Os itens ficam agrupados em duas seções visuais (`.nav-section`, com rótulo
+Os itens ficam agrupados em três seções visuais (`.nav-section`, com rótulo
 `.nav-section-label` — some quando a sidebar está recolhida): **Workspace**
-(Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões) e
-**Configuração** (Aparência, Instâncias, Apresentação — três abas soltas,
-sem hierarquia entre elas; "Aparência" é o link antigo "Configurações",
-renomeado porque a página edita a paleta de cores do app). A paleta
+(Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões,
+FAQ), **Configuração** (Aparência, Instâncias, Apresentação — três abas
+soltas, sem hierarquia entre elas; "Aparência" é o link antigo
+"Configurações", renomeado porque a página edita a paleta de cores do app) e
+**Admin** (Auditoria de Conversas + Admin — as 2 telas de acesso restrito
+do sistema, isoladas numa seção própria desde a HANDOFF Parte DO, 2026-08-18;
+antes ficavam misturadas em Workspace/Configuração). A seção Admin fica
+inteira escondida (não só os 2 itens individualmente) até que pelo menos
+um deles seja revelado pra quem está logado — super admin vê os 2, quem só
+tem grant de Auditoria de Conversas vê só esse. A paleta
 editada ali é **por usuário** desde a HANDOFF Parte DL (2026-08-18) —
 antes era um único registro global pra toda a instalação; hoje cada
 `ownerId` tem a própria linha em `user_palette` e só vê a própria cor,
@@ -754,7 +760,12 @@ continuam por instância (cada uma pode ter textos próprios).
   segurança acima garante que as duas fontes convivem sem se atropelar.
 - **Contatos**: criar manualmente, editar, excluir, **"Importar de conversas"**
   (cria um contato pra cada conversa de **qualquer** instância deste dono que ainda
-  não tenha virado contato, sem nome), ou **"Importar de arquivo (CSV)"** — lê um
+  não tenha virado contato, usando `conversations.push_name` como nome quando
+  disponível — corrigido na HANDOFF Parte DO; antes criava sempre sem nome,
+  mesmo a coluna já vindo preenchida sozinha pelo WhatsApp. Idempotente: reexecutar
+  também preenche retroativamente quem já tinha sido importado sem nome antes,
+  sem sobrescrever nome editado manualmente depois), ou **"Importar de arquivo
+  (CSV)"** — lê um
   `.csv` (colunas de nome/telefone reconhecidas em português ou inglês, delimitador
   `,` ou `;` detectado automaticamente — Excel em pt-BR exporta com `;`), até 5.000
   linhas, telefones duplicados no mesmo arquivo são mesclados num contato só. Sem
