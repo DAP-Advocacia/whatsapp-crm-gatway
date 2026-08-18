@@ -1575,6 +1575,33 @@
   // não tem instância própria).
   let myOwnerId = null;
 
+  // Guardado numa Promise (não só disparado) — o fetch de brand real fica
+  // mais abaixo, no fim do arquivo (mesmo lugar de sempre); esta Promise só
+  // é resolvida por ele. A paleta PESSOAL (applyPersonalPalette, chamada
+  // dentro de init()) precisa rodar DEPOIS desta ter aplicado a global —
+  // sem essa ordem garantida, uma corrida entre os dois fetches poderia
+  // fazer a pessoal ser sobrescrita de volta pra global por acidente
+  // (HANDOFF Parte DL).
+  let resolveBrandReady;
+  const brandReady = new Promise((resolve) => { resolveBrandReady = resolve; });
+
+  // Paleta POR USUÁRIO (tela Configurações/Aparência, HANDOFF Parte DL) —
+  // sobrepõe a paleta global/marca, só se este owner já tiver salvo
+  // alguma cor própria (campo null mantém o que já foi aplicado antes).
+  // API_BASE nesta tela já inclui '/whatsapp' — a rota real de settings é
+  // /api/settings, por isso usa window.location.origin direto aqui.
+  async function applyPersonalPalette() {
+    await brandReady;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/settings`);
+      if (!res.ok) return;
+      const p = await res.json();
+      if (window.__applyPalette) {
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor });
+      }
+    } catch {}
+  }
+
   async function init() {
     try {
       myOwnerId = await resolveOwner();
@@ -1602,6 +1629,7 @@
 
       resolveMyBitrixName();
       startPresenceHeartbeat();
+      applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
 
       await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions()]);
       setInterval(loadUsageMetrics, 30000);
@@ -1615,7 +1643,7 @@
     if (b.name) document.querySelectorAll('.firm-name').forEach((el) => { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach((el) => { el.textContent = b.subtitle; });
     if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => resolveBrandReady());
 })();
 </script>
 </body>

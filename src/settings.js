@@ -1,12 +1,15 @@
 const { pool } = require('./db');
 
 /**
- * Configurações editáveis pela tela `public/settings.html` — linha única
- * (singleton, id=1), mesmo escopo "uma instalação = uma empresa" já usado
- * por BRAND_NAME/BRAND_COLOR (ver GET /api/brand em src/server.js). Paleta:
+ * Paleta de cores editável pela tela `public/settings.html` — POR
+ * USUÁRIO (`user_palette`, `owner_id` como chave), não mais um singleton
+ * global (a tabela antiga `app_settings` existe ainda, mas deixou de ser
+ * lida/escrita por aqui). Nome/subtítulo da marca (GET /api/brand,
+ * pública) continuam globais de propósito — isto aqui é só a paleta:
  * `accentColor` (dourado padrão), `accentColorDim` (tom secundário —
- * hovers/bordas), `greenColor`/`redColor` (sucesso/erro). Qualquer campo
- * null mantém a cor padrão do app pra aquele papel.
+ * hovers/bordas), `greenColor`/`redColor` (sucesso/erro), `bgColor`
+ * (fundo). Qualquer campo `null` mantém a cor padrão do app pra aquele
+ * papel — cada usuário sem linha salva ainda usa o padrão de fábrica.
  */
 
 const FIELDS = {
@@ -21,26 +24,30 @@ const SELECT_COLUMNS = Object.entries(FIELDS)
   .map(([apiField, column]) => `${column} as "${apiField}"`)
   .join(', ');
 
-async function get() {
-  const { rows } = await pool.query(`select ${SELECT_COLUMNS} from app_settings where id = 1`);
+async function get(ownerId) {
+  const { rows } = await pool.query(`select ${SELECT_COLUMNS} from user_palette where owner_id = $1`, [ownerId]);
   if (rows[0]) return rows[0];
   return Object.fromEntries(Object.keys(FIELDS).map((k) => [k, null]));
 }
 
 // `patch`: objeto com qualquer subconjunto dos campos acima — só atualiza
 // os que vierem definidos (permite salvar um de cada vez ou todos juntos).
-async function update(patch) {
-  const sets = [];
-  const values = [];
-  for (const [apiField, column] of Object.entries(FIELDS)) {
-    if (!(apiField in patch)) continue;
-    values.push(patch[apiField] || null);
-    sets.push(`${column} = $${values.length}`);
-  }
-  if (!sets.length) return get();
+// Upsert: primeira vez que este owner salva algo, cria a linha; depois,
+// atualiza só os campos enviados, preservando os demais já salvos.
+async function update(ownerId, patch) {
+  const fieldsToSet = Object.keys(FIELDS).filter((apiField) => apiField in patch);
+  if (!fieldsToSet.length) return get(ownerId);
+
+  const columns = ['owner_id', ...fieldsToSet.map((f) => FIELDS[f])];
+  const placeholders = columns.map((_, i) => `$${i + 1}`);
+  const values = [ownerId, ...fieldsToSet.map((f) => patch[f] || null)];
+  const updateSets = fieldsToSet.map((f) => `${FIELDS[f]} = excluded.${FIELDS[f]}`).join(', ');
 
   const { rows } = await pool.query(
-    `update app_settings set ${sets.join(', ')}, updated_at = now() where id = 1 returning ${SELECT_COLUMNS}`,
+    `insert into user_palette (${columns.join(', ')})
+     values (${placeholders.join(', ')})
+     on conflict (owner_id) do update set ${updateSets}, updated_at = now()
+     returning ${SELECT_COLUMNS}`,
     values
   );
   return rows[0];

@@ -7408,3 +7408,122 @@ Admin (a lógica de cruzamento foi testada isoladamente, mas
 `listEmployees()` não está disponível no `.env` local pra um teste
 100% ponta-a-ponta — só a VPS tem `BITRIX_HR_WEBHOOK_URL`).
 
+### Parte DL — Paleta de cores deixa de ser global: agora é por usuário (2026-08-18)
+
+Usuário abriu a tela de Configurações/Aparência (a mesma de sempre) e
+notou que a paleta configurada lá é **global pra toda a instalação**
+— pediu que cada usuário escolha a própria cor, sem afetar os outros.
+Confirmado com 2 perguntas de esclarecimento antes de implementar:
+
+- **Escopo**: só as **cores de acento** nas telas internas. Nome/
+  subtítulo da marca (`GET /api/brand`, rota pública, usada até pela
+  LP sem login nenhum) continuam **globais** de propósito — não fazia
+  sentido "nome da empresa por usuário".
+- **Migração**: **sem** herdar a cor global já configurada — todo
+  mundo passa a partir do dourado padrão de fábrica. Decisão explícita
+  do usuário, não presumida.
+
+**Banco**: nova tabela `user_palette` (`owner_id` PK, 5 colunas de
+cor, `updated_at`) — **substitui** `app_settings` como fonte de leitura/
+escrita das rotas de settings; `app_settings` (era um singleton,
+`id=1`, decisão deliberada de sessão anterior — "equipe pequena e
+confiável") continua existindo no banco, só não é mais lida/escrita
+por nada a partir de agora. Migrada via `node db/migrate.js`,
+confirmada contra o banco real.
+
+**Backend**: `src/settings.js` reescrito por completo — de um módulo
+que lia/escrevia 1 linha fixa (`id=1`) pra um que recebe `ownerId` em
+toda chamada e faz `insert ... on conflict (owner_id) do update`
+(upsert, evita 2 caminhos de código pra "criar" vs "atualizar").
+`src/routes/settings.js` alterado só pra passar `req.ownerId` nas 2
+rotas (`GET`/`PUT /api/settings`) — validação de hex e a rota
+`POST /api-token` não mudaram.
+
+**Frontend — padrão de 3 partes repetido em 14 telas** (a técnica em
+si, não o código, é o que se repete): uma `Promise` externa
+(`brandReady`, resolvida por `resolveBrandReady()`) garante que a
+paleta pessoal só se aplica **depois** da paleta global já ter
+aplicado — sem essa ordem garantida, os 2 fetches assíncronos (brand
+global vs paleta pessoal) rodam em paralelo sem ordem determinística,
+e a global poderia sobrescrever a pessoal de volta por timing de
+rede. `applyPersonalPalette()` busca `/api/settings`, converte os
+nomes de campo (`accentColor`→`color`, etc. — `/api/brand` e
+`/api/settings` usam nomenclaturas diferentes) e chama
+`window.__applyPalette` (mesma função global já usada pelo brand).
+`settings.html` (a própria tela de edição) **não precisou de
+nenhuma edição** — já chama `GET`/`PUT /api/settings` direto.
+
+Telas alteradas: `admin.html`, `campaign.html`, `campaign-metrics.html`,
+`campaign-schedule.html`, `contacts.html`, `chat.html`, `faq.html`,
+`lead-metrics.html`, `sites.html`, `suggestions.html`,
+`conversation-analysis.html`, `notifications.html`, `instances.html`,
+`dashboard.html`. **`onboarding.html` intencionalmente fora** — tela
+puramente estática, sem nenhuma lógica de autenticação/API (mesma
+decisão já tomada na Parte DK pro item de nav da Auditoria de
+Conversas).
+
+**3 eixos de variação real entre as 14 telas** (nenhum novo — já
+mapeados nas Partes DG/DK, mas todos precisaram ser respeitados aqui
+de novo):
+- Nome da função de boot: `init()` (a maioria), `initInstances()`
+  (`campaign*`/`contacts`/`chat`), `initOwner()` (`notifications`),
+  `loadInstances()` (`instances`, chamada dentro de `BX24.init` em
+  `dashboard`, sem nome próprio).
+- Nome da variável de owner: `myOwnerId` (a maioria) vs `state.ownerId`
+  (`chat.html`).
+- **`API_BASE` com `/whatsapp` já embutido** em 6 telas (`admin.html`,
+  `chat.html`, `instances.html`, `campaign-metrics.html`,
+  `campaign-schedule.html`, `notifications.html`) — qualquer rota fora
+  de `/api/whatsapp/*` precisa de `${window.location.origin}/api/...`
+  direto nessas 6, nunca `${API_BASE}/...` (duplicaria `/whatsapp`).
+  `dashboard.html` não declara `API_BASE` nenhum — usa
+  `window.location.origin` direto em tudo.
+
+**Erros cometidos e corrigidos durante esta mesma tarefa** (nenhum
+chegou a ser commitado):
+- Em `admin.html`, a primeira tentativa inseriu o bloco
+  `brandReady`/`applyPersonalPalette` **depois** de `init()` já ter
+  sido chamada no arquivo, e esqueceu de adicionar a chamada de
+  `applyPersonalPalette()` dentro do próprio `init()` — corrigido
+  reestruturando a ordem antes de seguir pras outras telas.
+- Em `faq.html`/`lead-metrics.html`, a edição inicial usou como âncora
+  um trecho que assumia `let myOwnerId = null;` adjacente a
+  `async function init()` — na real tem um comentário de contexto
+  entre as duas E a função de boot fica bem mais abaixo no arquivo,
+  não colada. O `Edit` falhou (esperado, "string not found") pra essa
+  parte, mas a edição do fetch de brand (parte independente) foi
+  aplicada mesmo assim — as 2 telas ficaram temporariamente com
+  `resolveBrandReady()` sendo chamado sem ter sido declarado
+  (`ReferenceError` na próxima vez que a página carregasse). Detectado
+  antes de qualquer commit, corrigido com âncoras mais precisas.
+- **Bug real, não só de edição**: `admin.html`, `campaign-metrics.html`
+  e `campaign-schedule.html` — todas do grupo com `/whatsapp` embutido
+  em `API_BASE` — foram inicialmente editadas com `${API_BASE}/settings`
+  (sem o ajuste), o que resolveria pra `/api/whatsapp/settings` (rota
+  que não existe; a real é `/api/settings`). Como o código trata
+  `!res.ok` com um `return` silencioso, o efeito seria a paleta pessoal
+  simplesmente **não aplicar** nessas 3 telas, sem erro visível
+  nenhum — só um 404 no console. Detectado revisando sistematicamente
+  o `API_BASE` de cada tela antes de considerar a tarefa terminada,
+  corrigido nas 3 pra `${window.location.origin}/api/settings`.
+
+**Validação**: script novo (scratchpad) que extrai todo bloco
+`<script>` inline de cada uma das 14 telas e roda `vm.Script`
+(sintaxe), mais 3 checagens de consistência automatizadas — chamada de
+`resolveBrandReady()`/`applyPersonalPalette()` sem a declaração
+correspondente, e uso de `${API_BASE}/settings` em tela cujo
+`API_BASE` inclui `/whatsapp` (a classe exata dos 2 erros acima) —
+todas as 14 telas OK. Rota HTTP `src/routes/settings.js` testada de
+ponta a ponta contra o **banco real** (não mock), simulando
+`req`/`res` do Express sem precisar de servidor nem JWT forjado: 11
+casos, incluindo os 2 críticos de isolamento (owner B continua `null`
+depois de owner A salvar uma cor; owner A não perde a própria cor
+depois de owner B salvar a dele), hex inválido rejeitado, reset volta
+a `null`. Limpeza confirmada, nenhum resíduo.
+
+**Pendente**: deploy em produção ainda não confirmado (autoDeploy
+continua `false` no EasyPanel, Parte DH — precisa de clique manual em
+"Deploy"). Teste manual de UI (salvar cor em uma conta, confirmar em
+aba anônima/outra conta que a cor não mudou pra ela) só é possível
+depois do deploy.
+

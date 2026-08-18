@@ -774,3 +774,22 @@ create index if not exists idx_conversation_analysis_audit_owner
 alter table messages add column if not exists text_search tsvector
   generated always as (to_tsvector('portuguese', coalesce(text, ''))) stored;
 create index if not exists idx_messages_text_search on messages using gin (text_search);
+
+-- Paleta de cores POR USUÁRIO (tela Configurações/Aparência) — diferente
+-- de `app_settings` (singleton, id=1, "uma instalação = uma empresa"),
+-- que continua existindo mas deixa de ser lida/escrita pelas rotas de
+-- settings a partir de agora. Nome/subtítulo da marca (GET /api/brand,
+-- pública, usada até na LP sem login) continuam GLOBAIS de propósito —
+-- só a paleta de cores de acento passa a ser por pessoa. Sem migração
+-- de dado da tabela antiga: decisão confirmada com o usuário, todo
+-- mundo começa do dourado padrão de fábrica, não herda a cor global
+-- que já estava configurada.
+create table if not exists user_palette (
+  owner_id text primary key,
+  accent_color text,
+  accent_color_dim text,
+  green_color text,
+  red_color text,
+  bg_color text,
+  updated_at timestamptz not null default now()
+);

@@ -201,7 +201,7 @@ Isso inicia, na mesma porta:
 - `http://localhost:PORT/campaign-schedule.html` — Agenda de Envios (Kanban/Calendário)
 - `http://localhost:PORT/instances.html` — Gestão de instâncias de WhatsApp
 - `http://localhost:PORT/notifications.html` — Central de Notificações (Kanban/Calendário)
-- `http://localhost:PORT/settings.html` — Configurações (paleta de cores, §14.5)
+- `http://localhost:PORT/settings.html` — Aparência (paleta de cores **por usuário**, HANDOFF Parte DL)
 - `http://localhost:PORT/suggestions.html` — Sugestões de usuário (§15.5)
 - `http://localhost:PORT/faq.html` — FAQ pública (§15.5)
 - `http://localhost:PORT/admin.html` — Painel Admin, restrito (§14.5)
@@ -295,7 +295,13 @@ Os itens ficam agrupados em duas seções visuais (`.nav-section`, com rótulo
 (Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões) e
 **Configuração** (Aparência, Instâncias, Apresentação — três abas soltas,
 sem hierarquia entre elas; "Aparência" é o link antigo "Configurações",
-renomeado porque a página edita a paleta de cores do app, ver §14.5). A
+renomeado porque a página edita a paleta de cores do app). A paleta
+editada ali é **por usuário** desde a HANDOFF Parte DL (2026-08-18) —
+antes era um único registro global pra toda a instalação; hoje cada
+`ownerId` tem a própria linha em `user_palette` e só vê a própria cor,
+nas telas internas (nome/subtítulo/cor de fallback da marca em
+`GET /api/brand` continuam globais via `.env`, sem relação com esta
+mudança — ver a tabela de rotas mais abaixo). A
 sidebar é duplicada em cada um dos 13 arquivos HTML (não há componente/
 template compartilhado — vanilla JS/HTML, sem build step), então qualquer
 mudança nela (item novo, reordenar, mudar seção) precisa ser replicada
@@ -1525,8 +1531,8 @@ QUALQUER owner). Rotas de administração da própria permissão exigem
 
 | Rota | Método | Uso |
 |---|---|---|
-| `settings` | GET | Configurações globais (paleta de cores) — ver §14.5. |
-| `settings` | PUT | Body `{ accentColor?, accentColorDim?, greenColor?, redColor?, bgColor? }` (cada campo hex ou `null` pra restaurar o padrão). |
+| `settings` | GET | Paleta de cores do `ownerId` autenticado (**por usuário** desde a HANDOFF Parte DL, 2026-08-18 — antes era um singleton global, tabela `app_settings`; hoje cada owner tem a própria linha em `user_palette`, `null` em cada campo ainda não configurado por aquela pessoa). |
+| `settings` | PUT | Body `{ accentColor?, accentColorDim?, greenColor?, redColor?, bgColor? }` (cada campo hex ou `null` pra restaurar o padrão) — grava só na linha do `ownerId` autenticado, upsert (`insert ... on conflict do update`). |
 | `settings/api-token` | POST | Gera um novo token de API de validade longa (`API_TOKEN_TTL_DAYS`, padrão 90 dias) pro dono autenticado — devolve `{ token, expiresAt }`. Mesmo formato/verificação de `issueAppToken` (`src/auth.js`), só que pensado pra uso fora do navegador (scripts, Postman, Power Query), não pro login da própria SPA. Não é persistido/revogável no servidor — gerar de novo não invalida os anteriores, cada um expira sozinho no próprio prazo. UI em `/settings.html`, seção "Token de API"; rotas documentadas de forma interativa em `GET /api-docs` (Swagger UI, `src/openapi.js`). |
 
 ### `/api/lead-forms/*` (CRUD autenticado — `src/routes/leadForms.js`)
@@ -1626,7 +1632,7 @@ src/
     leadForms.js         # rotas REST /api/lead-forms/* (CRUD autenticado dos formulários + pipeline Bitrix)
     leads.js             # rotas REST /api/leads/* (PÚBLICO, sem login — config+views + submissão+Bitrix)
     abTests.js           # rotas REST /api/ab-tests/* (CRUD autenticado dos testes A/B + histórico)
-    settings.js          # rotas REST /api/settings/* (paleta de cores + geração de token de API)
+    settings.js          # rotas REST /api/settings/* (paleta de cores POR USUÁRIO, HANDOFF Parte DL + geração de token de API)
     suggestions.js        # rotas REST /api/suggestions/* (sugestões dos usuários)
     conversationAnalysis.js # rotas REST /api/conversation-analysis/* (Auditoria de Conversas, acesso restrito, §15.6)
 public/
