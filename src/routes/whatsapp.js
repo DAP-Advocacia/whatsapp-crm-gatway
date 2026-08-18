@@ -17,6 +17,7 @@ const presence = require('../presence');
 const pageSessions = require('../pageSessions');
 const blockedOwners = require('../blockedOwners');
 const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
+const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
 const actionLog = require('../actionLog');
 
@@ -1589,7 +1590,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
 
       const ownerIds = employees.map((e) => ownerIdFor(e.id));
       const sinceDate = new Date(Date.now() - ADMIN_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-      const [presenceRows, lastAccessMap, usage, blocked, activeDaysByOwner, usabilityByOwner] = await Promise.all([
+      const [presenceRows, lastAccessMap, usage, blocked, activeDaysByOwner, usabilityByOwner, analysisGrants] = await Promise.all([
         presence.listPresence(),
         pageSessions.getLastAccessByOwners(ownerIds),
         pageSessions.getUsageSince(sinceDate),
@@ -1600,10 +1601,15 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // Mensagens enviadas (30d), contatos cadastrados, campanhas criadas
         // (aproximado por DONO da instância — ver getUsabilityStatsByOwner).
         store.getUsabilityStatsByOwner(sinceDate),
+        // Quem tem acesso à Auditoria de Conversas (HANDOFF Parte DK) —
+        // reaproveita esta mesma tabela de Usuários pra conceder/revogar,
+        // sem precisar de um fluxo de busca por nome separado.
+        conversationAnalysisGrants.listGrants(),
       ]);
 
       const presenceByOwner = new Map(presenceRows.map((r) => [r.ownerId, r]));
       const blockedByOwner = new Map(blocked.map((b) => [b.ownerId, b]));
+      const analysisGrantByOwner = new Set(analysisGrants.map((g) => g.ownerId));
 
       const users = employees.map((e) => {
         const ownerId = ownerIdFor(e.id);
@@ -1636,6 +1642,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
           favoritePage: favoritePage?.page || null,
           isBlocked: !!blockedRow,
           blockedReason: blockedRow?.reason || null,
+          hasConversationAnalysisAccess: analysisGrantByOwner.has(ownerId),
           // Rastreamento de usabilidade ampliado (2026-08-13, HANDOFF Parte
           // CZ) — só usados no modal "Detalhado", mesma decisão dos campos
           // do Bitrix acima (tabela principal não muda).

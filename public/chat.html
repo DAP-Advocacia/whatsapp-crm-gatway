@@ -955,6 +955,17 @@
       <span class="nav-label">FAQ</span>
       <span class="nav-tip">FAQ</span>
     </a>
+    <!-- Escondido por padrão — só revelado por JS (ver GET
+         /conversation-analysis/whoami) depois de confirmar acesso (super
+         admin ou grant explícito, ver HANDOFF Parte DK). A proteção real
+         está na API (requireConversationAnalysisAccess em toda rota do
+         router dedicado); isto é só pra não anunciar a existência da
+         tela pra quem não tem acesso. -->
+    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
+      <span class="nav-label">Auditoria de Conversas</span>
+      <span class="nav-tip">Auditoria de Conversas</span>
+    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -1364,6 +1375,19 @@
       .then((data) => {
         const item = document.getElementById('navAdminItem');
         if (item && data?.isSuperAdmin) item.hidden = false;
+      })
+      .catch(() => {});
+    // Auditoria de Conversas (HANDOFF Parte DK) — mesmo padrão do item
+    // Admin acima, checagem separada porque o acesso não é só super
+    // admin (também owners com grant explícito, ver adminAuth.js).
+    // API_BASE nesta tela já inclui '/whatsapp' (ver const API_BASE
+    // acima) — a rota real é /api/conversation-analysis, por isso usa
+    // window.location.origin direto em vez de API_BASE aqui.
+    apiFetch(`${window.location.origin}/api/conversation-analysis/whoami`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const item = document.getElementById('navConversationAnalysisItem');
+        if (item && data?.hasAccess) item.hidden = false;
       })
       .catch(() => {});
   }

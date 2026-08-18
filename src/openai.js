@@ -257,4 +257,86 @@ async function generateTeamInsights(teamMetrics) {
     }));
 }
 
-module.exports = { suggestAbTestAnalysis, summarizeConversation, generateDashboardInsights, generateTeamInsights };
+// Teto rígido de conversas/mensagens amostradas pro insight abaixo — sem
+// isso, um filtro amplo (ex: 1 ano, sem outro filtro, na Auditoria de
+// Conversas) geraria um prompt de centenas de milhares de tokens: custo
+// alto, risco real de exceder o limite de contexto do modelo, latência
+// inaceitável numa chamada síncrona de request/response.
+const INSIGHT_MAX_CONVERSATIONS = 60;
+const INSIGHT_MAX_MESSAGES = 400;
+
+// Insight de IA sobre um CONJUNTO de conversas filtradas — Auditoria de
+// Conversas (`/conversation-analysis.html`, HANDOFF Parte DK).
+// DIFERENTE de summarizeConversation (1 conversa só, até 80 mensagens) e
+// de generateDashboardInsights (só números agregados, nunca texto de
+// mensagem): aqui o pedido explícito é ler CONTEÚDO real de várias
+// conversas de qualquer owner. `conversationsWithMessages`: array de
+// {contactName, phone, messages} já ordenado mais-recente-primeiro (é o
+// chamador — a rota — que decide o critério de "mais relevante"; esta
+// função só corta pelo teto). Amostra as `INSIGHT_MAX_CONVERSATIONS`
+// primeiras, dividindo o orçamento de `INSIGHT_MAX_MESSAGES` entre elas.
+// `sampledConversations`/`totalMatching` na resposta são OBRIGATÓRIOS
+// pro chamador exibir "baseado em X de Y conversas" — nunca dar a
+// entender que o insight cobriu o filtro inteiro quando é uma amostra.
+async function generateConversationAnalysisInsight(conversationsWithMessages, totalMatching) {
+  const sample = conversationsWithMessages.slice(0, INSIGHT_MAX_CONVERSATIONS);
+  if (!sample.length) throw new Error('nenhuma conversa nesse filtro ainda');
+
+  const perConversationBudget = Math.max(1, Math.floor(INSIGHT_MAX_MESSAGES / sample.length));
+  const transcript = sample
+    .map((conv) => {
+      const msgs = conv.messages.slice(-perConversationBudget);
+      const body = msgs
+        .map((m) => {
+          const who = m.direction === 'out' ? 'Empresa' : (conv.contactName || 'Contato');
+          const text = m.text || (m.type && m.type !== 'text' ? `[${m.type}]` : '(mensagem vazia)');
+          return `${who}: ${text}`;
+        })
+        .join('\n');
+      return `--- Conversa com ${conv.contactName || conv.phone} ---\n${body}`;
+    })
+    .join('\n\n');
+
+  const raw = await callChatCompletion(
+    'Você analisa um CONJUNTO de conversas de atendimento via WhatsApp de várias equipes/contatos ' +
+      'diferentes, já filtradas por quem está investigando (pode ser por período, atendente, instância ou ' +
+      'termo de busca). Responda em JSON com um campo "insights": uma lista de 3 a 6 objetos, cada um com ' +
+      '"title" (bem curto, até 6 palavras), "text" (1 a 3 frases sobre um padrão recorrente, problema comum, ' +
+      'ou observação relevante sobre o CONTEÚDO dessas conversas) e "tone" (exatamente "positive", "warning" ' +
+      'ou "neutral"). Baseie-se SOMENTE no texto fornecido — nunca invente informação que não apareceu nele. ' +
+      'Se as conversas não tiverem nada em comum relevante, diga isso diretamente em vez de forçar um padrão. ' +
+      'Responda em português do Brasil, sem saudação nem introdução.',
+    transcript,
+    700,
+    true
+  );
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('resposta em formato inesperado da OpenAI');
+  }
+  if (!Array.isArray(parsed.insights) || !parsed.insights.length) {
+    throw new Error('resposta sem insights da OpenAI');
+  }
+  return {
+    insights: parsed.insights
+      .filter((i) => i && i.title && i.text)
+      .map((i) => ({
+        title: i.title,
+        text: i.text,
+        tone: ['positive', 'warning', 'neutral'].includes(i.tone) ? i.tone : 'neutral',
+      })),
+    sampledConversations: sample.length,
+    totalMatching,
+  };
+}
+
+module.exports = {
+  suggestAbTestAnalysis,
+  summarizeConversation,
+  generateDashboardInsights,
+  generateTeamInsights,
+  generateConversationAnalysisInsight,
+};

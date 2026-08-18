@@ -562,6 +562,17 @@
       <span class="nav-label">FAQ</span>
       <span class="nav-tip">FAQ</span>
     </a>
+    <!-- Escondido por padrão — só revelado por JS (ver GET
+         /conversation-analysis/whoami) depois de confirmar acesso (super
+         admin ou grant explícito, ver HANDOFF Parte DK). A proteção real
+         está na API (requireConversationAnalysisAccess em toda rota do
+         router dedicado); isto é só pra não anunciar a existência da
+         tela pra quem não tem acesso. -->
+    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
+      <span class="nav-label">Auditoria de Conversas</span>
+      <span class="nav-tip">Auditoria de Conversas</span>
+    </a>
    </div>
    <div class="nav-section">
     <div class="nav-section-label">Configuração</div>
@@ -1119,6 +1130,13 @@
       const revokeAction = u.isBlocked
         ? `<button class="action-link" data-unblock="${escapeHtml(u.ownerId)}">Reativar</button>`
         : `<button class="action-link danger" data-block="${escapeHtml(u.ownerId)}">Revogar</button>`;
+      // Auditoria de Conversas (HANDOFF Parte DK) — acesso amplo e
+      // sensível (lê conteúdo de conversas de QUALQUER instância), por
+      // isso reaproveita o mesmo padrão visual de ação por linha já usado
+      // pra bloqueio total, em vez de um toggle/checkbox silencioso.
+      const analysisAction = u.hasConversationAnalysisAccess
+        ? `<button class="action-link" data-revoke-analysis="${escapeHtml(u.ownerId)}">Auditoria: Ativo</button>`
+        : `<button class="action-link" data-grant-analysis="${escapeHtml(u.ownerId)}">Auditoria: Conceder</button>`;
       return `
         <tr>
           <td>
@@ -1139,6 +1157,7 @@
             <div class="actions-cell">
               <button class="action-link" data-detail="${escapeHtml(u.ownerId)}">Detalhado</button>
               ${revokeAction}
+              ${analysisAction}
             </div>
           </td>
         </tr>
@@ -1400,6 +1419,41 @@
       } catch (err) {
         if (window.showToast) window.showToast(err.message, 'error');
       }
+      return;
+    }
+
+    // Auditoria de Conversas (HANDOFF Parte DK) — mesma tela de Usuários,
+    // rotas vivem no router dedicado (/api/conversation-analysis/admin/grants),
+    // não em /admin/users/*.
+    const grantAnalysisBtn = e.target.closest('[data-grant-analysis]');
+    if (grantAnalysisBtn) {
+      const ownerId = grantAnalysisBtn.dataset.grantAnalysis;
+      const confirmed = await window.confirmDialog('Conceder acesso à Auditoria de Conversas? Este usuário poderá ler o conteúdo de conversas de QUALQUER instância do sistema, não só as próprias.');
+      if (!confirmed) return;
+      try {
+        const res = await apiFetch(`${API_BASE}/conversation-analysis/admin/grants/${encodeURIComponent(ownerId)}`, { method: 'POST' });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao conceder acesso');
+        if (window.showToast) window.showToast('Acesso concedido.', 'success');
+        loadUsers();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+      return;
+    }
+
+    const revokeAnalysisBtn = e.target.closest('[data-revoke-analysis]');
+    if (revokeAnalysisBtn) {
+      const ownerId = revokeAnalysisBtn.dataset.revokeAnalysis;
+      const confirmed = await window.confirmDialog('Revogar o acesso deste usuário à Auditoria de Conversas?');
+      if (!confirmed) return;
+      try {
+        const res = await apiFetch(`${API_BASE}/conversation-analysis/admin/grants/${encodeURIComponent(ownerId)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error((await res.json()).error || 'falha ao revogar acesso');
+        if (window.showToast) window.showToast('Acesso revogado.', 'success');
+        loadUsers();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
     }
   });
 
@@ -1534,6 +1588,17 @@
         window.location.replace('/dashboard.html');
         return;
       }
+
+      // Chegou até aqui = super admin confirmado — e super admin sempre
+      // tem acesso à Auditoria de Conversas (ver adminAuth.js), sem
+      // precisar de mais uma chamada de API só pra revelar o item de nav
+      // (diferente das outras 14 telas, que checam via GET
+      // /conversation-analysis/whoami porque lá o acesso pode vir de um
+      // grant explícito, não só de ser super admin).
+      const navAdmin = document.getElementById('navAdminItem');
+      if (navAdmin) navAdmin.hidden = false;
+      const navAnalysis = document.getElementById('navConversationAnalysisItem');
+      if (navAnalysis) navAnalysis.hidden = false;
 
       resolveMyBitrixName();
       startPresenceHeartbeat();

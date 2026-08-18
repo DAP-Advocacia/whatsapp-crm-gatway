@@ -1312,6 +1312,43 @@ restrita.
 
 ---
 
+## 15.6. Auditoria de Conversas — painel restrito (`/conversation-analysis.html`)
+
+Tela **totalmente separada** do dashboard "Análise de Conversas"
+(§8) — aquele é agregado só das PRÓPRIAS instâncias de quem está
+logado; esta lê o **conteúdo real** de mensagens de **qualquer
+instância/owner do sistema**, por isso o acesso é restrito e
+concedido nominalmente (ver HANDOFF Parte DK).
+
+- **Controle de acesso**: super admin (`SUPER_ADMIN_OWNER_IDS`)
+  sempre tem acesso; qualquer outro owner precisa de um grant
+  explícito, concedido pelo super admin na tabela de Usuários do
+  Admin (§14.5) — botão "Auditoria: Conceder"/"Ativo" por linha, com
+  `confirmDialog` deixando o alcance claro. Verificado a cada request
+  (`requireConversationAnalysisAccess`, `src/adminAuth.js`), sem
+  cache — revogação corta acesso na próxima chamada.
+- **O que a tela mostra**: filtros (termo de busca no CONTEÚDO da
+  mensagem, instância, atendente — por mensagem individual que essa
+  pessoa escreveu, não por quem é o responsável atual da conversa —,
+  período), métricas agregadas do filtro atual, lista de conversas
+  paginada no servidor (o universo é o sistema todo, não as
+  instâncias de 1 dono), e o histórico completo de uma conversa em
+  bolhas **somente leitura** ao clicar numa linha.
+- **Insight de IA sobre o conjunto filtrado**: amostra até 60
+  conversas/400 mensagens (teto fixo, evita prompt gigante com um
+  filtro amplo) — a resposta sempre mostra "baseado em N de T
+  conversas", nunca dando a entender que cobriu o filtro inteiro.
+- **Auditoria própria**: toda vez que uma conversa é aberta, uma
+  busca é feita, ou um insight é gerado aqui, uma linha é registrada
+  em `conversation_analysis_audit` — **nunca** com texto de mensagem
+  ou do insight, só o recurso acessado (ex: `{sessionId, phone}`) —
+  diferente do histórico de ações do Admin (§14.5), que é sobre o
+  próprio uso do app, não sobre acesso a dado de terceiro.
+- Um aviso fixo (não um modal que se esquece) fica sempre visível no
+  topo da tela, lembrando do alcance e de que o acesso é registrado.
+
+---
+
 ## 16. Rotas / API
 
 Salvo indicação contrária, toda rota abaixo espera um identificador de **instância**
@@ -1359,6 +1396,7 @@ revelar que o recurso existe).
 | `/admin.html` | GET/POST | Painel Admin — restrito a `SUPER_ADMIN_OWNER_IDS` (ver §14.5). O arquivo é servido igual a qualquer outro estático; a restrição real está nas rotas `/api/whatsapp/admin/*` abaixo. |
 | `/suggestions.html` | GET/POST | Sugestões — enviar e acompanhar status (ver §15.5). |
 | `/faq.html` | GET/POST | FAQ pública — perguntas já respondidas (ver §15.5). |
+| `/conversation-analysis.html` | GET/POST | Auditoria de Conversas — acesso restrito (ver §15.6). |
 | `/api/whatsapp/page-session/close` | POST | Fora do middleware `requireAuth` de propósito (ver tabela `/api/whatsapp/*` abaixo) — montada aqui, direto em `src/server.js`, ANTES do `app.use('/api/whatsapp', requireAuth, ...)`. |
 | `/*` (estático) | GET | Arquivos de `public/`. |
 
@@ -1462,6 +1500,27 @@ qualquer outro `ownerId`) — vivem no Kanban do Admin (§14.5), não em
 | `suggestions/:id/respond` | POST | Restrito a `requireSuperAdmin`. Body `{ response }` (até 2.000 caracteres; vazio/`null` limpa a resposta). Publica (ou remove) a resposta na FAQ — independente do status. |
 | `suggestions/:id/release` | POST | Restrito a `requireSuperAdmin` (antes era aberto a qualquer autenticado — mudou junto com o Kanban, ver HANDOFF Parte CO). Marca `released` (404 se já estava) e notifica quem sugeriu. |
 
+### `/api/conversation-analysis/*` (`src/routes/conversationAnalysis.js`)
+
+Ver §15.6. TODA rota abaixo passa primeiro por
+`requireConversationAnalysisAccess` (super admin ou grant explícito,
+ver `src/adminAuth.js`) — nunca `requireSession`/`assertOwnsSession`,
+que bloqueariam por design (o propósito desta tela é ler dado de
+QUALQUER owner). Rotas de administração da própria permissão exigem
+`requireSuperAdmin` por cima desse portão.
+
+| Rota | Método | Uso |
+|---|---|---|
+| `whoami` | GET | `{ hasAccess: true }` — só chega aqui quem já passou pelo portão; usado pelas 15 telas pra decidir se revela o item de navegação. |
+| `instances` | GET | Todas as instâncias do sistema, qualquer dono, com nome do dono já cruzado — popula os filtros de Instância e Atendente da tela. |
+| `conversations?search=&sessionId=&sentBy=&from=&to=&page=&pageSize=` | GET | Lista cross-owner paginada no SERVIDOR (`pageSize` máx. 100). `sentBy` filtra por MENSAGEM INDIVIDUAL (`messages.sent_by`, quem escreveu), não por `conversations.assigned_to`. `search` usa full-text search em `messages.text_search` (stemming em português). Audita como `search`. |
+| `conversations/:sessionId/:phone/history` | GET | Histórico completo de UMA conversa, qualquer dono. Audita como `view_conversation`. |
+| `metrics?sessionId=&sentBy=&from=&to=` | GET | Métricas agregadas (total, recebidas/enviadas, conversas, instâncias) pro mesmo filtro de `conversations` (sem busca/paginação). |
+| `insight` | POST | Body `{ search?, sessionId?, sentBy?, from?, to? }`. Gera insight de IA sobre até 60 conversas/400 mensagens do filtro (teto fixo) — resposta inclui `sampledConversations`/`totalMatching`. Não persiste. Audita como `generate_insight`. |
+| `admin/grants` | GET | Restrito a `requireSuperAdmin`. Lista quem tem acesso concedido hoje, com nome já cruzado. |
+| `admin/grants/:ownerId` | POST | Restrito a `requireSuperAdmin`. Concede acesso a esse owner. |
+| `admin/grants/:ownerId` | DELETE | Restrito a `requireSuperAdmin`. Revoga — corta acesso na próxima chamada desse owner, sem esperar token expirar. |
+
 ### `/api/settings/*` (`src/routes/settings.js`)
 
 | Rota | Método | Uso |
@@ -1557,6 +1616,9 @@ src/
   blockedOwners.js       # bloqueio de acesso individual ao app inteiro (blocked_owners), verificado em requireAuth (§14.5)
   bitrixHierarchy.js     # hierarquia de departamento/gestor via user.get/department.get + listEmployees() (§14/§14.5)
   suggestions.js         # sugestões dos usuários — CRUD + moveToReview/respond/listFaq (Kanban do Admin + FAQ, §15.5)
+  conversationAnalysisGrants.js # quem tem acesso à Auditoria de Conversas (conversation_analysis_grants), espelha blockedOwners.js (§15.6)
+  conversationAnalysisAudit.js  # auditoria de acesso ao painel acima (conversation_analysis_audit) — nunca conteúdo de mensagem (§15.6)
+  conversationAnalysisStore.js  # consultas CROSS-OWNER (deliberado) pra Auditoria de Conversas — listAll/getHistory/computeAggregateMetrics (§15.6)
   openapi.js             # spec OpenAPI da API REST, servido em GET /api-docs (Swagger UI)
   routes/
     whatsapp.js        # rotas REST /api/whatsapp/* (chat, instâncias, campanhas, agendamentos)
@@ -1566,6 +1628,7 @@ src/
     abTests.js           # rotas REST /api/ab-tests/* (CRUD autenticado dos testes A/B + histórico)
     settings.js          # rotas REST /api/settings/* (paleta de cores + geração de token de API)
     suggestions.js        # rotas REST /api/suggestions/* (sugestões dos usuários)
+    conversationAnalysis.js # rotas REST /api/conversation-analysis/* (Auditoria de Conversas, acesso restrito, §15.6)
 public/
   index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância no cabeçalho
   dashboard.html        # Análise de Conversas
@@ -1582,6 +1645,7 @@ public/
   suggestions.html       # Sugestões — enviar e acompanhar o próprio status (§15.5)
   faq.html               # FAQ pública — perguntas já respondidas na triagem do Admin (§15.5)
   admin.html             # Painel Admin — restrito a SUPER_ADMIN_OWNER_IDS (§14.5)
+  conversation-analysis.html # Auditoria de Conversas — acesso restrito, leitura cross-instância (§15.6)
   apresentacao.html      # relatório executivo (scrollytelling) pra diretoria/CEO — sem sidebar, exportável em PDF
 db/
   schema.sql            # DDL de todas as tabelas

@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Auditoria de Conversas · WhatsApp Gateway</title>
+<script>
+  if (localStorage.getItem('sidebarCollapsed') === '1') {
+    document.documentElement.classList.add('sidebar-collapsed');
+  }
+  // Paleta customizada (mesmo cache das outras telas) — aplica ANTES do
+  // primeiro paint. Ver public/faq.html pro mesmo bloco comentado.
+  (function () {
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
+    function hexToRgbStr(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
+    }
+    function deriveSurfaces(hex) {
+      var n = parseInt(hex.slice(1), 16);
+      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
+      function lighten(amt) {
+        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
+        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
+        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
+        return '#' + rr + gg + bb;
+      }
+      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    }
+    window.__applyPalette = function (b) {
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      Object.keys(MAP).forEach(function (k) {
+        if (values[k]) {
+          document.documentElement.style.setProperty(MAP[k], values[k]);
+          localStorage.setItem('palette_' + k, values[k]);
+          if (RGB_MAP[k]) {
+            var rgbStr = hexToRgbStr(values[k]);
+            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+          }
+          if (k === 'bg') {
+            var surf = deriveSurfaces(values[k]);
+            document.documentElement.style.setProperty('--surface', surf.surface);
+            document.documentElement.style.setProperty('--surface-2', surf.surface2);
+            document.documentElement.style.setProperty('--border', surf.border);
+            localStorage.setItem('palette_surface', surf.surface);
+            localStorage.setItem('palette_surface2', surf.surface2);
+            localStorage.setItem('palette_border', surf.border);
+          }
+        } else {
+          document.documentElement.style.removeProperty(MAP[k]);
+          localStorage.removeItem('palette_' + k);
+          if (RGB_MAP[k]) {
+            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            localStorage.removeItem('palette_' + k + '_rgb');
+          }
+          if (k === 'bg') {
+            document.documentElement.style.removeProperty('--surface');
+            document.documentElement.style.removeProperty('--surface-2');
+            document.documentElement.style.removeProperty('--border');
+            localStorage.removeItem('palette_surface');
+            localStorage.removeItem('palette_surface2');
+            localStorage.removeItem('palette_border');
+          }
+        }
+      });
+    };
+    Object.keys(MAP).forEach(function (k) {
+      var cached = localStorage.getItem('palette_' + k);
+      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+      if (RGB_MAP[k]) {
+        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
+        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+      }
+      if (k === 'bg' && cached) {
+        var cachedSurface = localStorage.getItem('palette_surface');
+        var cachedSurface2 = localStorage.getItem('palette_surface2');
+        var cachedBorder = localStorage.getItem('palette_border');
+        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+      }
+    });
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #15120d;
+    --surface: #1d1812;
+    --surface-2: #241d15;
+    --border: #34291a;
+    --gold: #d8ab4f;
+    --gold-rgb: 216,171,79;
+    --gold-dim: #8a6b32;
+    --text: #f3ede2;
+    --text-muted: #a89a83;
+    --text-faint: #6e6353;
+    --green: #4caf6e;
+    --green-rgb: 76,175,110;
+    --red: #d9685f;
+    --red-rgb: 217,104,95;
+    --bubble-mine: #2a5f4a;
+    --bubble-mine-text: #f3ede2;
+    --bubble-theirs: var(--surface-2);
+    --radius: 14px;
+    --footer-h: 46px;
+    --header-h: 90px;
+  }
+  *{ box-sizing: border-box; }
+
+  html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
+  html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
+  html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
+  html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  html, body{
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #app{
+    max-width: 1080px;
+    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 1080px) / 2));
+    padding: 28px 20px 70px;
+    transition: margin-left .2s ease;
+  }
+  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 1080px) / 2)); }
+
+  /* ======================================================
+     Sidebar de navegação (retrátil) + notificações/toast
+     — mesmo bloco byte a byte usado nas demais telas.
+     ====================================================== */
+  :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
+
+  .sidebar{
+    position: fixed; top:0; left:0; bottom:0;
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display:flex; flex-direction:column;
+    transition: width .2s ease;
+    z-index: 40;
+    overflow: hidden;
+  }
+  html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
+
+  .sidebar-logo{
+    position:relative;
+    height: var(--header-h); box-sizing:border-box;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
+    padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
+  }
+  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-text{ display:flex; flex-direction:column; gap:3px; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  html.sidebar-collapsed .logo-text{ display:none; }
+  html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
+
+  .sidebar-toggle{
+    position:absolute; top:20px; right:-14px;
+    width:28px; height:28px; border-radius:50%;
+    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    transition: transform .15s ease, filter .15s ease;
+  }
+  .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
+  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
+
+  .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-section-label{
+    font-size:10.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase;
+    color: var(--text-faint); padding: 14px 12px 6px;
+  }
+  .nav-section:first-child .nav-section-label{ padding-top:2px; }
+  html.sidebar-collapsed .nav-section-label{ display:none; }
+  .nav-item{
+    position:relative;
+    display:flex; align-items:center; gap:12px;
+    padding: 10px 12px; border-radius:9px;
+    color: var(--text-muted); text-decoration:none;
+    font-size: 13px; white-space:nowrap;
+    background: transparent; border:none; width:100%; text-align:left; cursor:pointer;
+    font-family:'Inter',sans-serif;
+    transition: background .15s, color .15s;
+  }
+  .nav-item:hover{ background: var(--surface-2); color: var(--text); }
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item.active .nav-icon{ color: var(--gold); }
+  .nav-label{ overflow:hidden; text-overflow:ellipsis; }
+  html.sidebar-collapsed .nav-label{ display:none; }
+  html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  .nav-tip{
+    position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
+    background: var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; padding:6px 10px; border-radius:6px; white-space:nowrap; opacity:0; pointer-events:none;
+    transition: opacity .15s, transform .15s; z-index:50;
+  }
+  html.sidebar-collapsed .nav-item:hover .nav-tip{ opacity:1; transform:translateY(-50%) translateX(0); }
+  html:not(.sidebar-collapsed) .nav-tip{ display:none; }
+
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .bell-btn{ position:relative; }
+  .notif-dot{
+    position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
+    border-radius:100px; background:var(--red); color:#fff; font-size:9px; font-weight:700;
+    display:flex; align-items:center; justify-content:center; line-height:1;
+  }
+  html.sidebar-collapsed .notif-dot{ left:34px; top:4px; }
+
+  .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
+  .toast{
+    background: var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
+    color:var(--text); padding:12px 16px; border-radius:9px; font-size:12.5px; line-height:1.5;
+    box-shadow:0 10px 28px rgba(0,0,0,.4); animation: toast-in .25s ease; transition: opacity .2s, transform .2s;
+  }
+  .toast.success{ border-left-color: var(--green); }
+  .toast.error{ border-left-color: var(--red); }
+  @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  .credit-row{
+    position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
+    height: var(--footer-h);
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    transition: left .2s ease;
+  }
+  html.sidebar-collapsed .credit-row{ left: var(--sidebar-w-collapsed); }
+  .credit-badge{
+    display: inline-flex; align-items: center; gap: 6px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 100px; padding: 5px 13px; font-size: 11px;
+    color: var(--text-muted); text-decoration: none; white-space: nowrap;
+  }
+  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+
+  @media (max-width: 880px){
+    .sidebar{ display:none; }
+    #app{ margin-left:0 !important; }
+    .credit-row{ left:0; }
+  }
+
+  h1{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; margin: 0 0 4px; }
+  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 16px; }
+  .empty-state{ padding: 34px 20px; text-align:center; color: var(--text-faint); font-size:13px; }
+  .skeleton-row{ color: var(--text-faint); font-size:12.5px; padding: 14px 10px; }
+  .panel{ background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 20px; }
+  .btn{ font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); cursor:pointer; transition: background .15s, border-color .15s; }
+  .btn:hover{ border-color: var(--gold-dim); }
+  .btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn.primary{ background: var(--gold); color:#1a1408; border-color: var(--gold); }
+  .btn.primary:hover{ filter: brightness(1.06); }
+  .btn.secondary{ background: transparent; }
+
+  /* ======================================================
+     Aviso fixo de peso da tela — não é um modal que se
+     esquece, fica sempre visível no topo.
+     ====================================================== */
+  .weight-banner{
+    display:flex; align-items:flex-start; gap:10px;
+    background: rgba(var(--gold-rgb),.08); border:1px solid var(--gold-dim); border-radius: var(--radius);
+    padding: 12px 16px; margin-bottom: 18px; font-size:12.5px; color: var(--text-muted); line-height:1.5;
+  }
+  .weight-banner svg{ width:17px; height:17px; color:var(--gold); flex-shrink:0; margin-top:1px; }
+  .weight-banner strong{ color: var(--text); }
+
+  /* ======================================================
+     Filtros
+     ====================================================== */
+  .filters-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; }
+  .filter-field{ display:flex; flex-direction:column; gap:4px; min-width:160px; flex:1; }
+  .filter-field label{ font-size:11px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; color:var(--text-faint); }
+  .filter-field input, .filter-field select{
+    background: var(--surface-2); border:1px solid var(--border); border-radius:8px; color:var(--text);
+    font-family:'Inter',sans-serif; font-size:12.5px; padding:8px 10px;
+  }
+  .filter-field input:focus, .filter-field select:focus{ outline:none; border-color: var(--gold-dim); }
+
+  /* ======================================================
+     Cards de métrica (mesmo visual de admin.html/dashboard.html)
+     ====================================================== */
+  .metric-cards{ display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:20px; }
+  .metric-card{ background: var(--surface); border:1px solid var(--border); border-radius: var(--radius); padding:16px 18px; }
+  .metric-card .metric-label{ font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-faint); margin-bottom:6px; }
+  .metric-card .metric-value{ font-family:'Fraunces',serif; font-weight:600; font-size:24px; color:var(--text); }
+  @media (max-width: 880px){ .metric-cards{ grid-template-columns:repeat(2, 1fr); } }
+
+  /* ======================================================
+     Insight de IA (mesmo visual de dashboard.html)
+     ====================================================== */
+  .insight-card{ background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--gold-dim); border-radius:var(--radius); padding:14px 16px; }
+  .insight-card.positive{ border-left-color:var(--green); }
+  .insight-card.warning{ border-left-color:var(--red); }
+  .insight-card-title{ font-size:12.5px; font-weight:700; color:var(--text); margin:0 0 5px; }
+  .insight-card-text{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }
+  .insights-row{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-top:12px; }
+  .insights-sample-note{ font-size:11.5px; color: var(--gold); margin-top:10px; padding-top:10px; border-top:1px solid var(--border); }
+
+  /* ======================================================
+     Lista de conversas + paginação
+     ====================================================== */
+  .conv-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+  .conv-table th{ text-align:left; padding:8px 10px; font-size:11px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; color:var(--text-faint); border-bottom:1px solid var(--border); }
+  .conv-table td{ padding:10px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  .conv-table tbody tr{ cursor:pointer; transition: background .15s; }
+  .conv-table tbody tr:hover{ background: var(--surface-2); }
+  .conv-name{ font-weight:600; color:var(--text); }
+  .conv-preview{ color:var(--text-muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conv-meta{ color:var(--text-faint); font-size:11.5px; white-space:nowrap; }
+
+  .pager{ display:flex; align-items:center; justify-content:center; gap:14px; padding-top:14px; margin-top:4px; border-top:1px solid var(--border); }
+  .pager-info{ font-size:11.5px; color:var(--text-faint); white-space:nowrap; }
+
+  /* ======================================================
+     Histórico de UMA conversa — bolhas READ-ONLY (subset do
+     visual de chat.html: sem ações, sem citação/reação, só
+     exibição — reaproveita renderBubbleBody() de lá adaptada).
+     ====================================================== */
+  .history-overlay{
+    position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:80;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .history-overlay[hidden]{ display:none; }
+  .history-modal{
+    background: var(--bg); border:1px solid var(--border); border-radius: var(--radius);
+    width:100%; max-width:640px; max-height:82vh; display:flex; flex-direction:column; overflow:hidden;
+  }
+  .history-modal-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .history-modal-head h3{ font-family:'Fraunces',serif; font-size:15px; margin:0; }
+  .history-modal-close{ background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:18px; padding:2px 6px; }
+  .history-modal-close:hover{ color:var(--text); }
+  .history-messages{ flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; }
+  .day-divider{
+    align-self: center; font-size: 11px; color: var(--text-faint); background: var(--surface);
+    border: 1px solid var(--border); padding: 4px 12px; border-radius: 100px; margin: 14px 0 10px;
+    letter-spacing: .03em; text-transform: uppercase;
+  }
+  .bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
+  .bubble-row.mine{ justify-content: flex-end; }
+  .bubble-row.theirs{ justify-content: flex-start; }
+  .bubble{
+    max-width: min(75%, 460px); width: fit-content; padding: 9px 12px 8px; font-size: 13.5px; line-height: 1.45;
+    border-radius: var(--radius); word-wrap: break-word; white-space: pre-wrap;
+    box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14);
+  }
+  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 3px; color: var(--text); }
+  .bubble-row.mine .bubble{ background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 3px; }
+  .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
+  .bubble .caption-text{ margin-top: 4px; }
+  .media-frame img, .media-frame video{ max-width: 100%; border-radius: 8px; display:block; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
+      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
+      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
+      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+    </svg>
+    <div class="logo-text">
+      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
+      <span class="firm-sub">Advogados Associados</span>
+    </div>
+    <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    </button>
+  </div>
+
+  <nav class="sidebar-nav">
+   <div class="nav-section">
+    <div class="nav-section-label">Workspace</div>
+    <a href="/dashboard.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="nav-label">Dashboard</span>
+      <span class="nav-tip">Dashboard</span>
+    </a>
+    <a href="/chat.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg></span>
+      <span class="nav-label">Chat</span>
+      <span class="nav-tip">Chat</span>
+    </a>
+    <a href="/contacts.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+      <span class="nav-label">Contatos</span>
+      <span class="nav-tip">Contatos</span>
+    </a>
+    <a href="/suggestions.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/></svg></span>
+      <span class="nav-label">Sugestões</span>
+      <span class="nav-tip">Sugestões</span>
+    </a>
+    <a href="/faq.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12" y2="17"/></svg></span>
+      <span class="nav-label">FAQ</span>
+      <span class="nav-tip">FAQ</span>
+    </a>
+    <!-- Escondido por padrão — mesmo padrão de navAdminItem, só revelado
+         por JS depois de GET /api/conversation-analysis/whoami confirmar
+         acesso (super admin ou grant explícito). A proteção real está na
+         API (requireConversationAnalysisAccess em toda rota do router). -->
+    <a href="/conversation-analysis.html" class="nav-item active" id="navConversationAnalysisItem">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
+      <span class="nav-label">Auditoria de Conversas</span>
+      <span class="nav-tip">Auditoria de Conversas</span>
+    </a>
+   </div>
+   <div class="nav-section">
+    <div class="nav-section-label">Configuração</div>
+    <a href="/settings.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+      <span class="nav-label">Aparência</span>
+      <span class="nav-tip">Aparência</span>
+    </a>
+    <a href="/instances.html" class="nav-item">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+      <span class="nav-label">Instâncias</span>
+      <span class="nav-tip">Instâncias</span>
+    </a>
+    <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>
+      <span class="nav-label">Admin</span>
+      <span class="nav-tip">Admin</span>
+    </a>
+   </div>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
+      <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
+      <span class="nav-label">Notificações</span>
+      <span class="notif-dot" id="notifDot" hidden></span>
+    </a>
+  </div>
+</aside>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<div id="app">
+  <h1>Auditoria de Conversas</h1>
+  <p class="subtitle">Painel de acesso restrito — leitura de conversas de qualquer instância do sistema.</p>
+
+  <div class="weight-banner">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 17h.01"/></svg>
+    <span>Você está vendo conversas de <strong>todas as instâncias do sistema</strong>, de qualquer usuário — não só as próprias. Todo acesso a uma conversa, busca ou insight gerado aqui é registrado.</span>
+  </div>
+
+  <div class="panel">
+    <div class="filters-row">
+      <div class="filter-field">
+        <label for="filterSearch">Termo</label>
+        <input type="search" id="filterSearch" placeholder="Buscar por palavra…">
+      </div>
+      <div class="filter-field">
+        <label for="filterInstance">Instância</label>
+        <select id="filterInstance"><option value="">Todas</option></select>
+      </div>
+      <div class="filter-field">
+        <label for="filterSentBy">Atendente</label>
+        <select id="filterSentBy"><option value="">Qualquer</option></select>
+      </div>
+      <div class="filter-field">
+        <label for="filterFrom">De</label>
+        <input type="date" id="filterFrom">
+      </div>
+      <div class="filter-field">
+        <label for="filterTo">Até</label>
+        <input type="date" id="filterTo">
+      </div>
+      <button type="button" class="btn primary" id="applyFiltersBtn">Aplicar filtros</button>
+    </div>
+  </div>
+
+  <div class="metric-cards" id="metricCards">
+    <div class="metric-card"><div class="metric-label">Mensagens</div><div class="metric-value">—</div></div>
+    <div class="metric-card"><div class="metric-label">Conversas</div><div class="metric-value">—</div></div>
+    <div class="metric-card"><div class="metric-label">Instâncias</div><div class="metric-value">—</div></div>
+    <div class="metric-card"><div class="metric-label">Recebidas / Enviadas</div><div class="metric-value">—</div></div>
+  </div>
+
+  <div class="panel">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <h2 style="font-family:'Fraunces',serif; font-size:15px; margin:0;">Insight de IA sobre o filtro atual</h2>
+      <button type="button" class="btn secondary" id="generateInsightBtn">Gerar insight</button>
+    </div>
+    <div id="insightResult"></div>
+  </div>
+
+  <div class="panel">
+    <h2 style="font-family:'Fraunces',serif; font-size:15px; margin:0 0 10px;">Conversas</h2>
+    <div id="conversationsWrap">
+      <div class="skeleton-row">Carregando…</div>
+    </div>
+    <div id="conversationsPager"></div>
+  </div>
+
+  <div class="credit-row">
+    <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
+      <span class="dot"></span> Desenvolvido por Daniel Costa e Gabriel Alves
+    </a>
+  </div>
+</div>
+
+<div class="history-overlay" id="historyOverlay" hidden>
+  <div class="history-modal">
+    <div class="history-modal-head">
+      <h3 id="historyModalTitle">Conversa</h3>
+      <button type="button" class="history-modal-close" id="historyModalClose">&times;</button>
+    </div>
+    <div class="history-messages" id="historyMessages"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var sidebarToggle = document.getElementById('sidebarToggle');
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('click', function () {
+      var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
+      localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  var notifDot = document.getElementById('notifDot');
+  var toastStack = document.getElementById('toastStack');
+
+  window.showToast = function (message, type) {
+    type = type || 'info';
+    if (toastStack) {
+      var el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = message;
+      toastStack.appendChild(el);
+      setTimeout(function () {
+        el.style.opacity = '0';
+        el.style.transform = 'translateY(6px)';
+        setTimeout(function () { el.remove(); }, 220);
+      }, 4500);
+    }
+  };
+
+  window.updateNotifBadge = function (count) {
+    if (!notifDot) return;
+    if (count > 0) {
+      notifDot.textContent = count > 99 ? '99+' : String(count);
+      notifDot.hidden = false;
+    } else {
+      notifDot.hidden = true;
+    }
+  };
+})();
+</script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
+<script>
+(function () {
+  const API_BASE = window.location.origin + '/api';
+  const CA_BASE = `${API_BASE}/conversation-analysis`;
+
+  let resolveBx24Ready;
+  const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
+  if (window.BX24) {
+    BX24.init(() => {
+      if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
+      resolveBx24Ready();
+    });
+  } else {
+    resolveBx24Ready();
+  }
+
+  let appToken = null;
+  let myOwnerId = null;
+
+  async function verifyAuth() {
+    if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
+    await bx24Ready;
+    const auth = BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function resolveOwner() {
+    const ownerId = await verifyAuth();
+    fetch(`${window.location.origin}/api/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { Authorization: `Bearer ${appToken}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+      .catch(() => {});
+    return ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  let heartbeatStarted = false;
+  let pageSessionId = null;
+  function openPageSession() {
+    apiFetch(`${API_BASE}/whatsapp/page-session/open`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ page: window.location.pathname, ownerName: null }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (data?.sessionId) pageSessionId = data.sessionId; })
+      .catch(() => {});
+  }
+  window.addEventListener('pagehide', () => {
+    if (!pageSessionId || !appToken) return;
+    try {
+      navigator.sendBeacon('/api/whatsapp/page-session/close', JSON.stringify({ sessionId: pageSessionId, token: appToken }));
+    } catch {}
+  });
+  const SEEN_NOTIF_KEY = 'seenNotifIds';
+  function checkNewNotifications() {
+    if (!myOwnerId) return;
+    apiFetch(`${API_BASE}/whatsapp/notifications/latest-unread?owner=${encodeURIComponent(myOwnerId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const raw = sessionStorage.getItem(SEEN_NOTIF_KEY);
+        const isFirstCheck = raw === null;
+        const seen = new Set(raw ? JSON.parse(raw) : []);
+        (data.notifications || []).forEach((n) => {
+          if (!seen.has(n.id)) {
+            if (!isFirstCheck && window.showToast) window.showToast(n.title, 'info', n.target);
+            seen.add(n.id);
+          }
+        });
+        sessionStorage.setItem(SEEN_NOTIF_KEY, JSON.stringify([...seen].slice(-50)));
+      })
+      .catch(() => {});
+  }
+  function startPresenceHeartbeat() {
+    if (heartbeatStarted) return;
+    heartbeatStarted = true;
+    openPageSession();
+    const send = () => {
+      apiFetch(`${API_BASE}/whatsapp/presence/heartbeat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page: window.location.pathname }),
+      }).catch(() => {});
+      if (pageSessionId) {
+        apiFetch(`${API_BASE}/whatsapp/page-session/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: pageSessionId }),
+        }).catch(() => {});
+      }
+      checkNewNotifications();
+    };
+    send();
+    setInterval(send, 30000);
+  }
+  function revealAdminNavItemIfSuperAdmin() {
+    apiFetch(`${API_BASE}/whatsapp/admin/whoami`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const item = document.getElementById('navAdminItem');
+        if (item && data?.isSuperAdmin) item.hidden = false;
+      })
+      .catch(() => {});
+  }
+
+  // ------------------------------------------------------------
+  // Estado dos filtros + paginação
+  // ------------------------------------------------------------
+  const state = { page: 1, pageSize: 20, filters: {} };
+
+  function currentFiltersFromForm() {
+    return {
+      search: document.getElementById('filterSearch').value.trim() || undefined,
+      sessionId: document.getElementById('filterInstance').value || undefined,
+      sentBy: document.getElementById('filterSentBy').value || undefined,
+      from: document.getElementById('filterFrom').value || undefined,
+      to: document.getElementById('filterTo').value || undefined,
+    };
+  }
+
+  function toQueryString(params) {
+    const q = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => { if (v) q.set(k, v); });
+    return q.toString();
+  }
+
+  // ------------------------------------------------------------
+  // Filtros de Instância e Atendente — ambos populados a partir da
+  // MESMA chamada GET /instances (todas as instâncias do sistema, com
+  // dono+nome já cruzado) — os "atendentes" do sistema são os mesmos
+  // ownerIds que aparecem aqui como dono de instância, não precisa de
+  // uma segunda rota só pra isso.
+  // ------------------------------------------------------------
+  async function loadInstanceFilter() {
+    try {
+      const res = await apiFetch(`${CA_BASE}/instances`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const instanceSelect = document.getElementById('filterInstance');
+      const sentBySelect = document.getElementById('filterSentBy');
+      const seenOwners = new Set();
+      (data.instances || []).forEach((i) => {
+        const opt = document.createElement('option');
+        opt.value = i.id;
+        opt.textContent = `${i.ownerName} — ${i.label}`;
+        instanceSelect.appendChild(opt);
+
+        if (!seenOwners.has(i.ownerId)) {
+          seenOwners.add(i.ownerId);
+          const ownerOpt = document.createElement('option');
+          ownerOpt.value = i.ownerId;
+          ownerOpt.textContent = i.ownerName;
+          sentBySelect.appendChild(ownerOpt);
+        }
+      });
+    } catch {}
+  }
+
+  // ------------------------------------------------------------
+  // Métricas agregadas
+  // ------------------------------------------------------------
+  async function loadMetrics() {
+    const wrap = document.getElementById('metricCards');
+    try {
+      const qs = toQueryString(state.filters);
+      const res = await apiFetch(`${CA_BASE}/metrics${qs ? '?' + qs : ''}`);
+      if (!res.ok) throw new Error('falha ao carregar métricas');
+      const data = await res.json();
+      const t = data.totals;
+      wrap.innerHTML = `
+        <div class="metric-card"><div class="metric-label">Mensagens</div><div class="metric-value">${t.total.toLocaleString('pt-BR')}</div></div>
+        <div class="metric-card"><div class="metric-label">Conversas</div><div class="metric-value">${t.conversas.toLocaleString('pt-BR')}</div></div>
+        <div class="metric-card"><div class="metric-label">Instâncias</div><div class="metric-value">${t.instancias.toLocaleString('pt-BR')}</div></div>
+        <div class="metric-card"><div class="metric-label">Recebidas / Enviadas</div><div class="metric-value" style="font-size:18px;">${t.totalIn.toLocaleString('pt-BR')} / ${t.totalOut.toLocaleString('pt-BR')}</div></div>
+      `;
+    } catch (err) {
+      wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Lista de conversas (paginada no servidor)
+  // ------------------------------------------------------------
+  function formatPreview(c) {
+    if (!c.lastText) return c.lastType ? `[${c.lastType}]` : '(sem mensagens)';
+    return c.lastText;
+  }
+
+  async function loadConversations() {
+    const wrap = document.getElementById('conversationsWrap');
+    const pager = document.getElementById('conversationsPager');
+    wrap.innerHTML = '<div class="skeleton-row">Carregando…</div>';
+    try {
+      const qs = toQueryString({ ...state.filters, page: state.page, pageSize: state.pageSize });
+      const res = await apiFetch(`${CA_BASE}/conversations?${qs}`);
+      if (!res.ok) throw new Error('falha ao carregar conversas');
+      const data = await res.json();
+      if (!data.conversations.length) {
+        wrap.innerHTML = '<div class="empty-state">Nenhuma conversa encontrada com esse filtro.</div>';
+        pager.innerHTML = '';
+        return;
+      }
+      wrap.innerHTML = `
+        <table class="conv-table">
+          <thead><tr><th>Contato</th><th>Instância</th><th>Atendente</th><th>Última mensagem</th><th>Quando</th></tr></thead>
+          <tbody>
+            ${data.conversations.map((c) => `
+              <tr data-session="${escapeHtml(c.sessionId)}" data-phone="${escapeHtml(c.phone)}">
+                <td class="conv-name">${escapeHtml(c.contactName || c.phone)}</td>
+                <td class="conv-meta">${escapeHtml(c.ownerId || '—')}</td>
+                <td class="conv-meta">${escapeHtml(c.assignedToName || '—')}</td>
+                <td class="conv-preview">${escapeHtml(formatPreview(c))}</td>
+                <td class="conv-meta">${new Date(c.updatedAt).toLocaleString('pt-BR')}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      wrap.querySelectorAll('tbody tr').forEach((tr) => {
+        tr.addEventListener('click', () => openHistory(tr.dataset.session, tr.dataset.phone, tr.querySelector('.conv-name').textContent));
+      });
+
+      const totalPages = Math.max(1, Math.ceil(data.total / state.pageSize));
+      pager.innerHTML = totalPages > 1 ? `
+        <div class="pager">
+          <button type="button" class="btn secondary" id="convPagePrev" ${state.page <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+          <span class="pager-info">Página ${state.page} de ${totalPages} (${data.total.toLocaleString('pt-BR')} conversas)</span>
+          <button type="button" class="btn secondary" id="convPageNext" ${state.page >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+        </div>
+      ` : '';
+      const prevBtn = document.getElementById('convPagePrev');
+      const nextBtn = document.getElementById('convPageNext');
+      if (prevBtn) prevBtn.addEventListener('click', () => { state.page--; loadConversations(); });
+      if (nextBtn) nextBtn.addEventListener('click', () => { state.page++; loadConversations(); });
+    } catch (err) {
+      wrap.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+      pager.innerHTML = '';
+    }
+  }
+
+  // ------------------------------------------------------------
+  // Histórico de UMA conversa — bolhas read-only (subset de
+  // renderBubbleBody de chat.html: sem ações, sem citação/reação).
+  // ------------------------------------------------------------
+  function formatDayLabel(dateStr) {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+  }
+
+  function renderBubbleBody(msg) {
+    if (msg.type === 'image' && msg.mediaUrl) {
+      const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
+      return `<div class="media-frame"><img src="${escapeHtml(msg.mediaUrl)}" alt="imagem" /></div>${caption}`;
+    }
+    if (msg.type === 'video' && msg.mediaUrl) {
+      const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
+      return `<div class="media-frame"><video controls src="${escapeHtml(msg.mediaUrl)}"></video></div>${caption}`;
+    }
+    if (msg.type === 'audio' && msg.mediaUrl) {
+      return `<audio controls src="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio>`;
+    }
+    if (msg.type === 'document' && msg.mediaUrl) {
+      return `<a href="${escapeHtml(msg.mediaUrl)}" target="_blank" rel="noopener">${escapeHtml(msg.fileName || 'Documento')}</a>`;
+    }
+    return escapeHtml(msg.text || (msg.type && msg.type !== 'text' ? `[${msg.type}]` : '(mensagem vazia)'));
+  }
+
+  function renderHistoryMessages(messages) {
+    const container = document.getElementById('historyMessages');
+    let html = '';
+    let lastDay = null;
+    messages.forEach((m) => {
+      const day = new Date(m.createdAt).toDateString();
+      if (day !== lastDay) {
+        html += `<div class="day-divider">${formatDayLabel(m.createdAt)}</div>`;
+        lastDay = day;
+      }
+      const mine = m.direction === 'out';
+      const time = new Date(m.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      html += `
+        <div class="bubble-row ${mine ? 'mine' : 'theirs'}">
+          <div class="bubble">${renderBubbleBody(m)}<span class="timestamp">${time}</span></div>
+        </div>
+      `;
+    });
+    container.innerHTML = html || '<div class="empty-state">Nenhuma mensagem nessa conversa ainda.</div>';
+    container.scrollTop = container.scrollHeight;
+  }
+
+  async function openHistory(sessionId, phone, contactLabel) {
+    const overlay = document.getElementById('historyOverlay');
+    document.getElementById('historyModalTitle').textContent = contactLabel || phone;
+    document.getElementById('historyMessages').innerHTML = '<div class="skeleton-row">Carregando…</div>';
+    overlay.hidden = false;
+    try {
+      const res = await apiFetch(`${CA_BASE}/conversations/${encodeURIComponent(sessionId)}/${encodeURIComponent(phone)}/history`);
+      if (!res.ok) throw new Error('falha ao carregar histórico');
+      const data = await res.json();
+      renderHistoryMessages(data.messages || []);
+    } catch (err) {
+      document.getElementById('historyMessages').innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  document.getElementById('historyModalClose').addEventListener('click', () => {
+    document.getElementById('historyOverlay').hidden = true;
+  });
+  document.getElementById('historyOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'historyOverlay') document.getElementById('historyOverlay').hidden = true;
+  });
+
+  // ------------------------------------------------------------
+  // Insight de IA sobre o conjunto filtrado
+  // ------------------------------------------------------------
+  document.getElementById('generateInsightBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('generateInsightBtn');
+    const result = document.getElementById('insightResult');
+    btn.disabled = true;
+    result.innerHTML = '<p class="skeleton-row">Gerando insight…</p>';
+    try {
+      const res = await apiFetch(`${CA_BASE}/insight`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state.filters),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar insight');
+      const cards = (data.insights || []).map((i) => `
+        <div class="insight-card ${i.tone || 'neutral'}">
+          <p class="insight-card-title">${escapeHtml(i.title)}</p>
+          <p class="insight-card-text">${escapeHtml(i.text)}</p>
+        </div>
+      `).join('');
+      result.innerHTML = `
+        <div class="insights-row">${cards || '<p class="empty-state">Sem insights.</p>'}</div>
+        <p class="insights-sample-note">Baseado em ${data.sampledConversations} de ${data.totalMatching.toLocaleString('pt-BR')} conversas que batem esse filtro.</p>
+      `;
+    } catch (err) {
+      result.innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ------------------------------------------------------------
+  // Aplicar filtros — recarrega tudo, volta pra página 1
+  // ------------------------------------------------------------
+  document.getElementById('applyFiltersBtn').addEventListener('click', () => {
+    state.filters = currentFiltersFromForm();
+    state.page = 1;
+    loadMetrics();
+    loadConversations();
+  });
+
+  async function init() {
+    try {
+      myOwnerId = await resolveOwner();
+      startPresenceHeartbeat();
+      revealAdminNavItemIfSuperAdmin();
+      await loadInstanceFilter();
+      await Promise.all([loadMetrics(), loadConversations()]);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+  init();
+
+  fetch('/api/brand').then((r) => r.json()).then((b) => {
+    if (b.name) document.querySelectorAll('.firm-name').forEach((el) => { el.textContent = b.name; });
+    if (b.subtitle) document.querySelectorAll('.firm-sub').forEach((el) => { el.textContent = b.subtitle; });
+    if (window.__applyPalette) window.__applyPalette(b);
+  }).catch(() => {});
+})();
+</script>
+</body>
+</html>

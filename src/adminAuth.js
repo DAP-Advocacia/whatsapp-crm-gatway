@@ -28,4 +28,29 @@ function requireSuperAdmin(req, res, next) {
   next();
 }
 
-module.exports = { requireSuperAdmin, isSuperAdmin, SUPER_ADMIN_OWNER_IDS };
+const conversationAnalysisGrants = require('./conversationAnalysisGrants');
+
+/**
+ * Acesso à Auditoria de Conversas (ver src/conversationAnalysisGrants.js
+ * pro porquê) — super admin SEMPRE tem acesso (checado aqui, não
+ * duplicado na tabela); qualquer outro owner precisa estar em
+ * conversation_analysis_grants, concedido explicitamente pelo super
+ * admin via Admin > Usuários. Verificado a cada request (não cacheado)
+ * — mesmo raciocínio de blockedOwners.isBlocked em requireAuth.
+ */
+async function hasConversationAnalysisAccess(ownerId) {
+  return isSuperAdmin(ownerId) || (await conversationAnalysisGrants.hasAccess(ownerId));
+}
+
+async function requireConversationAnalysisAccess(req, res, next) {
+  if (await hasConversationAnalysisAccess(req.ownerId)) return next();
+  res.status(403).json({ error: 'acesso restrito' });
+}
+
+module.exports = {
+  requireSuperAdmin,
+  isSuperAdmin,
+  SUPER_ADMIN_OWNER_IDS,
+  hasConversationAnalysisAccess,
+  requireConversationAnalysisAccess,
+};

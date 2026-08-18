@@ -31,6 +31,7 @@ const { createLeadsRouter } = require('./routes/leads');
 const { createAbTestsRouter } = require('./routes/abTests');
 const { createSuggestionsRouter } = require('./routes/suggestions');
 const { createSettingsRouter } = require('./routes/settings');
+const { createConversationAnalysisRouter } = require('./routes/conversationAnalysis');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -294,6 +295,10 @@ app.post('/onboarding.html', (req, res) => {
 
 app.post('/settings.html', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/settings.html'));
+});
+
+app.post('/conversation-analysis.html', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/conversation-analysis.html'));
 });
 
 // ---------------------------------------------------------------
@@ -710,6 +715,7 @@ app.use('/api/lead-forms', requireAuth, createLeadFormsRouter());
 app.use('/api/ab-tests', requireAuth, createAbTestsRouter());
 app.use('/api/suggestions', requireAuth, createSuggestionsRouter({ sessions }));
 app.use('/api/settings', requireAuth, createSettingsRouter());
+app.use('/api/conversation-analysis', requireAuth, createConversationAnalysisRouter());
 
 // ---------------------------------------------------------------
 // Sobe HTTP + WebSocket no mesmo servidor/porta

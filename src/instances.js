@@ -124,6 +124,21 @@ async function listAccessible(ownerId) {
   return rows;
 }
 
+// Lista TODAS as instâncias do sistema, qualquer dono — SEM filtro de
+// propósito, exclusivamente pra Auditoria de Conversas (ver
+// src/adminAuth.js, requireConversationAnalysisAccess — só chamada
+// atrás desse middleware, nunca exposta sem ele). Diferente de
+// listByOwner/listAccessible (ambas SEMPRE ancoradas num ownerId) — aqui
+// a ausência de filtro é o requisito da feature, não um esquecimento.
+// NÃO CHAMAR fora de uma rota protegida por requireConversationAnalysisAccess.
+async function listAll() {
+  const { rows } = await pool.query(
+    `select id, owner_id as "ownerId", label, created_at as "createdAt"
+     from instances order by owner_id, created_at asc`
+  );
+  return rows;
+}
+
 module.exports = {
   listByOwner,
   get,
@@ -136,4 +151,5 @@ module.exports = {
   addDelegate,
   removeDelegate,
   listAccessible,
+  listAll,
 };

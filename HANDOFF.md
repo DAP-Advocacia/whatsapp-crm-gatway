@@ -7267,3 +7267,144 @@ usuário: "a apresentação dentro do sistema está atualizada?"):
 **Validação**: `vm.Script` no JS embutido + contagem de tags `<div>`
 abertas/fechadas balanceada (170/170) depois das edições.
 
+### Parte DK — Auditoria de Conversas: painel restrito com leitura cross-instância (2026-08-18)
+
+Usuário pediu uma tela nova, visível só para ele e usuários específicos
+selecionados por ele no Admin, para "analisar conversas trocadas no
+DapZap" — deliberadamente diferente do dashboard "Análise de
+Conversas" já existente (que é agregado só das PRÓPRIAS instâncias de
+quem está logado). Esclarecido antes de implementar: precisa ler o
+conteúdo real das mensagens de QUALQUER instância/owner do sistema,
+métricas agregadas, busca/filtro (palavra, período, instância,
+atendente) e insight de IA sobre o conteúdo filtrado. Filtro de
+"atendente" confirmado como **por mensagem individual**
+(`messages.sent_by`, quem escreveu aquela mensagem especificamente),
+não por conversa/responsável atual (`conversations.assigned_to`).
+
+Planejado em modo de planejamento formal (Explore + Plan agents) dado
+o volume e a sensibilidade — é uma **exceção deliberada** ao
+isolamento de dados que existe em todo o resto do sistema (toda
+função de leitura em `store.js`/`metrics.js` exige `sessionId(s)`
+obrigatório, desde o bug de isolamento corrigido na Parte AQ).
+Nome escolhido — **"Auditoria de Conversas"**, não "Análise de
+Conversas" — de propósito, pra não colidir com o termo já usado pelo
+Dashboard e pra comunicar melhor a natureza restrita da tela.
+
+**Banco (`db/schema.sql`)**:
+- `conversation_analysis_grants` (owner_id PK, granted_by, granted_at)
+  — mesmo padrão estrutural de `blocked_owners`. Super admin
+  (`SUPER_ADMIN_OWNER_IDS`) sempre tem acesso, não precisa de linha.
+- `conversation_analysis_audit` (owner_id, action, detail jsonb,
+  created_at) — auditoria de QUAL recurso foi acessado (conversa
+  específica, filtro de busca, insight gerado), deliberadamente
+  **sem** texto de mensagem nem o texto do insight — diferente de
+  `action_log` (ações do próprio uso do app) por ser sobre acesso a
+  dado de terceiro, categoria distinta.
+- `messages.text_search` (coluna GERADA, `tsvector('portuguese', ...)`)
+  + índice GIN — primeira busca por CONTEÚDO de mensagem do sistema
+  (a busca em `listConversations` sempre foi só por telefone/nome de
+  contato). Faz stemming (acha "atestados" buscando "atestado"), não
+  é busca por substring arbitrário — documentado no comentário do
+  schema pra não presumir cobertura tipo grep.
+
+**Controle de acesso**: `hasConversationAnalysisAccess(ownerId)` em
+`src/adminAuth.js` (super admin OU grant explícito, verificado a cada
+request, sem cache — mesmo raciocínio de `blockedOwners.isBlocked`) +
+`src/conversationAnalysisGrants.js` (espelha `blockedOwners.js`).
+
+**Backend cross-owner** (`src/conversationAnalysisStore.js`, novo —
+comentário de topo explícito de que a ausência de filtro de owner é
+DELIBERADA, não reintrodução do bug da Parte AQ): `listAll` (busca +
+filtros + paginação de SERVIDOR — diferente da paginação client-side
+de Usuários no Admin, aqui o universo é o sistema todo), reusa
+`store.getHistory` direto (a query já era agnóstica de dono, o
+isolamento sempre esteve em quem chamava, nunca na query),
+`computeAggregateMetrics` (agregação SQL direta, não reusa
+`computeMetrics` que exige `sessionIds` e carrega tudo em memória).
+`instances.js::listAll()` — mesma decisão, sem filtro de propósito.
+
+**Insight de IA** (`src/openai.js::generateConversationAnalysisInsight`)
+— trade-off central: `summarizeConversation` trunca 80 mensagens de
+UMA conversa, não escala pra N conversas filtradas (pode ser
+milhares de mensagens). Decisão: teto rígido (60 conversas, 400
+mensagens no total, distribuídas) + a resposta **sempre** inclui
+`sampledConversations`/`totalMatching` — a UI mostra "baseado em N de
+T conversas" de forma visível, nunca dando a entender que cobriu o
+filtro inteiro.
+
+**Router dedicado** (`src/routes/conversationAnalysis.js`, montado em
+`/api/conversation-analysis`) — decisão de não colocar em
+`routes/whatsapp.js` (já com 1800+ linhas). `router.use(requireConversationAnalysisAccess)`
+no topo — portão único, nunca `requireSession`/`assertOwnsSession`
+(`src/authz.js`), que bloqueariam por design. Sub-rotas
+`/admin/grants/*` exigem `requireSuperAdmin` POR CIMA do portão
+principal — quem tem grant concedido não pode conceder a mais gente.
+
+**Frontend** (`public/conversation-analysis.html`, novo): aviso fixo
+no topo (não modal que se esquece) — "conversas de todas as
+instâncias do sistema... acesso registrado". Filtros + cards de
+métrica + botão de insight + lista paginada no servidor + histórico
+em bolhas READ-ONLY (reaproveita a lógica pura de `renderBubbleBody`/
+`.bubble`/`.day-divider` de `chat.html`, sem nenhum botão de ação).
+
+**UI de concessão** (`public/admin.html` + `GET /admin/users`):
+reaproveita a tabela de Usuários já existente (`listEmployees()` já
+lista todo mundo) — um botão por linha ("Auditoria: Conceder"/"Ativo"),
+mesmo padrão de `confirmDialog` já usado pra bloqueio, com frase
+explícita do alcance ("QUALQUER instância do sistema, não só as
+próprias").
+
+**Item de navegação nas 15 telas**: mesmo padrão de inserção manual
+repetida já usado pro item Admin. Achados no processo (nenhum deles
+introduzido por esta mudança, todos pré-existentes):
+- **3 grupos de prefixo de `API_BASE`** (mesmos 3 já mapeados na
+  Parte DG pro heartbeat) — `admin.html`/`chat.html`/`instances.html`/
+  `campaign-metrics.html`/`campaign-schedule.html`/`notifications.html`
+  usam `API_BASE` com `/whatsapp` já embutido (erro cometido e
+  corrigido nesta mesma sessão: `${API_BASE}/conversation-analysis/...`
+  duplicaria `/whatsapp` nessas 6 telas — corrigido pra
+  `${window.location.origin}/api/conversation-analysis/...` nelas).
+- `admin.html`/`onboarding.html` tinham o item `navAdminItem` no HTML
+  mas **nunca tiveram a função que o revela** — bug pré-existente.
+  Corrigido em `admin.html` (a guarda de `init()` já confirma super
+  admin antes de qualquer coisa renderizar, então revela os 2 itens
+  direto, sem chamada de API extra). **Não corrigido** em
+  `onboarding.html` — é uma tela puramente estática, sem nenhuma
+  lógica de autenticação/API, fora do escopo introduzir isso agora só
+  pra 1 item de nav.
+- `db/schema.sql` documenta `contacts.session_id`, mas o **banco real
+  usa `contacts.owner_id`** (confirmado via `information_schema` —
+  código real, `src/contacts.js`, sempre usou `owner_id`; o schema.sql
+  está desatualizado nessa tabela especificamente). Corrigido só o
+  JOIN em `conversationAnalysisStore.js` pra usar a coluna real —
+  **`db/schema.sql` continua desatualizado**, não corrigido (fora do
+  escopo, mas fica registrado pra não confundir quem ler o arquivo
+  depois).
+- `chat.html`/`sites.html` já tinham tags `<a>` desbalanceadas antes
+  desta sessão (confirmado via `git show HEAD` antes de editar — 22/21
+  e 23/21 respectivamente). A edição desta sessão em ambos manteve o
+  saldo proporcional (+1/+1), não introduziu nem agravou o
+  desbalanceamento pré-existente — não investigado a fundo nem
+  corrigido, fora do escopo.
+
+**Validação**: `node -c` em todos os arquivos de backend, `vm.Script`
++ contagem de `<a>` em todas as 15 telas. Testes isolados contra
+dados/permissões REAIS (não mockado), com limpeza confirmada:
+controle de acesso (6 casos: grant/revoke/upsert), router via HTTP
+real (13 casos, incluindo os críticos — 403 em toda rota pra quem não
+tem acesso mesmo `/instances`/`/whoami`, quem tem grant não pode
+conceder a mais gente, revogação corta na próxima chamada sem
+esperar token expirar), `conversationAnalysisStore.listAll`/
+`computeAggregateMetrics` (7 casos contra os dados reais do sistema —
+30.7k conversas, 448k mensagens), rota de histórico + auditoria via
+HTTP real (3 casos, incluindo confirmar que o `detail` da auditoria
+nunca contém texto de mensagem), lógica de amostragem/teto do insight
+de IA isolada (5 casos, sem chamar a API real da OpenAI).
+
+**Pendente**: deploy em produção ainda não confirmado (autoDeploy
+continua `false` no EasyPanel, Parte DH — precisa de clique manual em
+"Deploy"). Teste end-to-end real de concessão de acesso via UI do
+Admin (a lógica de cruzamento foi testada isoladamente, mas
+`listEmployees()` não está disponível no `.env` local pra um teste
+100% ponta-a-ponta — só a VPS tem `BITRIX_HR_WEBHOOK_URL`).
+

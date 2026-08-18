@@ -725,3 +725,52 @@ create table if not exists blocked_owners (
 -- ter sido lançada de fato, ex: "não vamos fazer isso porque...").
 alter table suggestions add column if not exists response text;
 alter table suggestions add column if not exists responded_at timestamptz;
+
+-- Acesso à Auditoria de Conversas (/conversation-analysis.html, ver
+-- HANDOFF Parte DK) — tela DIFERENTE do dashboard "Análise de
+-- Conversas" já existente (agregado só das PRÓPRIAS instâncias, GET
+-- /metrics); esta lê CONTEÚDO real de mensagens de QUALQUER owner do
+-- sistema — acesso restrito, concedido nominalmente pelo super admin,
+-- nunca por hierarquia/departamento automática (diferente de
+-- hierarchy_subordinates, calculada sozinha a partir do Bitrix). Super
+-- admin (SUPER_ADMIN_OWNER_IDS) sempre tem acesso e NÃO precisa de
+-- linha aqui — granted_by é o ownerId de quem concedeu.
+create table if not exists conversation_analysis_grants (
+  owner_id text primary key,
+  granted_by text not null,
+  granted_at timestamptz not null default now()
+);
+
+-- Auditoria de acesso ao painel acima — DIFERENTE de action_log (ações
+-- do PRÓPRIO uso do app, deliberadamente sem conteúdo digitado, ver
+-- HANDOFF Parte DC) e de page_sessions (navegação genérica, sem saber
+-- QUAL recurso foi olhado dentro da página). Aqui: qual conversa de
+-- qual dono foi aberta, ou com quais filtros uma busca/insight foi
+-- gerado — `detail` é estruturado (jsonb) e NUNCA guarda texto de
+-- mensagem nem o texto do insight gerado, só o QUE foi acessado (é
+-- sobre rastreabilidade de acesso privilegiado, não sobre duplicar
+-- dado sensível em outro lugar).
+create table if not exists conversation_analysis_audit (
+  id bigserial primary key,
+  owner_id text not null,
+  action text not null, -- 'view_conversation' | 'search' | 'generate_insight'
+  detail jsonb,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_conversation_analysis_audit_owner
+  on conversation_analysis_audit (owner_id, created_at desc);
+
+-- Busca por conteúdo de mensagem — só usada pela Auditoria de
+-- Conversas acima (nenhuma outra tela busca por texto dentro do corpo
+-- de uma mensagem hoje; a busca existente em listConversations é só
+-- por telefone/nome de contato). Coluna GERADA — o Postgres mantém
+-- sincronizada sozinho a cada insert/update de `text`, sem precisar de
+-- trigger. 'portuguese' faz STEMMING (acha "atestados" ao buscar
+-- "atestado"), não é busca por substring arbitrário dentro de uma
+-- palavra — suficiente pro caso de uso (buscar um termo/palavra), mas
+-- documentado aqui pra quem for usar não presumir que cobre qualquer
+-- busca tipo grep. `coalesce` porque `text` é nulável (mensagem de
+-- mídia sem legenda) — inofensivo, só nunca dá match.
+alter table messages add column if not exists text_search tsvector
+  generated always as (to_tsvector('portuguese', coalesce(text, ''))) stored;
+create index if not exists idx_messages_text_search on messages using gin (text_search);
