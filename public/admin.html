@@ -307,6 +307,16 @@
   }
   select:focus, input:focus, textarea:focus{ border-color: var(--gold-dim); }
 
+  /* Filtros da tabela de Usuários (além da busca por texto já existente
+     em #usersSearch) — cada <select> herda o estilo base acima; aqui só
+     organiza em linha com quebra, já que `select{width:100%}` faria cada
+     um ocupar a linha inteira fora de um container flex. */
+  .users-filters{
+    display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px;
+  }
+  .users-filters select{ width:auto; min-width:170px; flex:1 1 170px; }
+  .users-filters .btn{ flex:0 0 auto; }
+
   .admin-table{ width:100%; border-collapse:collapse; font-size:13px; }
   .admin-table th{
     text-align:left; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
@@ -657,6 +667,30 @@
     <h2>Usuários <span class="panel-count" id="usersCount">—</span></h2>
     <p class="panel-hint">Cadastro do Bitrix cruzado com uso real do app — inclusive quem nunca abriu nada ainda. "Revogar" bloqueia o acesso ao app inteiro, verificado na hora (não precisa esperar o token expirar).</p>
     <input type="search" id="usersSearch" placeholder="Buscar por nome, e-mail ou cargo…" style="margin-bottom:12px">
+    <div class="users-filters">
+      <select id="usersFilterStatus">
+        <option value="">Status: todos</option>
+        <option value="online">Online</option>
+        <option value="offline">Offline</option>
+        <option value="blocked">Bloqueado</option>
+      </select>
+      <select id="usersFilterPage">
+        <option value="">Página favorita: todas</option>
+      </select>
+      <select id="usersFilterRole">
+        <option value="">Cargo: todos</option>
+      </select>
+      <select id="usersFilterAnalysis">
+        <option value="">Auditoria de Conversas: todos</option>
+        <option value="yes">Com acesso</option>
+        <option value="no">Sem acesso</option>
+      </select>
+      <select id="usersFilterActivity">
+        <option value="">Atividade: todos</option>
+        <option value="never">Nunca usou o app</option>
+      </select>
+      <button type="button" class="btn secondary" id="usersFiltersClear">Limpar filtros</button>
+    </div>
     <table class="admin-table" id="usersTable">
       <thead>
         <tr><th>Usuário</th><th>Conta</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
@@ -1080,6 +1114,7 @@
       warning.innerHTML = data.hrConfigured
         ? ''
         : `<div class="warn-banner"><b>Cadastro do Bitrix indisponível.</b> A variável BITRIX_HR_WEBHOOK_URL não está configurada neste servidor — sem ela, esta lista fica sempre vazia (ver .env.example).</div>`;
+      populateUsersFilterOptions();
       renderUsers();
     } catch (err) {
       console.error('[admin] erro ao carregar usuários:', err.message);
@@ -1094,15 +1129,60 @@
     return (document.getElementById('usersSearch')?.value || '').trim().toLowerCase();
   }
 
+  // Preenche os dropdowns de "Página favorita" e "Cargo" com os valores
+  // que de fato aparecem em usersRows (não uma lista fixa) — evita opção
+  // morta se um cargo/página sair de uso, e cobre página nova sem precisar
+  // editar este arquivo. Chamado 1x por loadUsers(), depois que
+  // usersRows já está preenchido; preserva a seleção atual (se ainda
+  // existir entre as novas opções) pra um refresh não resetar o filtro
+  // que a pessoa já tinha escolhido.
+  function populateUsersFilterOptions() {
+    const pageSelect = document.getElementById('usersFilterPage');
+    const roleSelect = document.getElementById('usersFilterRole');
+    const currentPage = pageSelect.value;
+    const currentRole = roleSelect.value;
+
+    const pages = [...new Set(usersRows.map((u) => u.favoritePage).filter(Boolean))].sort();
+    const roles = [...new Set(usersRows.map((u) => u.workPosition).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+
+    pageSelect.innerHTML = '<option value="">Página favorita: todas</option>'
+      + pages.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(formatPageName(p))}</option>`).join('');
+    roleSelect.innerHTML = '<option value="">Cargo: todos</option>'
+      + roles.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+
+    if (pages.includes(currentPage)) pageSelect.value = currentPage;
+    if (roles.includes(currentRole)) roleSelect.value = currentRole;
+  }
+
   function renderUsers() {
     const term = usersSearchTerm();
-    const filtered = term
-      ? usersRows.filter((u) =>
-          (u.name || '').toLowerCase().includes(term) ||
-          (u.email || '').toLowerCase().includes(term) ||
-          (u.workPosition || '').toLowerCase().includes(term)
-        )
-      : usersRows;
+    const statusFilter = document.getElementById('usersFilterStatus').value;
+    const pageFilter = document.getElementById('usersFilterPage').value;
+    const roleFilter = document.getElementById('usersFilterRole').value;
+    const analysisFilter = document.getElementById('usersFilterAnalysis').value;
+    const activityFilter = document.getElementById('usersFilterActivity').value;
+
+    const filtered = usersRows.filter((u) => {
+      if (term) {
+        const matchesTerm = (u.name || '').toLowerCase().includes(term)
+          || (u.email || '').toLowerCase().includes(term)
+          || (u.workPosition || '').toLowerCase().includes(term);
+        if (!matchesTerm) return false;
+      }
+      if (statusFilter === 'online' && !u.isOnline) return false;
+      if (statusFilter === 'offline' && u.isOnline) return false;
+      if (statusFilter === 'blocked' && !u.isBlocked) return false;
+      if (pageFilter && u.favoritePage !== pageFilter) return false;
+      if (roleFilter && u.workPosition !== roleFilter) return false;
+      if (analysisFilter === 'yes' && !u.hasConversationAnalysisAccess) return false;
+      if (analysisFilter === 'no' && u.hasConversationAnalysisAccess) return false;
+      // "Nunca usou o app" — sem nenhum acesso registrado em page_sessions
+      // (lastAccess null), diferente de "sem uso nos últimos 30 dias"
+      // (totalSecondsLast30d === 0 cobriria alguém ativo há 40 dias, que
+      // não é a mesma coisa e seria confuso rotular como "nunca usou").
+      if (activityFilter === 'never' && u.lastAccess) return false;
+      return true;
+    });
 
     const body = document.getElementById('usersBody');
     const count = document.getElementById('usersCount');
@@ -1110,7 +1190,7 @@
     count.textContent = String(usersRows.length);
 
     if (!filtered.length) {
-      body.innerHTML = `<tr><td colspan="7" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca.' : 'Nenhum usuário encontrado.'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="7" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
       pager.innerHTML = '';
       return;
     }
@@ -1179,6 +1259,22 @@
   }
 
   document.getElementById('usersSearch').addEventListener('input', () => { usersPage = 1; renderUsers(); });
+
+  // Filtros adicionais da tabela de Usuários — mesmo padrão do listener de
+  // busca acima (volta pra página 1, já que o total de linhas mudou).
+  ['usersFilterStatus', 'usersFilterPage', 'usersFilterRole', 'usersFilterAnalysis', 'usersFilterActivity'].forEach((id) => {
+    document.getElementById(id).addEventListener('change', () => { usersPage = 1; renderUsers(); });
+  });
+  document.getElementById('usersFiltersClear').addEventListener('click', () => {
+    document.getElementById('usersSearch').value = '';
+    document.getElementById('usersFilterStatus').value = '';
+    document.getElementById('usersFilterPage').value = '';
+    document.getElementById('usersFilterRole').value = '';
+    document.getElementById('usersFilterAnalysis').value = '';
+    document.getElementById('usersFilterActivity').value = '';
+    usersPage = 1;
+    renderUsers();
+  });
 
   // "Data-só" do Bitrix (PERSONAL_BIRTHDAY/UF_EMPLOYMENT_DATE) vem sempre
   // com hora "T00:00:00+00:00" (meia-noite UTC) — mesmo problema de fuso já

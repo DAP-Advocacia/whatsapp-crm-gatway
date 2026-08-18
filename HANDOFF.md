@@ -7527,3 +7527,59 @@ continua `false` no EasyPanel, Parte DH — precisa de clique manual em
 aba anônima/outra conta que a cor não mudou pra ela) só é possível
 depois do deploy.
 
+### Parte DM — Filtros na tabela de Usuários do Admin (2026-08-18)
+
+Usuário pediu filtros na tabela de Usuários (`admin.html`) — só havia
+busca por texto (nome/e-mail/cargo) até então. Perguntado quais
+dimensões filtrar; resposta foi "todos os sugeridos e mais", então,
+além dos 4 sugeridos, foi acrescentado um 5º (atividade) que surgiu
+natural dos mesmos dados já carregados — sem exigir chamada de API
+nova. **Decisão deliberada de não incluir filtro por Departamento**:
+`listEmployees()` só devolve `departmentIds` (IDs numéricos do
+Bitrix, `UF_DEPARTMENT`), sem o nome resolvido — precisaria de uma
+chamada nova a `department.get` (já usada em `bitrixHierarchy.js`,
+mas com outro formato/propósito) e um mapeamento extra só pra isso;
+fora do que os dados hoje suportam de forma direta, registrado aqui
+pra não se perder caso vire pedido futuro.
+
+5 `<select>` novos entre a busca e a tabela (`public/admin.html`,
+`.users-filters`, `flex-wrap` — o CSS base de `select{width:100%}`
+já existia por precaução, comentário de sessão anterior previa
+"evita o mesmo problema se um for adicionado depois"):
+- **Status**: Online / Offline / Bloqueado (`isOnline`/`isBlocked`).
+- **Página favorita** e **Cargo**: `<option>` populada
+  **dinamicamente** (`populateUsersFilterOptions()`, chamada 1x
+  depois de `loadUsers()` preencher `usersRows`) a partir dos valores
+  que de fato aparecem nos dados — `[...new Set(...)].sort()` — em
+  vez de uma lista fixa no HTML, pra não ficar desatualizado se um
+  cargo/página sair de uso ou uma página nova aparecer.
+- **Acesso à Auditoria de Conversas**: com/sem (`hasConversationAnalysisAccess`,
+  mesmo campo já usado pro botão de conceder/revogar, Parte DK).
+- **Atividade**: só uma opção hoje, "Nunca usou o app" — via
+  `lastAccess` nulo. Deliberadamente diferente de "sem uso nos
+  últimos 30 dias" (`totalSecondsLast30d === 0`), que incluiria
+  alguém ativo há 40 dias — rótulo enganoso pra esse caso.
+
+Todos os filtros entram no mesmo `usersRows.filter(...)` de
+`renderUsers()` que já fazia a busca de texto — combináveis livremente
+entre si e com a busca, sem nenhuma chamada de API nova (os dados já
+estavam todos carregados de uma vez, ver comentário existente sobre
+paginação client-side). Botão "Limpar filtros" reseta os 5 selects +
+o campo de busca numa ação só.
+
+**Validação**: `vm.Script` no arquivo inteiro. Lógica de filtro
+extraída e testada isolada (12 casos com dados sintéticos — cada
+filtro sozinho, 2 combinações de filtro+filtro, 1 combinação de
+busca+filtro), incluindo confirmar que "Analista" bate na busca por
+texto "ana" (contém a substring) — achado no processo de escrever o
+teste, não um bug: é o mesmo comportamento de substring
+case-insensitive que a busca já tinha antes desta mudança, só ficou
+mais visível testando com um cargo que colidia. Lógica de
+`populateUsersFilterOptions` (dedupe + sort + descartar `null`)
+testada isolada também, sem precisar de DOM.
+
+**Pendente**: teste visual em produção depois do deploy (a lógica foi
+validada de ponta a ponta fora do navegador; confirmar visualmente
+que os 5 selects renderizam com o estilo/posição esperados e que
+"Limpar filtros" reseta a UI, não só o estado interno).
+

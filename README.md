@@ -1163,10 +1163,21 @@ acesso, tempo total (30d), página favorita e bloqueio.
   registrada nunca incluir o tempo "esquecido" até o job rodar.
   `sendBeacon` não permite header de `Authorization`; a rota de
   fechamento aceita o token no próprio body por isso.
-- **Paginação + busca** (client-side, `public/admin.html`, HANDOFF Parte
-  CY): `GET /admin/users` traz TUDO numa chamada só (nenhuma paginação
-  de servidor); corte só na hora de renderizar, 20 por página. Busca
-  filtra por nome, e-mail OU cargo (match parcial, case-insensitive).
+- **Paginação + busca + filtros** (client-side, `public/admin.html`,
+  HANDOFF Parte CY/DM): `GET /admin/users` traz TUDO numa chamada só
+  (nenhuma paginação de servidor); corte só na hora de renderizar, 20
+  por página. Busca filtra por nome, e-mail OU cargo (match parcial,
+  case-insensitive). 5 filtros adicionais (dropdown, combináveis entre
+  si e com a busca — todos aplicados dentro do mesmo `filtered =
+  usersRows.filter(...)`, sem chamada de API extra): **Status**
+  (Online/Offline/Bloqueado), **Página favorita** e **Cargo** (as 2
+  populadas dinamicamente a partir dos valores que de fato aparecem em
+  `usersRows`, não uma lista fixa — cobre página/cargo novo sem editar
+  o arquivo), **Acesso à Auditoria de Conversas** (com/sem) e
+  **Atividade** (só "nunca usou o app" hoje — `lastAccess` nulo,
+  diferente de "sem uso nos últimos 30 dias", que incluiria quem usou
+  há 40 dias e seria rótulo confuso). Botão "Limpar filtros" reseta os
+  5 selects + a busca de uma vez.
 - **Detalhado**: modal expandido (720px, HANDOFF Parte CY) com cadastro
   COMPLETO do Bitrix pra aquela pessoa (cargo, e-mail, celular, telefone
   comercial, cidade, nascimento, data de admissão, criado no Bitrix,
