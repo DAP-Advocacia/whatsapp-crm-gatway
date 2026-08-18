@@ -307,7 +307,14 @@ antes era um único registro global pra toda a instalação; hoje cada
 `ownerId` tem a própria linha em `user_palette` e só vê a própria cor,
 nas telas internas (nome/subtítulo/cor de fallback da marca em
 `GET /api/brand` continuam globais via `.env`, sem relação com esta
-mudança — ver a tabela de rotas mais abaixo). A
+mudança — ver a tabela de rotas mais abaixo). Cache local
+(`localStorage`) do brand global e da paleta pessoal fica em chaves
+SEPARADAS (`palette_*` vs `personalPalette_*`, HANDOFF Parte DP,
+2026-08-18) — antes usava as mesmas chaves pras duas, o que causava
+um flash visível "cor pessoal → cor global → cor pessoal" a cada
+navegação pra quem tinha paleta pessoal configurada (o fetch de
+`/api/brand`, que sempre roda, reaplicava a cor global por cima do
+cache antes do fetch da paleta pessoal confirmar de novo). A
 sidebar é duplicada em cada um dos 13 arquivos HTML (não há componente/
 template compartilhado — vanilla JS/HTML, sem build step), então qualquer
 mudança nela (item novo, reordenar, mudar seção) precisa ser replicada

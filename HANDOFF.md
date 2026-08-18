@@ -7721,3 +7721,63 @@ execução — 5 casos, limpeza confirmada sem resíduo.
 precisa de clique manual). Teste visual em produção da seção "Admin"
 revelando/escondendo corretamente conforme o acesso de cada pessoa.
 
+### Parte DP — Corrige "pisca" ao navegar com paleta pessoal configurada (2026-08-18)
+
+Usuário reportou: ao clicar em "Admin" (dentro da nova seção Admin da
+sidebar, Parte DO), a tela pisca. Investigado antes de qualquer
+mudança visual, causa raiz confirmada no mecanismo de cache de
+paleta (Parte DL) — não era a sidebar em si.
+
+**Causa**: `window.__applyPalette` (definida no `<head>` de cada
+tela) sempre grava/lê o cache local sob as MESMAS chaves
+(`palette_gold`, `palette_bg`, etc.), não importa se quem chamou foi
+o fetch de `/api/brand` (paleta GLOBAL) ou `applyPersonalPalette()`
+(paleta POR USUÁRIO, chamada depois via a `Promise` `brandReady`).
+Numa navegação com paleta pessoal já configurada, a sequência real
+era: (1) o cache local já tinha a cor pessoal certa, aplicada ANTES
+do primeiro paint — funcionando como esperado; (2) o fetch de
+`/api/brand` **sempre roda**, e sempre reaplica a cor GLOBAL por
+cima, mesmo quando o cache já estava certo; (3) só depois disso o
+fetch de `applyPersonalPalette()` completa e reaplica a cor pessoal
+de volta. O resultado visível é uma troca rápida "pessoal → global →
+pessoal" a cada navegação — o "pisca" reportado.
+
+**Correção**: 2 caches SEPARADOS — `palette_*` pro brand global,
+`personalPalette_*` pra paleta por usuário. `window.__applyPalette`
+ganhou um 2º parâmetro (`prefix`, default `'palette_'`); o loop de
+leitura de cache no boot (antes do 1º paint) virou uma função
+reaproveitável `applyCachedPalette(prefix)`, chamada 2x — brand
+primeiro, pessoal por cima. `applyPersonalPalette()` (nas 14 telas
+que a têm) e `syncPaletteCache()` (`settings.html`, a própria tela de
+edição da paleta — bug irmão descoberto no processo: ela gravava a
+edição em tempo real no cache do BRAND por engano, poluindo o
+fallback global com a cor de uma pessoa só) agora passam
+`'personalPalette_'` explicitamente. Replicado nas 16 telas — mesmo
+código, mas o comentário ANTES da assinatura da função varia entre
+telas (achado no processo: nem todo comentário nesta base é
+idêntico, só o CÓDIGO era — precisou reancorar os `Edit`s a partir
+de `window.__applyPalette = function (b) {`, não do comentário).
+
+**Limitação conhecida, não corrigida**: o cenário principal (flash
+ao trocar de PÁGINA, recarregando do zero) está resolvido — o cache
+já aplica a cor certa antes do 1º paint. Ainda existe uma janela bem
+mais curta, DENTRO da mesma carga de página, entre o fetch de brand
+completar e o fetch de paleta pessoal confirmar de novo (a paleta
+pessoal só começa a buscar depois que `brandReady` resolve) — o
+fetch de brand ainda reaplica a cor global por um instante nesse
+meio-tempo. Não corrigido agora (exigiria pular a aplicação visual
+do brand quando já há cache de paleta pessoal, uma segunda rodada de
+edição nas 16 telas por um ganho marginal — a janela é da ordem de
+1 fetch HTTP, bem menor que o flash de navegação já resolvido).
+
+**Validação**: `vm.Script` + checagem automatizada (parâmetro
+`prefix` presente, `applyCachedPalette` chamado com os 2 prefixos,
+`applyPersonalPalette` passando `'personalPalette_'`) nas 16 telas —
+achado 1 arquivo (`campaign.html`) que tinha ficado pra trás de uma
+tentativa anterior de edição em massa que reportou erro (percebido
+só na validação automatizada, não na hora). Teste funcional com
+mocks mínimos de `localStorage`/`document.documentElement` (sem
+jsdom, não é dependência do projeto) — 8 casos: boot aplica pessoal
+por cima do global; reset remove só o cache pessoal, sem tocar no
+global; cache do brand e da paleta pessoal nunca se misturam.
+

@@ -38,60 +38,71 @@
       }
       return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
     }
-    window.__applyPalette = function (b) {
+    window.__applyPalette = function (b, prefix) {
+      prefix = prefix || 'palette_';
       var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
           document.documentElement.style.setProperty(MAP[k], values[k]);
-          localStorage.setItem('palette_' + k, values[k]);
+          localStorage.setItem(prefix + k, values[k]);
           if (RGB_MAP[k]) {
             var rgbStr = hexToRgbStr(values[k]);
             document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
-            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+            localStorage.setItem(prefix + k + '_rgb', rgbStr);
           }
           if (k === 'bg') {
             var surf = deriveSurfaces(values[k]);
             document.documentElement.style.setProperty('--surface', surf.surface);
             document.documentElement.style.setProperty('--surface-2', surf.surface2);
             document.documentElement.style.setProperty('--border', surf.border);
-            localStorage.setItem('palette_surface', surf.surface);
-            localStorage.setItem('palette_surface2', surf.surface2);
-            localStorage.setItem('palette_border', surf.border);
+            localStorage.setItem(prefix + 'surface', surf.surface);
+            localStorage.setItem(prefix + 'surface2', surf.surface2);
+            localStorage.setItem(prefix + 'border', surf.border);
           }
         } else {
           document.documentElement.style.removeProperty(MAP[k]);
-          localStorage.removeItem('palette_' + k);
+          localStorage.removeItem(prefix + k);
           if (RGB_MAP[k]) {
             document.documentElement.style.removeProperty(RGB_MAP[k]);
-            localStorage.removeItem('palette_' + k + '_rgb');
+            localStorage.removeItem(prefix + k + '_rgb');
           }
           if (k === 'bg') {
             document.documentElement.style.removeProperty('--surface');
             document.documentElement.style.removeProperty('--surface-2');
             document.documentElement.style.removeProperty('--border');
-            localStorage.removeItem('palette_surface');
-            localStorage.removeItem('palette_surface2');
-            localStorage.removeItem('palette_border');
+            localStorage.removeItem(prefix + 'surface');
+            localStorage.removeItem(prefix + 'surface2');
+            localStorage.removeItem(prefix + 'border');
           }
         }
       });
     };
-    Object.keys(MAP).forEach(function (k) {
-      var cached = localStorage.getItem('palette_' + k);
-      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-      if (RGB_MAP[k]) {
-        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
-        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-      }
-      if (k === 'bg' && cached) {
-        var cachedSurface = localStorage.getItem('palette_surface');
-        var cachedSurface2 = localStorage.getItem('palette_surface2');
-        var cachedBorder = localStorage.getItem('palette_border');
-        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
-        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
-        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
-      }
-    });
+    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
+    // 'personalPalette_' pra paleta por usuário. Antes os dois escreviam nas
+    // MESMAS chaves: o cache já mostrava a cor pessoal certa, mas o fetch de
+    // /api/brand (sempre roda) reaplicava a cor GLOBAL por cima antes do
+    // fetch da paleta pessoal completar — um flash "pessoal → global →
+    // pessoal" visível a cada navegação, é o "pisca" que o usuário reportou.
+    function applyCachedPalette(prefix) {
+      Object.keys(MAP).forEach(function (k) {
+        var cached = localStorage.getItem(prefix + k);
+        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+        if (RGB_MAP[k]) {
+          var cachedRgb = localStorage.getItem(prefix + k + '_rgb');
+          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+        }
+        if (k === 'bg' && cached) {
+          var cachedSurface = localStorage.getItem(prefix + 'surface');
+          var cachedSurface2 = localStorage.getItem(prefix + 'surface2');
+          var cachedBorder = localStorage.getItem(prefix + 'border');
+          if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+          if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+          if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+        }
+      });
+    }
+    applyCachedPalette('palette_');
+    applyCachedPalette('personalPalette_');
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1265,7 +1276,7 @@
       if (!res.ok) return;
       const p = await res.json();
       if (window.__applyPalette) {
-        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor });
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
       }
     } catch {}
   }
