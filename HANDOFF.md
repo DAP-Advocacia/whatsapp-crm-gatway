@@ -7583,3 +7583,61 @@ validada de ponta a ponta fora do navegador; confirmar visualmente
 que os 5 selects renderizam com o estilo/posição esperados e que
 "Limpar filtros" reseta a UI, não só o estado interno).
 
+### Parte DN — 3 achados na Auditoria de Conversas e no Admin (2026-08-18)
+
+Usuário reportou 3 problemas em sequência, todos com print.
+
+**1) Sidebar de `conversation-analysis.html` sumindo itens ao navegar
+pra ela** — não era um bug de esconder/mostrar dinâmico: a sidebar
+DESSA TELA (criada do zero na Parte DK) estava **incompleta desde a
+criação**, faltando Campanha (+ subitens Análise de Campanha/Agenda de
+Envios), Landing Page/Sites (+ subitem Métricas LP), Onboarding e
+Apresentação — confirmado comparando com `faq.html` (usada como
+referência na Parte DK, que tem a sidebar completa e correta).
+Reconstruída copiando a estrutura exata de `faq.html` — HTML dos 4
+itens/grupos que faltavam, CSS de `.nav-group`/`.nav-caret-btn`/
+`.nav-subitems` (bloco inteiro faltava, não só os itens) e o JS de
+toggle dos 2 grupos colapsáveis (`navGroupLP`/`navGroupCampaign`,
+estado em `localStorage`) — nenhuma dessas 3 partes existia antes
+nesta tela.
+
+**2) ESC não fechava o modal de histórico de conversa** — o resto do
+sistema (12 telas) já tinha um listener genérico de ESC pra qualquer
+`.overlay.open` (implementado numa sessão anterior). O modal de
+histórico desta tela usa um mecanismo **próprio e diferente**
+(`<div id="historyOverlay" hidden>`, alternando o atributo `hidden`
+via JS, não a classe `.overlay`/`.open`) — confirmado via busca ampla
+que é o ÚNICO modal do sistema com esse padrão, então o listener
+genérico nunca alcançaria ele mesmo copiado. Adicionado um listener
+dedicado pra este mecanismo específico.
+
+**3) "Filtrei usuários online (10 no KPI) mas a tabela mostrou só
+1"** — investigado a fundo antes de qualquer mudança: confirmado que
+o KPI "Online agora" (`GET /admin/usage-metrics`) e o campo `isOnline`
+usado no filtro (`GET /admin/users`) leem a **mesma fonte**
+(`presence.listPresence()`) com o **mesmo threshold** (90s) — sem
+discrepância de dado nenhuma. Verificado contra a produção real: 10
+pessoas online agora, e dentre elas exatamente 1 (Jonathan Yuri) bate
+o termo de busca "han" que continuava digitado no campo de texto
+(substring de "Jon**ath**an", contra `workPosition`/`name`) — **não
+era bug**, era a combinação busca-de-texto + filtro-de-status que o
+usuário não tinha percebido que ainda estava ativa junto.
+Não é bug, mas é um problema de UX real (nada indicava visualmente
+que 2 filtros estavam somados) — corrigido com 2 mudanças em
+`admin.html`: (a) o contador "Usuários N" no cabeçalho do painel
+agora mostra "N de T" sempre que algum filtro/busca reduz o
+resultado, em vez de mostrar sempre o TOTAL geral mesmo com a tabela
+filtrada (bug de UX pré-existente à parte — o texto "X usuário(s)
+encontrado(s)" só aparecia dentro do paginador, que só renderiza
+com mais de 1 página; um filtro que reduz pra poucos resultados
+ficava sem NENHUM contador visível de quantos sobraram); (b) uma
+linha nova (`#usersActiveFilters`, escondida por padrão) lista em
+texto todo filtro/busca ativo no momento ("Filtrando por: busca
+'han' + status: Online").
+
+**Validação**: `vm.Script` + contagem de `<a>` em
+`conversation-analysis.html` depois da sidebar. Cenário do item 3
+reproduzido com dados sintéticos batendo os números exatos
+observados em produção (789 total, 10 online, busca "han" → 1) antes
+de considerar a correção pronta.
+

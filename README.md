@@ -1177,7 +1177,13 @@ acesso, tempo total (30d), página favorita e bloqueio.
   **Atividade** (só "nunca usou o app" hoje — `lastAccess` nulo,
   diferente de "sem uso nos últimos 30 dias", que incluiria quem usou
   há 40 dias e seria rótulo confuso). Botão "Limpar filtros" reseta os
-  5 selects + a busca de uma vez.
+  5 selects + a busca de uma vez. O contador "Usuários N" no
+  cabeçalho do painel mostra **"N de T"** sempre que algum filtro/
+  busca reduz o resultado (antes mostrava sempre o total geral, mesmo
+  com a tabela filtrada pra 1 linha — confundiu um usuário real que
+  comparou isso com o card "Online agora", HANDOFF Parte DN), e uma
+  linha abaixo dos filtros lista em texto qual busca/filtro está
+  ativo no momento.
 - **Detalhado**: modal expandido (720px, HANDOFF Parte CY) com cadastro
   COMPLETO do Bitrix pra aquela pessoa (cargo, e-mail, celular, telefone
   comercial, cidade, nascimento, data de admissão, criado no Bitrix,

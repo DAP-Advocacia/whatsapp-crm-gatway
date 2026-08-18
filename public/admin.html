@@ -691,6 +691,7 @@
       </select>
       <button type="button" class="btn secondary" id="usersFiltersClear">Limpar filtros</button>
     </div>
+    <div id="usersActiveFilters" style="display:none; margin-bottom:12px; font-size:12px; color:var(--text-muted);"></div>
     <table class="admin-table" id="usersTable">
       <thead>
         <tr><th>Usuário</th><th>Conta</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
@@ -1184,10 +1185,40 @@
       return true;
     });
 
+    // Resumo visível de "o que está filtrando agora" — some por padrão,
+    // só aparece com pelo menos 1 filtro/busca ativo. Sem isso, é fácil
+    // esquecer que a busca (ou um select de sessão anterior) ainda está
+    // preenchida ao trocar outro filtro, e ler o resultado pequeno como
+    // bug em vez de soma de filtros (HANDOFF Parte DM).
+    const activeFilterLabels = [];
+    if (term) activeFilterLabels.push(`busca "${term}"`);
+    if (statusFilter) activeFilterLabels.push(`status: ${{ online: 'Online', offline: 'Offline', blocked: 'Bloqueado' }[statusFilter]}`);
+    if (pageFilter) activeFilterLabels.push(`página: ${formatPageName(pageFilter)}`);
+    if (roleFilter) activeFilterLabels.push(`cargo: ${roleFilter}`);
+    if (analysisFilter) activeFilterLabels.push(`auditoria: ${analysisFilter === 'yes' ? 'com acesso' : 'sem acesso'}`);
+    if (activityFilter === 'never') activeFilterLabels.push('nunca usou o app');
+    const activeFiltersEl = document.getElementById('usersActiveFilters');
+    if (activeFilterLabels.length) {
+      activeFiltersEl.style.display = '';
+      activeFiltersEl.innerHTML = `Filtrando por: <b>${escapeHtml(activeFilterLabels.join(' + '))}</b>`;
+    } else {
+      activeFiltersEl.style.display = 'none';
+      activeFiltersEl.innerHTML = '';
+    }
+
     const body = document.getElementById('usersBody');
     const count = document.getElementById('usersCount');
     const pager = document.getElementById('usersPager');
-    count.textContent = String(usersRows.length);
+    // "N de T" quando algum filtro/busca está reduzindo o resultado —
+    // antes mostrava sempre o TOTAL geral aqui, mesmo com a tabela
+    // filtrada pra 1 linha só, o que já causou confusão real (usuário
+    // comparou "10 online" do card KPI lá em cima com só 1 linha aqui e
+    // achou que o filtro estava com bug — na real ele tinha esquecido
+    // que a busca por texto também estava ativa, reduzindo ainda mais.
+    // HANDOFF Parte DM).
+    count.textContent = filtered.length === usersRows.length
+      ? String(usersRows.length)
+      : `${filtered.length} de ${usersRows.length}`;
 
     if (!filtered.length) {
       body.innerHTML = `<tr><td colspan="7" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
