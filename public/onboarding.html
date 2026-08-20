@@ -206,6 +206,10 @@
      sempre com 0px de altura — nenhuma classe .revealed é adicionada
      aqui, mas a regra fica por consistência com as outras 15 telas. */
   #navSectionAdmin{ max-height:0; overflow:hidden; }
+  /* Mesma regra das outras 15 telas, por consistência — esta tela nunca
+     revela nada (sem lógica de auth, decisão deliberada), então os 2
+     itens ficam sempre em max-height:0, igual já era com `hidden`. */
+  #navAdminItem, #navConversationAnalysisItem{ max-height:0; overflow:hidden; padding-top:0; padding-bottom:0; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -440,7 +444,7 @@
          está na API (requireConversationAnalysisAccess em toda rota do
          router dedicado); isto é só pra não anunciar a existência da
          tela pra quem não tem acesso. -->
-    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
+    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
       <span class="nav-label">Auditoria de Conversas</span>
       <span class="nav-tip">Auditoria de Conversas</span>
@@ -450,7 +454,7 @@
          A proteção real está na API (requireSuperAdmin em toda rota
          /admin/*); isto é só pra não anunciar a existência da tela pra
          quem não tem acesso. -->
-    <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
+    <a href="/admin.html" class="nav-item" id="navAdminItem">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>
       <span class="nav-label">Admin</span>
       <span class="nav-tip">Admin</span>

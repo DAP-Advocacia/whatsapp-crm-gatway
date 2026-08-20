@@ -214,6 +214,21 @@
      0px de altura até a classe `.revealed` ser adicionada via JS. */
   #navSectionAdmin{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
   #navSectionAdmin.revealed{ max-height:300px; }
+  /* Os 2 ITENS dentro da seção (não só o container) também precisam da
+     mesma transição suave — antes usavam só o atributo `hidden`
+     (display:none instantâneo). Quando os 2 fetches de whoami completam
+     em momentos ligeiramente diferentes (o normal — são 2 requests
+     distintos), o segundo item ainda "pulava" dentro da seção já
+     expandida, mesmo depois da correção do container (usuário reportou
+     de novo, HANDOFF Parte DV). Zera padding junto com max-height pra a
+     expansão incluir o respiro do item, não só o conteúdo interno. */
+  #navAdminItem, #navConversationAnalysisItem{
+    max-height:0; overflow:hidden; padding-top:0; padding-bottom:0;
+    transition: max-height .2s ease, padding .2s ease;
+  }
+  #navAdminItem.revealed, #navConversationAnalysisItem.revealed{
+    max-height:44px; padding-top:10px; padding-bottom:10px;
+  }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -712,7 +727,7 @@
          está na API (requireConversationAnalysisAccess em toda rota do
          router dedicado); isto é só pra não anunciar a existência da
          tela pra quem não tem acesso. -->
-    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem" hidden>
+    <a href="/conversation-analysis.html" class="nav-item" id="navConversationAnalysisItem">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/></svg></span>
       <span class="nav-label">Auditoria de Conversas</span>
       <span class="nav-tip">Auditoria de Conversas</span>
@@ -722,7 +737,7 @@
          A proteção real está na API (requireSuperAdmin em toda rota
          /admin/*); isto é só pra não anunciar a existência da tela pra
          quem não tem acesso. -->
-    <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
+    <a href="/admin.html" class="nav-item" id="navAdminItem">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>
       <span class="nav-label">Admin</span>
       <span class="nav-tip">Admin</span>
@@ -1110,7 +1125,7 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navAdminItem');
-        if (item && data?.isSuperAdmin) { item.hidden = false; revealAdminSectionIfAnyItemVisible(); }
+        if (item && data?.isSuperAdmin) { item.classList.add('revealed'); revealAdminSectionIfAnyItemVisible(); }
       })
       .catch(() => {});
     // Auditoria de Conversas (HANDOFF Parte DK) — mesmo padrão do item
@@ -1121,7 +1136,7 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navConversationAnalysisItem');
-        if (item && data?.hasAccess) { item.hidden = false; revealAdminSectionIfAnyItemVisible(); }
+        if (item && data?.hasAccess) { item.classList.add('revealed'); revealAdminSectionIfAnyItemVisible(); }
       })
       .catch(() => {});
   }

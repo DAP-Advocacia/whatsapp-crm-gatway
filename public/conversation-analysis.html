@@ -201,6 +201,15 @@
      consistência com o seletor usado no restante do arquivo, mesmo que
      a classe `.revealed` nunca seja necessária aqui. */
   #navSectionAdmin{ max-height:none; overflow:visible; }
+  /* Só o item Admin (não Auditoria de Conversas, que já é sempre visível
+     nesta própria página) precisa da transição suave — antes usava só
+     `hidden` (display:none instantâneo), causando um pequeno "pulo"
+     quando a confirmação de super admin chegava (HANDOFF Parte DV). */
+  #navAdminItem{
+    max-height:0; overflow:hidden; padding-top:0; padding-bottom:0;
+    transition: max-height .2s ease, padding .2s ease;
+  }
+  #navAdminItem.revealed{ max-height:44px; padding-top:10px; padding-bottom:10px; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -528,7 +537,7 @@
       <span class="nav-label">Auditoria de Conversas</span>
       <span class="nav-tip">Auditoria de Conversas</span>
     </a>
-    <a href="/admin.html" class="nav-item" id="navAdminItem" hidden>
+    <a href="/admin.html" class="nav-item" id="navAdminItem">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/></svg></span>
       <span class="nav-label">Admin</span>
       <span class="nav-tip">Admin</span>
@@ -838,7 +847,7 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navAdminItem');
-        if (item && data?.isSuperAdmin) item.hidden = false;
+        if (item && data?.isSuperAdmin) item.classList.add('revealed');
       })
       .catch(() => {});
   }

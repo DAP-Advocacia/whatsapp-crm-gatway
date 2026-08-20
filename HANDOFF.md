@@ -7984,3 +7984,52 @@ no código testado aqui. Próximo passo nesse caso: pedir prints do
 e confirmar a URL exata que aparece na barra de endereço (se o
 navegador mostrar isso dentro do iframe do Bitrix).
 
+### Parte DV — "Pisca" na sidebar persistia mesmo com a correção da Parte DQ (2026-08-20)
+
+Usuário reportou de novo, depois da correção anterior (transição
+suave só no CONTAINER `#navSectionAdmin`, Parte DQ) já confirmada em
+produção (container de 25min de vida, já com o código). Tentou
+mandar um vídeo mostrando o problema, mas não chegou (só os 2 stills
+anexados, sem relação clara com o bug em si).
+
+**Causa provável**: a correção da Parte DQ suavizou só a SEÇÃO (o
+container que reúne label + os 2 itens) — mas os 2 ITENS individuais
+dentro dela (`navAdminItem`, `navConversationAnalysisItem`) ainda
+usavam o atributo `hidden` puro (`display:none` instantâneo). Os 2
+fetches de whoami (super admin, grant de Auditoria) são requests de
+rede DISTINTOS — completam em momentos ligeiramente diferentes, o
+normal. Cenário: fetch 1 completa → item 1 revelado → seção já
+expande (container). Fetch 2 completa alguns ms depois → item 2
+aparece DENTRO da seção JÁ EXPANDIDA, mas de forma instantânea (sem
+transição própria) — um "pulo" de conteúdo residual, menor que o
+anterior mas ainda visível, exatamente na área que a pessoa estava
+olhando.
+
+**Correção**: aplicada a MESMA técnica (`max-height` + `transition`)
+também nos 2 ITENS individuais, não só no container — precisou de um
+seletor por ID (`#navAdminItem, #navConversationAnalysisItem`, NÃO
+`.nav-item` genérico, que afetaria todo o resto da navegação).
+`max-height:44px` quando `.revealed` (altura real de `.nav-item`:
+ícone de 19px + padding de 10px cada lado ≈ 39px, arredondado com
+margem). Trocado TAMBÉM o JS: `item.hidden = false` → `item.classList.add('revealed')`,
+nas 16 telas (14 "padrão" via `revealAdminSectionIfAnyItemVisible`,
+`admin.html` com a lógica síncrona própria, `conversation-analysis.html`
+só pro item Admin — o item Auditoria ali já é sempre visível, sem
+depender de fetch nenhum). Removido o atributo `hidden` do HTML dos
+2 itens em todas as 16 (o estado escondido agora é 100% controlado
+pelo CSS via `max-height:0` por padrão, não mais pelo atributo).
+
+**Validação**: `vm.Script` + checagem automatizada (nenhum resíduo
+de `.hidden = false` pros itens, nenhum atributo `hidden` solto no
+HTML deles, regra CSS `.revealed` presente) nas 16 telas. Teste
+funcional com mock de `classList` simulando os 2 fetches completando
+em momentos diferentes — confirma que cada item ganha a classe de
+forma independente, sem esperar o outro.
+
+**Ainda não confirmado**: se isso resolve o "pisca" por completo, já
+que a causa exata nunca foi vista diretamente (nem vídeo nem
+descrição detalhada chegaram) — é a correção mais plausível dado o
+que já foi eliminado (cor, Parte DP; container da seção, Parte DQ).
+Se persistir depois deste deploy, o vídeo (ou uma descrição de ONDE
+exatamente na tela o pisca aparece) é necessário pra continuar.
+
