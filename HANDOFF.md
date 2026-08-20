@@ -7873,3 +7873,60 @@ sempre* (dívida já registrada na Parte BS — foto trocada no WhatsApp
 não é revalidada). O objetivo aqui era só a velocidade da PRIMEIRA
 busca, não o TTL do cache.
 
+### Parte DS — "Ver conversas" na tabela de Usuários do Admin (2026-08-20)
+
+Usuário pediu uma conexão entre a tabela de Usuários (Admin) e a
+Auditoria de Conversas, que leve direto às conversas ATENDIDAS por
+aquele usuário específico. Implementado com 2 partes:
+
+**1) `conversation-analysis.html` passa a ler o filtro de atendente
+da própria URL** — antes, `state.filters` só era populado quando o
+usuário clicava em "Aplicar filtros" no formulário; a tela sempre
+abria mostrando tudo. Função nova, `applyFiltersFromUrl()`, lê
+`?sentBy=<ownerId>` (via `URLSearchParams(window.location.search)`)
+1x no boot, depois de `loadInstanceFilter()` já ter populado os
+selects. Seta o valor no `<select id="filterSentBy">` (reflexo
+visual, quando existe a opção) E em `state.filters.sentBy`
+diretamente (o filtro REAL, aplicado na busca) — os dois
+separados de propósito: um `ownerId` sem nenhuma instância
+conectada nunca aparece como opção no select (que é populado a
+partir de `GET /instances`, ver `loadInstanceFilter`), mas ainda é
+um valor válido pra filtrar `messages.sent_by` no backend, então o
+filtro se aplica de qualquer forma mesmo sem seleção visível.
+
+**2) Link novo na tabela de Usuários** (`admin.html`,
+`renderUsers()`): "Ver conversas", ao lado de Detalhado/Revogar/
+Auditoria — `<a href="/conversation-analysis.html?sentBy=<ownerId>">`,
+navegação normal (`window.location.href`, mesmo padrão já usado por
+"Enviar mensagem no WhatsApp" no modal Detalhado — nenhum link
+interno do app abre aba nova). Sem checagem de permissão adicional:
+quem está vendo esta tabela já é super admin (só super admin acessa
+`/admin.html`), e super admin sempre tem acesso à Auditoria de
+Conversas.
+
+**Validação**: `vm.Script` nas 2 telas. `applyFiltersFromUrl` testada
+isolada com mock de `document`/`URLSearchParams` — 2 cenários:
+`sentBy` presente na URL (select e `state.filters` setados, demais
+filtros ficam vazios) e ausente (early return, `state.filters`
+intacto).
+
+### Parte DT — Ícone mais detalhado pro menu do Bitrix (2026-08-20)
+
+Usuário pediu um ícone mais elaborado pro app no menu lateral do
+Bitrix24 (hoje é a letra "D" genérica). Investigado antes de
+qualquer mudança: **esse ícone não é configurável em nenhum arquivo
+deste repositório** — é uma propriedade do registro do app no
+painel de desenvolvedor do Bitrix (Aplicações → Desenvolvedor de
+aplicativos → editar o app → campo de ícone), fora do alcance de
+qualquer código aqui. Confirmado com o usuário: ele quer que a
+IMAGEM seja criada aqui, pra ele mesmo subir manualmente no painel
+do Bitrix depois.
+
+Desenhado como SVG (bolha de chat + raio dourado, mesma paleta do
+app — `#d8ab4f`/fundo `#15120d`) e exportado em PNG (512/256/128px)
+via `sharp` instalado ISOLADO no scratchpad da sessão (não é
+dependência do projeto, nunca tocou o `package.json` nem
+`node_modules` do repositório). Arquivos ficam fora do repositório —
+não fazem parte de nenhum commit, o usuário baixa direto do
+scratchpad pra fazer o upload no Bitrix.
+

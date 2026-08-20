@@ -1286,6 +1286,14 @@
       const analysisAction = u.hasConversationAnalysisAccess
         ? `<button class="action-link" data-revoke-analysis="${escapeHtml(u.ownerId)}">Auditoria: Ativo</button>`
         : `<button class="action-link" data-grant-analysis="${escapeHtml(u.ownerId)}">Auditoria: Conceder</button>`;
+      // Atalho pra ver as conversas ATENDIDAS por esta pessoa (filtro por
+      // messages.sent_by, não por instância/dono) direto na Auditoria de
+      // Conversas — quem está nesta tabela já é super admin, então já tem
+      // acesso garantido a essa tela, sem precisar checar de novo (HANDOFF
+      // Parte DS). Mesmo padrão de navegação (window.location.href, não
+      // aba nova) já usado por "Enviar mensagem no WhatsApp" no modal
+      // Detalhado, pra manter consistência com o resto do app.
+      const viewConversationsAction = `<a class="action-link" href="/conversation-analysis.html?sentBy=${encodeURIComponent(u.ownerId)}">Ver conversas</a>`;
       return `
         <tr>
           <td>
@@ -1307,6 +1315,7 @@
               <button class="action-link" data-detail="${escapeHtml(u.ownerId)}">Detalhado</button>
               ${revokeAction}
               ${analysisAction}
+              ${viewConversationsAction}
             </div>
           </td>
         </tr>

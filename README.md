@@ -1229,6 +1229,12 @@ acesso, tempo total (30d), página favorita e bloqueio.
   normalizado>` — reaproveita o deep-link já existente em `chat.html`
   (usado hoje também por `notifications.html`), sem UI de chat duplicada
   dentro do modal.
+- **Ver conversas** (HANDOFF Parte DS, 2026-08-20): link na própria
+  linha da tabela (não dentro do modal), pra
+  `/conversation-analysis.html?sentBy=<ownerId>` — abre a Auditoria de
+  Conversas já filtrada pelas conversas que ESSA pessoa atendeu
+  (`messages.sent_by`, não pela instância/dono). A tela de Auditoria lê
+  esse parâmetro 1x no boot (`applyFiltersFromUrl`).
 - **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
   **inteiro** (tabela `blocked_owners`) — `POST
   /admin/users/:ownerId/block`|`unblock`. Verificado dentro de

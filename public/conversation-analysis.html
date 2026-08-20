@@ -1102,6 +1102,25 @@
     loadConversations();
   });
 
+  // Permite abrir esta tela já filtrada via link — usado pela tabela de
+  // Usuários do Admin ("Ver conversas", HANDOFF Parte DS) pra ir direto
+  // às conversas de UM atendente específico, sem precisar escolher o
+  // filtro manualmente de novo. Só lê a URL 1x no boot, depois disso o
+  // fluxo normal de "Aplicar filtros" funciona igual sempre funcionou.
+  // Seta `state.filters.sentBy` sempre (o filtro real, aplicado na busca)
+  // e só tenta refletir no <select> se a opção existir ali — um
+  // ownerId sem nenhuma instância conectada nunca aparece na lista de
+  // "atendentes conhecidos" (populada a partir de instâncias, ver
+  // loadInstanceFilter), mas ainda é um sentBy válido pra filtrar por
+  // mensagem (`messages.sent_by`), então o filtro se aplica de qualquer
+  // forma, mesmo sem seleção visível no select.
+  function applyFiltersFromUrl() {
+    const sentBy = new URLSearchParams(window.location.search).get('sentBy');
+    if (!sentBy) return;
+    document.getElementById('filterSentBy').value = sentBy;
+    state.filters = { ...currentFiltersFromForm(), sentBy };
+  }
+
   async function init() {
     try {
       myOwnerId = await resolveOwner();
@@ -1109,6 +1128,7 @@
       revealAdminNavItemIfSuperAdmin();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
       await loadInstanceFilter();
+      applyFiltersFromUrl();
       await Promise.all([loadMetrics(), loadConversations()]);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
