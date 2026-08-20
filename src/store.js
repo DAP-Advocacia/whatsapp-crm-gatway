@@ -36,8 +36,8 @@ async function addMessage(sessionId, phone, message, dealId, pushName) {
 
   const { rowCount } = await pool.query(
     `insert into messages
-       (conversation_id, wa_message_id, direction, type, text, media_url, mimetype, status, created_at, reply_to_id, file_name, sent_by, sent_by_name)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       (conversation_id, wa_message_id, direction, type, text, media_url, mimetype, status, created_at, reply_to_id, file_name, sent_by, sent_by_name, group_sender_phone, group_sender_name)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      on conflict (conversation_id, wa_message_id) do nothing`,
     [
       conversationId,
@@ -53,6 +53,11 @@ async function addMessage(sessionId, phone, message, dealId, pushName) {
       message.fileName ?? null,
       message.sentBy ?? null,
       message.sentByName ?? null,
+      // Só preenchido em mensagem 'in' de grupo de card (quem mandou DENTRO
+      // do grupo, não a conversa em si — ver bypass em whatsapp.js e
+      // db/schema.sql). DM nunca preenche isso.
+      message.groupSenderPhone ?? null,
+      message.groupSenderName ?? null,
     ]
   );
 
@@ -77,6 +82,8 @@ async function getHistory(sessionId, phone) {
          m.file_name as "fileName",
          m.sent_by as "sentBy",
          m.sent_by_name as "sentByName",
+         m.group_sender_phone as "groupSenderPhone",
+         m.group_sender_name as "groupSenderName",
          m.created_at as "createdAt"
        from messages m
        join conversations c on c.id = m.conversation_id
@@ -685,12 +692,18 @@ async function setAvatarUrl(sessionId, phone, url) {
 // ---------------------------------------------------------------
 // Grupos de WhatsApp (ver src/whatsapp.js — WhatsAppGateway.createGroup).
 // ---------------------------------------------------------------
-async function createGroupRecord(id, sessionId, name, participantCount) {
+// `opts.source`/`opts.dealId` são novos e opcionais (default preserva o
+// comportamento de sempre — grupo "manual", sem negócio associado) — usados
+// pela feature de "Criar grupo" do card (src/routes/cardGroup.js), que passa
+// { source: 'card', dealId }. POST /groups (tela Contatos/Chat) continua
+// chamando sem o 3º argumento, sem nenhuma mudança de comportamento.
+async function createGroupRecord(id, sessionId, name, participantCount, opts = {}) {
+  const { source = 'manual', dealId = null } = opts;
   await pool.query(
-    `insert into wa_groups (id, session_id, name, participant_count)
-     values ($1, $2, $3, $4)
-     on conflict (id) do update set name = $3, participant_count = $4`,
-    [id, sessionId, name, participantCount]
+    `insert into wa_groups (id, session_id, name, participant_count, source, deal_id)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (id) do update set name = $3, participant_count = $4, source = $5, deal_id = $6`,
+    [id, sessionId, name, participantCount, source, dealId]
   );
 }
 
@@ -703,6 +716,76 @@ async function listGroups(sessionIds) {
     [sessionIds]
   );
   return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+}
+
+// Grupo de card já criado pra este negócio, se houver — alimenta o switch
+// "Cliente"/"Grupo" na aba do card (GET /api/card-group) decidir se mostra
+// a opção "Grupo". `sessionIds` é a lista de instâncias do dono autenticado
+// (mesmo padrão de posse do resto do app, nunca busca fora disso).
+async function getCardGroupForDeal(sessionIds, dealId) {
+  const { rows } = await pool.query(
+    `select id, session_id as "sessionId", name, participant_count as "participantCount", created_at as "createdAt"
+     from wa_groups
+     where session_id = any($1::text[]) and deal_id = $2 and source = 'card'
+     limit 1`,
+    [sessionIds, dealId]
+  );
+  if (!rows.length) return null;
+  return { ...rows[0], createdAt: rows[0].createdAt.toISOString() };
+}
+
+// Direção oposta de getCardGroupForDeal (que busca "o grupo deste
+// negócio") — aqui já se tem o JID do grupo (é o "phone" de uma mensagem
+// recebida de grupo de card, ver src/server.js onMessage) e se precisa do
+// negócio dele, pra logar na timeline/gerar dealId corretamente (nunca via
+// getDealForPhone, que é por telefone de CLIENTE — um JID de grupo nunca
+// teria linha lá com esse sentido).
+async function getDealForGroup(groupId) {
+  const { rows } = await pool.query(`select deal_id from wa_groups where id = $1`, [groupId]);
+  return rows[0]?.deal_id || null;
+}
+
+// Usado pelo bypass condicional em src/whatsapp.js (WhatsAppGateway,
+// injetado via construtor — ver src/sessions.js/src/server.js) — decide se
+// uma mensagem recebida de um JID de grupo deve ser processada/salva
+// (source='card') ou descartada por completo, como qualquer outro grupo
+// (comportamento padrão desde antes desta feature, decisão deliberada do
+// usuário — ver comentário em whatsapp.js).
+async function isCardGroupId(groupId) {
+  const { rows } = await pool.query(
+    `select 1 from wa_groups where id = $1 and source = 'card' limit 1`,
+    [groupId]
+  );
+  return rows.length > 0;
+}
+
+// ---------------------------------------------------------------
+// Nota interna — visível SÓ para internos, NUNCA enviada ao WhatsApp nem
+// exposta pelas rotas normais de histórico (ver db/schema.sql,
+// src/routes/internalNotes.js). Serve conversa 1-a-1 e grupo-com-cliente
+// igualmente — ambos já são linhas de `conversations`.
+// ---------------------------------------------------------------
+async function listInternalNotes(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select n.id, n.text, n.author_owner_id as "authorOwnerId", n.author_name as "authorName", n.created_at as "createdAt"
+     from internal_notes n
+     join conversations c on c.id = n.conversation_id
+     where c.session_id = $1 and c.phone = $2
+     order by n.created_at asc`,
+    [sessionId, phone]
+  );
+  return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+}
+
+async function addInternalNote(sessionId, phone, { text, authorOwnerId, authorName }) {
+  const conversationId = await getOrCreateConversation(sessionId, phone, null, null);
+  const { rows } = await pool.query(
+    `insert into internal_notes (conversation_id, text, author_owner_id, author_name)
+     values ($1, $2, $3, $4)
+     returning id, created_at as "createdAt"`,
+    [conversationId, text, authorOwnerId, authorName || null]
+  );
+  return { id: rows[0].id, text, authorOwnerId, authorName: authorName || null, createdAt: rows[0].createdAt.toISOString() };
 }
 
 // "Esse telefone já me respondeu alguma vez de verdade?" — usado antes de
@@ -760,5 +843,10 @@ module.exports = {
   setAvatarUrl,
   createGroupRecord,
   listGroups,
+  getCardGroupForDeal,
+  getDealForGroup,
+  isCardGroupId,
+  listInternalNotes,
+  addInternalNote,
   classifyRecipients,
 };

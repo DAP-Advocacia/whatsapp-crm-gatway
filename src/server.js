@@ -32,6 +32,8 @@ const { createAbTestsRouter } = require('./routes/abTests');
 const { createSuggestionsRouter } = require('./routes/suggestions');
 const { createSettingsRouter } = require('./routes/settings');
 const { createConversationAnalysisRouter } = require('./routes/conversationAnalysis');
+const { createCardGroupRouter } = require('./routes/cardGroup');
+const { createInternalNotesRouter } = require('./routes/internalNotes');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -355,13 +357,25 @@ function broadcastStatus(sessionId, status) {
 // ---------------------------------------------------------------
 const sessions = new SessionManager({
   baseFolder: AUTH_FOLDER,
+  isCardGroup: store.isCardGroupId,
   onStatus: (sessionId, status) => {
     console.log(`[whatsapp:${sessionId}] status:`, status);
     broadcastStatus(sessionId, status);
   },
-  onMessage: async (sessionId, phone, message, pushName, isHistory) => {
+  onMessage: async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
     try {
-      const dealId = await store.getDealForPhone(sessionId, phone);
+      // Mensagem de GRUPO de card (feature de Negócio) — identificada por
+      // senderPhone vir preenchido (só acontece nesse caso, ver
+      // WhatsAppGateway._processIncomingMessage). O "phone" aqui já é o
+      // JID do grupo, não um telefone de cliente — dealId vem do PRÓPRIO
+      // grupo (wa_groups.deal_id), nunca de getDealForPhone (que é por
+      // telefone de cliente e nunca teria linha pra um JID de grupo).
+      const isGroupMsg = !!senderPhone;
+      const dealId = isGroupMsg ? await store.getDealForGroup(phone) : await store.getDealForPhone(sessionId, phone);
+      if (isGroupMsg) {
+        message.groupSenderPhone = senderPhone;
+        message.groupSenderName = senderName;
+      }
       const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName);
       if (!isNew) return; // já tínhamos essa mensagem (ex: eco da que nós mesmos enviamos)
 
@@ -382,15 +396,21 @@ const sessions = new SessionManager({
       // num backfill grande, não é necessário pra correção. Best-effort:
       // uma falha aqui nunca deve impedir salvar/notificar a mensagem em
       // si — é um efeito colateral, não o caminho principal.
-      const contactSyncKey = `${sessionId}::${phone}`;
-      if (!contactSyncedThisRun.has(contactSyncKey)) {
-        contactSyncedThisRun.add(contactSyncKey);
-        instancesStore.ownerOf(sessionId)
-          .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name: pushName, dealId }))
-          .catch((err) => {
-            contactSyncedThisRun.delete(contactSyncKey); // falhou -> tenta de novo na próxima mensagem
-            console.error('[contacts] falha ao sincronizar contato automaticamente:', err.message);
-          });
+      // Sync automático de contato não se aplica a grupo — "phone" é um JID
+      // de grupo (@g.us), não um telefone de cliente; não existe "contato"
+      // pra cadastrar automaticamente aqui (os participantes já foram
+      // resolvidos individualmente na criação do grupo, ver cardGroup.js).
+      if (!isGroupMsg) {
+        const contactSyncKey = `${sessionId}::${phone}`;
+        if (!contactSyncedThisRun.has(contactSyncKey)) {
+          contactSyncedThisRun.add(contactSyncKey);
+          instancesStore.ownerOf(sessionId)
+            .then((ownerId) => contactsStore.upsertContact(ownerId, { phone, name: pushName, dealId }))
+            .catch((err) => {
+              contactSyncedThisRun.delete(contactSyncKey); // falhou -> tenta de novo na próxima mensagem
+              console.error('[contacts] falha ao sincronizar contato automaticamente:', err.message);
+            });
+        }
       }
 
       // Mensagem de histórico (backfill via messaging-history.set, ver
@@ -716,6 +736,8 @@ app.use('/api/ab-tests', requireAuth, createAbTestsRouter());
 app.use('/api/suggestions', requireAuth, createSuggestionsRouter({ sessions }));
 app.use('/api/settings', requireAuth, createSettingsRouter());
 app.use('/api/conversation-analysis', requireAuth, createConversationAnalysisRouter());
+app.use('/api/card-group', requireAuth, createCardGroupRouter({ sessions }));
+app.use('/api/internal-notes', requireAuth, createInternalNotesRouter({ broadcast }));
 
 // ---------------------------------------------------------------
 // Sobe HTTP + WebSocket no mesmo servidor/porta

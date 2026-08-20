@@ -549,6 +549,115 @@
   .toast.success{ border-left-color: var(--green); }
   .toast.error{ border-left-color: var(--red); }
   @keyframes toast-in{ from{ opacity:0; transform:translateY(10px); } to{ opacity:1; transform:none; } }
+
+  /* ---------- Grupo de card (feature "Criar grupo") + Nota interna ---------- */
+  /* Switch Cliente/Grupo no cabeçalho — só aparece quando já existe um
+     grupo de card criado pra este negócio (ver loadCardGroup). */
+  .view-switch{
+    display: flex; background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 100px; padding: 2px; flex-shrink: 0;
+  }
+  .view-switch button{
+    border: none; background: none; color: var(--text-muted); font-family: inherit;
+    font-size: 11.5px; padding: 6px 12px; border-radius: 100px; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .view-switch button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
+  .view-switch button:not(.active):hover{ color: var(--gold); }
+
+  .icon-btn.has-notes{ border-color: var(--gold-dim); color: var(--gold); }
+
+  /* Overlay/modal — mesmo padrão visual de chat.html (.overlay/.modal),
+     replicado aqui (index.html não importa CSS/JS de outra tela). */
+  .overlay{
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
+    align-items: center; justify-content: center; z-index: 200; padding: 20px;
+  }
+  .modal{
+    background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
+    width: 100%; max-width: 420px; max-height: 85vh; display: flex; flex-direction: column;
+    overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal-head{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .modal-head h3{ font-size: 15px; margin: 0; }
+  .modal-close{ background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 18px; padding: 2px 6px; }
+  .modal-close:hover{ color: var(--text); }
+  .modal-body{ padding: 16px 18px; overflow-y: auto; flex: 1; }
+  .modal-actions{
+    display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px;
+    border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .modal input[type="text"]{
+    width: 100%; height: 38px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text); font-family: inherit; font-size: 13px;
+    padding: 0 12px; margin-bottom: 14px;
+  }
+  .modal input[type="text"]:focus{ outline: none; border-color: var(--gold-dim); }
+  .modal label.field-label{ display: block; font-size: 11.5px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .03em; }
+  .btn-primary{
+    background: var(--gold); color: #1a1408; border: none; border-radius: 9px;
+    padding: 9px 18px; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .btn-primary:disabled{ opacity: .5; cursor: not-allowed; }
+  .btn-secondary{
+    background: none; color: var(--text-muted); border: 1px solid var(--border); border-radius: 9px;
+    padding: 9px 18px; font-family: inherit; font-size: 13px; cursor: pointer;
+  }
+  .btn-secondary:hover{ color: var(--text); border-color: var(--gold-dim); }
+
+  .participant-row{
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--border);
+  }
+  .participant-row:last-child{ border-bottom: none; }
+  .participant-role{ font-size: 10.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .03em; }
+  .participant-name{ font-size: 13px; color: var(--text); }
+  .participant-phone{ font-size: 11.5px; color: var(--text-muted); }
+  .participant-missing{ font-size: 11.5px; color: var(--red); }
+
+  /* Bolha recebida num grupo tem N remetentes possíveis (DM sempre teve
+     só 1) — nome de quem mandou aparece acima da bolha, só no modo grupo. */
+  .group-sender-label{
+    font-size: 11px; color: var(--gold-dim); font-weight: 600; margin: 0 0 3px 2px;
+  }
+
+  /* Drawer de nota interna — visual DELIBERADAMENTE distinto de mensagem
+     real (fundo âmbar, ícone de cadeado), pra nunca ser confundido com
+     algo que o cliente também vê. */
+  .notes-drawer{
+    position: fixed; top: 0; right: 0; bottom: 0; width: 100%; max-width: 360px;
+    background: var(--bg); border-left: 1px solid var(--border); z-index: 190;
+    display: flex; flex-direction: column; box-shadow: -20px 0 60px rgba(0,0,0,.4);
+  }
+  .notes-drawer-head{
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .notes-drawer-head h3{ font-size: 14px; margin: 0; }
+  .notes-drawer-warning{
+    background: rgba(216,171,79,.08); border-bottom: 1px solid var(--border);
+    color: var(--gold-dim); font-size: 11px; padding: 8px 18px; flex-shrink: 0;
+  }
+  .notes-list{ flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .note-item{
+    background: rgba(216,171,79,.07); border: 1px solid rgba(216,171,79,.22);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .note-item-author{ font-size: 11px; color: var(--gold-dim); font-weight: 600; margin-bottom: 3px; }
+  .note-item-text{ font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .note-item-time{ font-size: 10.5px; color: var(--text-faint); margin-top: 5px; }
+  .notes-composer{
+    display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .notes-composer textarea{
+    flex: 1; resize: none; border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text); border-radius: 9px; padding: 8px 12px; font-family: inherit; font-size: 13px;
+    max-height: 90px;
+  }
+  .notes-composer textarea:focus{ outline: none; border-color: var(--gold-dim); }
 </style>
 </head>
 <body>
@@ -564,6 +673,17 @@
   </div>
 </div>
 
+<!-- Modal "Criar grupo" — feature de grupo por card do negócio.
+     Conteúdo real montado dinamicamente por renderCreateGroupModal(). -->
+<div class="overlay" id="createGroupOverlay" hidden>
+  <div class="modal" id="createGroupModal"></div>
+</div>
+
+<!-- Drawer de nota interna — visível SÓ para internos, nunca enviada ao
+     WhatsApp (ver src/routes/internalNotes.js). Conteúdo montado por
+     renderNotesDrawer(). -->
+<div class="notes-drawer" id="notesDrawer" hidden></div>
+
 <script src="https://api.bitrix24.com/api/v1/"></script>
 <script>
 (function () {
@@ -572,6 +692,11 @@
   // CONFIGURAÇÃO — ajuste para o endereço real do seu backend
   // =========================================================
   const API_BASE = window.location.origin + '/api/whatsapp';
+  // Raiz de /api, sem o sufixo /whatsapp — usada pelas rotas novas de
+  // "Criar grupo" (/api/card-group) e nota interna (/api/internal-notes),
+  // que vivem em routers próprios (ver src/routes/cardGroup.js,
+  // src/routes/internalNotes.js), não dentro de routes/whatsapp.js.
+  const API_ROOT = window.location.origin + '/api';
 
   // O ngrok grátis intercepta requisições do navegador com uma página
   // de aviso (HTML), o que faz o res.json() quebrar. Este header pula
@@ -635,11 +760,39 @@
     replyingTo: null,      // { id, text, type, direction } — mensagem sendo citada na próxima resposta
     socket: null,
     qrTimer: null,
+    // Grupo de card (feature "Criar grupo") já existente pra este negócio,
+    // se houver — { id, name, ... } | null. Alimenta o switch Cliente/Grupo
+    // no cabeçalho (ver renderChat/loadCardGroup).
+    cardGroup: null,
+    // 'client' (padrão, comportamento de sempre) | 'group' — qual "phone"
+    // está carregado no momento. clientPhone guarda o telefone do CLIENTE
+    // sempre (mesmo quando viewMode='group', state.phone vira o JID do
+    // grupo) — necessário pra "voltar" pro modo Cliente sem perder o
+    // telefone original.
+    viewMode: 'client',
+    clientPhone: null,
+    internalNotesOpen: false,
+    internalNotes: [],
   };
 
   // Emoji de reação com o picker aberto no momento (só um por vez).
   let openReactionPickerId = null;
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Nome do usuário atual — usado só como rótulo de autor ao adicionar uma
+  // nota interna (mesmo padrão de chat.html::myBitrixName, ver
+  // submitInternalNote). Best-effort: sem BX24/erro, fica null e a nota
+  // é criada sem nome de autor (author_owner_id do backend continua
+  // preenchido de qualquer forma, ver src/routes/internalNotes.js).
+  let myBitrixName = null;
+  function fetchMyBitrixName() {
+    if (!window.BX24) return;
+    BX24.callMethod('user.current', {}, (result) => {
+      if (result.error()) return;
+      const u = result.data();
+      myBitrixName = [u.NAME, u.LAST_NAME].filter(Boolean).join(' ') || null;
+    });
+  }
 
   // Lembra qual instância foi escolhida pra cada negócio (só importa quando
   // o usuário tem mais de uma) — assim reabrir a mesma conversa não obriga a
@@ -747,6 +900,19 @@
           </div>
         </div>
         <div class="header-actions">
+          ${state.cardGroup ? `
+            <div class="view-switch" id="viewSwitch">
+              <button type="button" data-view="client" class="${state.viewMode === 'client' ? 'active' : ''}">Cliente</button>
+              <button type="button" data-view="group" class="${state.viewMode === 'group' ? 'active' : ''}">Grupo</button>
+            </div>
+          ` : (state.entityType === 'deal' ? `
+            <button class="icon-btn" id="createGroupBtn" title="Criar grupo de WhatsApp com Responsável, Verificação e cliente">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </button>
+          ` : '')}
+          <button class="icon-btn${state.internalNotes.length ? ' has-notes' : ''}" id="notesBtn" title="Nota interna (não visível ao cliente)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          </button>
           ${state.instances.length > 1 ? `
             <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp">
               ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
@@ -821,6 +987,18 @@
     if (instanceSelectEl) {
       instanceSelectEl.addEventListener('change', (e) => switchInstance(e.target.value));
     }
+
+    const createGroupBtn = document.getElementById('createGroupBtn');
+    if (createGroupBtn) createGroupBtn.addEventListener('click', () => openCreateGroupModal());
+
+    const viewSwitch = document.getElementById('viewSwitch');
+    if (viewSwitch) {
+      viewSwitch.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => switchViewMode(btn.dataset.view));
+      });
+    }
+
+    document.getElementById('notesBtn').addEventListener('click', () => openNotesDrawer());
   }
 
   function statusLabel() {
@@ -857,8 +1035,16 @@
       const mine = msg.direction === 'out';
       const quotedHtml = msg.replyToId ? renderQuotedBlock(msg.replyToId) : '';
       const reactionMine = msg.reactionBy === 'out';
+      // Bolha recebida no modo Grupo tem N remetentes possíveis (DM sempre
+      // teve só 1) — nome de quem mandou aparece acima do conteúdo. Só
+      // preenchido em mensagem 'in' de grupo de card (ver
+      // src/whatsapp.js/db/schema.sql).
+      const senderLabel = !mine && (msg.groupSenderName || msg.groupSenderPhone)
+        ? `<div class="group-sender-label">${escapeHtml(msg.groupSenderName || msg.groupSenderPhone)}</div>`
+        : '';
       const bubbleHtml = `
         <div class="bubble">
+          ${senderLabel}
           ${quotedHtml}
           ${renderBubbleBody(msg)}
           <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
@@ -1588,8 +1774,17 @@
       const data = await res.json();
       state.messages = data.messages || [];
       state.connectionStatus = data.connectionStatus || 'unknown';
+      // Grupo de card (feature "Criar grupo") já existente pra este
+      // negócio, se houver — só faz sentido na aba de Negócio (Responsável/
+      // Verificação/campo customizado só existem em deal). Recarregado a
+      // cada loadHistory (custo baixo, muda raramente) pra pegar um grupo
+      // criado em outra aba/sessão sem precisar recarregar a página.
+      if (state.entityType === 'deal' && state.viewMode === 'client') {
+        await loadCardGroup();
+      }
       renderChat();
       connectRealtime();
+      loadInternalNotes(); // best-effort, não bloqueia o resto do boot
     } catch (err) {
       console.error(err);
       renderState('error', {
@@ -1597,6 +1792,223 @@
         desc: 'Verifique a conexão com o servidor de WhatsApp e tente novamente.',
         retry: () => loadHistory(),
       });
+    }
+  }
+
+  // ---------------------------------------------------------
+  // Grupo de card ("Criar grupo") + switch Cliente/Grupo
+  // ---------------------------------------------------------
+  async function loadCardGroup() {
+    try {
+      const res = await apiFetch(`${API_ROOT}/card-group?session=${encodeURIComponent(state.session)}&dealId=${encodeURIComponent(state.dealId)}`);
+      if (!res.ok) { state.cardGroup = null; return; }
+      const data = await res.json();
+      state.cardGroup = data.group || null;
+    } catch (err) {
+      console.error('[cardGroup] falha ao verificar grupo existente:', err.message);
+      state.cardGroup = null;
+    }
+  }
+
+  // Troca entre ver a conversa do CLIENTE (telefone individual, comportamento
+  // de sempre) e a conversa do GRUPO (JID do grupo como "phone") — as duas
+  // convivem, nenhuma substitui a outra (ver HANDOFF, feature "Criar grupo").
+  async function switchViewMode(mode) {
+    if (mode === state.viewMode || !state.cardGroup) return;
+    if (mode === 'group') {
+      state.clientPhone = state.phone; // guarda pra poder voltar
+      state.phone = state.cardGroup.id; // JID do grupo
+    } else {
+      state.phone = state.clientPhone || state.phone;
+    }
+    state.viewMode = mode;
+    await loadHistory();
+  }
+
+  // ---------------------------------------------------------
+  // Modal "Criar grupo"
+  // ---------------------------------------------------------
+  async function openCreateGroupModal() {
+    const overlay = document.getElementById('createGroupOverlay');
+    const modal = document.getElementById('createGroupModal');
+    overlay.hidden = false;
+    modal.innerHTML = compactHtml(`
+      <div class="modal-head"><h3>Criar grupo de WhatsApp</h3><button class="modal-close" id="createGroupCloseBtn" type="button">&times;</button></div>
+      <div class="modal-body"><div class="spinner" style="margin:20px auto;"></div></div>
+    `);
+    document.getElementById('createGroupCloseBtn').addEventListener('click', () => { overlay.hidden = true; });
+
+    let participants = [];
+    try {
+      const res = await apiFetch(`${API_ROOT}/card-group/participants?session=${encodeURIComponent(state.session)}&dealId=${encodeURIComponent(state.dealId)}`);
+      if (!res.ok) throw new Error('falha ao resolver participantes');
+      const data = await res.json();
+      participants = data.participants || [];
+    } catch (err) {
+      console.error('[cardGroup] falha ao carregar participantes:', err.message);
+      modal.querySelector('.modal-body').innerHTML = `<p style="color:var(--red);font-size:13px;">Não foi possível carregar os participantes. Tente novamente.</p>`;
+      return;
+    }
+
+    renderCreateGroupModal(participants);
+  }
+
+  const ROLE_LABELS = { assigned: 'Responsável', verification: 'Verificação de contratos', requester: 'Você' };
+
+  function renderCreateGroupModal(participants) {
+    const modal = document.getElementById('createGroupModal');
+    const resolvedCount = participants.filter((p) => p.resolved).length;
+    const suggestedName = state.contactName ? `${state.contactName} — Negócio` : 'Grupo do negócio';
+
+    modal.innerHTML = compactHtml(`
+      <div class="modal-head"><h3>Criar grupo de WhatsApp</h3><button class="modal-close" id="createGroupCloseBtn" type="button">&times;</button></div>
+      <div class="modal-body">
+        <label class="field-label">Nome do grupo</label>
+        <input type="text" id="createGroupNameInput" value="${escapeHtml(suggestedName)}" maxlength="100" />
+        <label class="field-label">Participantes</label>
+        ${participants.map((p) => `
+          <div class="participant-row">
+            <div>
+              <div class="participant-role">${escapeHtml(ROLE_LABELS[p.role] || p.role)}</div>
+              <div class="participant-name">${escapeHtml(p.name || 'Não identificado')}</div>
+            </div>
+            ${p.resolved
+              ? `<div class="participant-phone">${escapeHtml(p.phone)}</div>`
+              : `<div class="participant-missing">Sem celular cadastrado</div>`}
+          </div>
+        `).join('')}
+        <div class="participant-row">
+          <div><div class="participant-role">Cliente</div><div class="participant-name">${escapeHtml(state.contactName || 'Sem nome')}</div></div>
+          <div class="participant-phone">${escapeHtml(state.clientPhone || state.phone || '')}</div>
+        </div>
+        ${resolvedCount < participants.length ? `<p style="font-size:11.5px;color:var(--text-muted);margin-top:10px;">Participantes sem celular cadastrado não entrarão no grupo.</p>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button class="btn-secondary" id="createGroupCancelBtn" type="button">Cancelar</button>
+        <button class="btn-primary" id="createGroupConfirmBtn" type="button">Criar grupo</button>
+      </div>
+    `);
+
+    const overlay = document.getElementById('createGroupOverlay');
+    const close = () => { overlay.hidden = true; };
+    document.getElementById('createGroupCloseBtn').addEventListener('click', close);
+    document.getElementById('createGroupCancelBtn').addEventListener('click', close);
+    document.getElementById('createGroupConfirmBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('createGroupConfirmBtn');
+      const name = document.getElementById('createGroupNameInput').value.trim();
+      if (!name) { showToast('Dê um nome ao grupo.', 'error'); return; }
+      const phones = participants.filter((p) => p.resolved).map((p) => p.phone);
+      const clientPhone = state.clientPhone || state.phone;
+      if (clientPhone) phones.push(clientPhone);
+      if (!phones.length) { showToast('Nenhum participante com celular disponível.', 'error'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Criando…';
+      try {
+        const res = await apiFetch(`${API_ROOT}/card-group`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: state.session, dealId: state.dealId, name, phones }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'falha ao criar grupo');
+        showToast('Grupo criado com sucesso!', 'success');
+        close();
+        state.cardGroup = data.group;
+        renderChat();
+      } catch (err) {
+        showToast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Criar grupo';
+      }
+    });
+  }
+
+  // ---------------------------------------------------------
+  // Nota interna — visível SÓ para internos, NUNCA enviada ao WhatsApp
+  // (ver src/routes/internalNotes.js). Serve tanto o modo Cliente quanto
+  // o modo Grupo — cada um é uma conversa (conversation_id) distinta.
+  // ---------------------------------------------------------
+  async function loadInternalNotes() {
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes?session=${encodeURIComponent(state.session)}&phone=${encodeURIComponent(state.phone)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      state.internalNotes = data.notes || [];
+      const notesBtn = document.getElementById('notesBtn');
+      if (notesBtn) notesBtn.classList.toggle('has-notes', state.internalNotes.length > 0);
+      if (state.internalNotesOpen) renderNotesDrawer();
+    } catch (err) {
+      console.error('[internalNotes] falha ao carregar notas:', err.message);
+    }
+  }
+
+  function openNotesDrawer() {
+    state.internalNotesOpen = true;
+    document.getElementById('notesDrawer').hidden = false;
+    renderNotesDrawer();
+  }
+
+  function closeNotesDrawer() {
+    state.internalNotesOpen = false;
+    document.getElementById('notesDrawer').hidden = true;
+  }
+
+  function renderNotesDrawer() {
+    const drawer = document.getElementById('notesDrawer');
+    drawer.innerHTML = compactHtml(`
+      <div class="notes-drawer-head">
+        <h3>🔒 Nota interna</h3>
+        <button class="modal-close" id="notesCloseBtn" type="button">&times;</button>
+      </div>
+      <div class="notes-drawer-warning">Nunca visível ao cliente — mesmo no modo Grupo.</div>
+      <div class="notes-list" id="notesList">
+        ${state.internalNotes.length ? state.internalNotes.map((n) => `
+          <div class="note-item">
+            <div class="note-item-author">${escapeHtml(n.authorName || 'Sem nome')}</div>
+            <div class="note-item-text">${escapeHtml(n.text)}</div>
+            <div class="note-item-time">${formatTime(n.createdAt)} · ${formatDayLabel(n.createdAt)}</div>
+          </div>
+        `).join('') : '<p style="font-size:12.5px;color:var(--text-muted);">Nenhuma nota ainda.</p>'}
+      </div>
+      <div class="notes-composer">
+        <textarea id="noteInput" placeholder="Escreva uma nota interna…" rows="1"></textarea>
+        <button class="icon-btn" id="noteSendBtn" title="Adicionar nota" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+    `);
+    document.getElementById('notesCloseBtn').addEventListener('click', closeNotesDrawer);
+    const list = document.getElementById('notesList');
+    list.scrollTop = list.scrollHeight;
+    document.getElementById('noteSendBtn').addEventListener('click', submitInternalNote);
+    document.getElementById('noteInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitInternalNote(); }
+    });
+  }
+
+  async function submitInternalNote() {
+    const input = document.getElementById('noteInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.disabled = true;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: state.session, phone: state.phone, text, authorName: myBitrixName || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao adicionar nota');
+      state.internalNotes.push(data.note);
+      input.value = '';
+      renderNotesDrawer();
+      const notesBtn = document.getElementById('notesBtn');
+      if (notesBtn) notesBtn.classList.add('has-notes');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      input.disabled = false;
     }
   }
 
@@ -1771,7 +2183,9 @@
 
       const { phone, name } = entityType === 'deal' ? await loadDealContact(id) : await loadContactPhone(id);
       state.phone = phone;
+      state.clientPhone = phone;
       state.contactName = name;
+      fetchMyBitrixName(); // best-effort, só rótulo de autor em nota interna
 
       await ensureConnected();
     } catch (err) {

@@ -26,13 +26,23 @@ const { convertToOggOpus } = require('./audioConvert');
  * Não é a API oficial da Meta. Veja o aviso de risco de banimento já dado na conversa.
  */
 class WhatsAppGateway extends EventEmitter {
-  constructor({ authFolder, sessionId }) {
+  constructor({ authFolder, sessionId, isCardGroup }) {
     super();
     this.authFolder = authFolder;
     // Usado só pra prefixar arquivos de mídia salvos (ver saveMedia) — evita
     // colisão de nome quando duas instâncias diferentes geram o mesmo
     // key.id do WhatsApp (o espaço de ids não é coordenado entre contas).
     this.sessionId = sessionId;
+    // Consulta se um JID de grupo é "grupo de card" (feature de Negócio, ver
+    // wa_groups.source='card') — usado só pelo bypass condicional do
+    // descarte de mensagem de grupo, abaixo. Injetado de fora (mesmo
+    // espírito de authFolder/sessionId: esta classe não tem NENHUMA
+    // dependência de banco, e não deveria passar a ter uma só pra isto —
+    // quem instancia decide, via src/sessions.js/src/server.js). Default
+    // seguro: nenhum grupo é "de card" até alguém passar a função real —
+    // preserva o comportamento de descarte total pra qualquer código que
+    // instancie este gateway sem passar essa opção.
+    this.isCardGroup = isCardGroup || (async () => false);
     this.sock = null;
     this.status = 'offline';
     this.lastQrDataUrl = null;
@@ -718,7 +728,15 @@ class WhatsAppGateway extends EventEmitter {
     // só que respostas de quem está no grupo não aparecem em lugar
     // nenhum do CRM — só a mensagem enviada pela própria empresa (que
     // segue outro caminho, sendMessage/sendMedia, não passa por aqui).
-    if ((m.key.remoteJid || '').endsWith('@g.us')) return null;
+    //
+    // EXCEÇÃO (2026-08-20): grupos "de card" (criados pela feature de
+    // Negócio — aba DapZap do card, ver src/routes/cardGroup.js,
+    // wa_groups.source='card') SÃO processados normalmente — decisão do
+    // usuário, esse conteúdo precisa aparecer na conversa dentro do
+    // card. Qualquer outro grupo (manual, POST /groups da tela
+    // Contatos/Chat) continua descartando, sem nenhuma mudança.
+    const isGroupMsg = (m.key.remoteJid || '').endsWith('@g.us');
+    if (isGroupMsg && !(await this.isCardGroup(m.key.remoteJid))) return null;
 
     // Canal do WhatsApp (remoteJid termina em "@newsletter") — posts de
     // canais seguidos (ex: ESPN Brasil, Netflix Brasil) chegam pelo mesmo
@@ -765,10 +783,11 @@ class WhatsAppGateway extends EventEmitter {
     // Nesta versão do Baileys, o telefone real vem em key.participantAlt
     // (mensagem de grupo) ou key.remoteJidAlt (conversa direta) — os campos
     // key.senderPn/participantPn documentados não existem nesta versão.
-    // Mensagem de grupo já foi descartada acima, então participant* aqui
-    // só apareceria num caso estranho (não deveria acontecer na prática).
-    // Mas esse caso "estranho" acontece na prática com frequência (LID sem
-    // alt disponível ainda) — por isso passa por _resolveLidPhone (mesmo
+    // Mensagem de grupo (não-card) já foi descartada acima, então
+    // participant* aqui só apareceria num caso estranho fora do fluxo de
+    // grupo de card (não deveria acontecer na prática). Mas esse caso
+    // "estranho" acontece na prática com frequência (LID sem alt
+    // disponível ainda) — por isso passa por _resolveLidPhone (mesmo
     // helper já usado em messages.update acima), que tenta o mapeamento
     // LID->telefone real via o próprio Baileys antes de aceitar o id cru.
     // Sem isso, um contato com LID ainda não mapeado virava uma "mensagem"
@@ -776,8 +795,28 @@ class WhatsAppGateway extends EventEmitter {
     // dígitos, sem relação com o número de verdade) — e, desde o sync
     // automático de contatos (HANDOFF Parte CO), isso passou a criar um
     // contato fantasma "sem nome" também, não só uma mensagem estranha.
-    const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
-    const phone = await this._resolveLidPhone(phoneSource);
+    let phone;
+    let senderPhone = null;
+    let senderName = null;
+    if (isGroupMsg) {
+      // Grupo de card (única forma de chegar aqui com isGroupMsg=true, ver
+      // acima): a IDENTIDADE DA CONVERSA é o JID DO GRUPO (mesmo "phone"
+      // usado nas rotas de envio/histórico, ver db/schema.sql:419-421),
+      // NUNCA o participante — senão cada pessoa que fala no grupo criaria
+      // uma "conversa" própria, em vez de todas caírem na conversa do
+      // grupo. Quem mandou DENTRO do grupo fica em senderPhone/senderName,
+      // separado (grupo tem N remetentes possíveis; DM sempre teve só 1).
+      const participantSource = m.key.participantAlt || m.key.participant;
+      // Sem remetente identificável dentro do grupo, não dá pra saber quem
+      // mandou — descarta em vez de salvar sem essa informação.
+      if (!participantSource) return null;
+      senderPhone = await this._resolveLidPhone(participantSource);
+      senderName = m.key.fromMe ? null : m.pushName || null;
+      phone = m.key.remoteJid;
+    } else {
+      const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
+      phone = await this._resolveLidPhone(phoneSource);
+    }
     // Sem telefone resolvido, não tem conversa/contato pra associar — mesma
     // decisão de grupo/status/newsletter acima: descarta em vez de salvar
     // com um id interno no lugar do telefone (ver _resolveLidPhone). A
@@ -814,7 +853,17 @@ class WhatsAppGateway extends EventEmitter {
       // Nome que o próprio contato definiu no WhatsApp dele — só vem em
       // mensagens recebidas (m.key.fromMe === false); usado pra já
       // preencher o nome do contato na interface sem cadastro manual.
-      pushName: m.key.fromMe ? null : m.pushName || null,
+      // Em grupo, NUNCA vem daqui (senão o nome da CONVERSA seria
+      // sobrescrito pelo nome de quem mandou por último) — o nome do
+      // grupo já vem de outro lugar (wa_groups.name, definido na criação),
+      // e quem mandou fica em senderName, separado.
+      pushName: isGroupMsg || m.key.fromMe ? null : m.pushName || null,
+      // Preenchidos SÓ em mensagem de grupo de card — telefone/nome de
+      // quem mandou DENTRO do grupo (não a conversa em si). DM nunca
+      // preenche isso (remetente já é a conversa inteira, sem
+      // ambiguidade) — ver comentário acima de onde phone é resolvido.
+      senderPhone,
+      senderName,
       // true pra mensagem que veio de messaging-history.set (backfill) —
       // usado por quem consome o evento 'message' pra decidir se dispara
       // notificação/broadcast/timeline (mensagem histórica não deveria,

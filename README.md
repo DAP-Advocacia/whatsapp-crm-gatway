@@ -1420,6 +1420,47 @@ concedido nominalmente (ver HANDOFF Parte DK).
 
 ---
 
+## 15.7. "Criar grupo" no card do negócio + Nota interna (aba DapZap, `public/index.html`)
+
+Dentro da aba DapZap (placement `CRM_DEAL_DETAIL_TAB`, mesma tela que
+já mostra a conversa 1-a-1 com o cliente), um botão "Criar grupo" monta
+um grupo de WhatsApp real reunindo automaticamente: o Responsável
+principal do negócio (`ASSIGNED_BY_ID` — só o principal, 2º
+Responsável/Supervisor do Responsável ficam de fora), a pessoa do
+campo customizado "[AUT] Resp. Ver. Contratos", quem está logado
+clicando no botão, e o cliente (telefone já resolvido pela própria
+tela). HANDOFF Parte DX tem o histórico completo da implementação.
+
+- **Diferente de `POST /groups`** (`src/routes/whatsapp.js`, tela
+  Contatos/Chat, "grupo em comum") — grupos criados aqui são marcados
+  `wa_groups.source = 'card'` (com `deal_id`), o que os torna os
+  ÚNICOS grupos cujas mensagens recebidas são processadas e salvas
+  (ver bypass condicional em `src/whatsapp.js`, item abaixo). Qualquer
+  outro grupo continua com mensagem recebida descartada por completo,
+  decisão deliberada anterior (ver HANDOFF Parte DX pro histórico
+  completo dessa decisão).
+- **Switch "Cliente"/"Grupo"** no cabeçalho, visível só depois do
+  grupo criado — as duas conversas convivem, nenhuma substitui a
+  outra. Bolha recebida no modo Grupo mostra o nome de quem mandou
+  (grupo tem N remetentes possíveis; DM sempre teve só 1) via
+  `messages.group_sender_phone`/`group_sender_name`, novos.
+- **Nota interna** (`/api/internal-notes`, tabela `internal_notes`) —
+  mensagens visíveis só pros internos (Responsável, Verificação,
+  atendente), nunca pro cliente, mesmo estando todos no mesmo grupo.
+  Serve conversa 1-a-1 e grupo-com-cliente igualmente. É a MESMA
+  infraestrutura pedida antes na Parte DW do HANDOFF (insight de IA em
+  tempo real + nota do gerente pro atendente) — tratada como uma peça
+  só, não duas. Nunca lida por `GET /history`/`POST /send`.
+- **Resolução do Bitrix** (`src/bitrixDealFields.js`) — o nome técnico
+  (`UF_CRM_*`) do campo "[AUT] Resp. Ver. Contratos" é descoberto via
+  `crm.deal.fields` em tempo de execução (cacheado em memória, 24h),
+  não fixado no código. **Ainda não validado contra o portal real**
+  (webhook local com credencial inválida no momento da implementação —
+  ver HANDOFF Parte DX) — código degrada graciosamente (erro tratado,
+  nunca crash) até isso ser corrigido e confirmado.
+
+---
+
 ## 16. Rotas / API
 
 Salvo indicação contrária, toda rota abaixo espera um identificador de **instância**
@@ -1592,6 +1633,27 @@ QUALQUER owner). Rotas de administração da própria permissão exigem
 | `admin/grants/:ownerId` | POST | Restrito a `requireSuperAdmin`. Concede acesso a esse owner. |
 | `admin/grants/:ownerId` | DELETE | Restrito a `requireSuperAdmin`. Revoga — corta acesso na próxima chamada desse owner, sem esperar token expirar. |
 
+### `/api/card-group/*` (`src/routes/cardGroup.js`)
+
+Ver §15.7. "Criar grupo" no card do negócio — toda rota exige
+`requireSession` (posse da instância, mesma régua do resto do app).
+
+| Rota | Método | Uso |
+|---|---|---|
+| `participants?session=&dealId=` | GET | Resolve os 3 participantes internos padrão (Responsável via `ASSIGNED_BY_ID`, Verificação via o campo customizado, quem está logado) com nome+telefone (`getEmployeeInfo`). Nunca 500 por participante sem celular — `resolved:false` no item, quem chama decide. |
+| `/` (raiz) | POST | Body `{ session, dealId, name, phones }`. Cria o grupo via `gateway.createGroup` (já existente) e marca `wa_groups.source='card'`/`deal_id`. |
+| `/` (raiz) | GET | `?session=&dealId=` — devolve o grupo de card já criado pra esse negócio, ou `{group:null}`. Alimenta o switch Cliente/Grupo do frontend. |
+
+### `/api/internal-notes/*` (`src/routes/internalNotes.js`)
+
+Ver §15.7. Serve conversa 1-a-1 e grupo-com-cliente igualmente — nunca
+lida por `GET /history`/`POST /send` (rota própria, dedicada).
+
+| Rota | Método | Uso |
+|---|---|---|
+| `?session=&phone=` | GET | Lista notas da conversa, em ordem cronológica. Não cria a conversa se ela ainda não existir (lista vazia). |
+| `/` (raiz) | POST | Body `{ session, phone, text, authorName? }`. `author_owner_id` sempre `req.ownerId` (nunca do client). Broadcast via WebSocket (`type:'internal-note'`) pra outra aba ver em tempo real. |
+
 ### `/api/settings/*` (`src/routes/settings.js`)
 
 | Rota | Método | Uso |
@@ -1657,11 +1719,11 @@ encerrado → vencedor; preserva query string + `#formulario`).
 ```
 src/
   server.js            # bootstrap HTTP+WS; rotas de página; hub de WebSocket; inicia o poller do scheduler
-  sessions.js          # SessionManager: 1 WhatsAppGateway por instância; retoma no boot; remove() desconecta+apaga
-  whatsapp.js          # WhatsAppGateway: encapsula UMA instância Baileys (QR, status, envio/recebimento, disconnect)
+  sessions.js          # SessionManager: 1 WhatsAppGateway por instância; retoma no boot; remove() desconecta+apaga; repassa isCardGroup (§15.7)
+  whatsapp.js          # WhatsAppGateway: encapsula UMA instância Baileys (QR, status, envio/recebimento, disconnect) — bypass condicional de mensagem de grupo "de card" (§15.7)
   audioConvert.js       # converte áudio para OGG/Opus via ffmpeg antes de enviar
   db.js                # pool de conexão Postgres (pg), usa DATABASE_URL
-  store.js             # persistência em Postgres — conversations + messages
+  store.js             # persistência em Postgres — conversations + messages; grupo de card + nota interna (§15.7)
   media.js             # upload de mídia pro Supabase Storage (bucket "media")
   publicAssets.js        # upload de logo pro Supabase Storage (bucket "public-assets", PÚBLICO)
   linkPreview.js         # busca metadados Open Graph de uma URL (título/descrição/imagem), com guard de SSRF
@@ -1685,7 +1747,8 @@ src/
   presence.js            # heartbeat()/listPresence() — "quem está com o app aberto agora" (admin_presence)
   pageSessions.js        # trackeamento real de navegação (page_sessions) — open/ping/close + closeStaleSessions + agregações (§14.5)
   blockedOwners.js       # bloqueio de acesso individual ao app inteiro (blocked_owners), verificado em requireAuth (§14.5)
-  bitrixHierarchy.js     # hierarquia de departamento/gestor via user.get/department.get + listEmployees() (§14/§14.5)
+  bitrixHierarchy.js     # hierarquia de departamento/gestor via user.get/department.get + listEmployees()/getEmployeePhone()/getEmployeeInfo() (§14/§14.5/§15.7)
+  bitrixDealFields.js    # resolve o UF_CRM_* do campo customizado "[AUT] Resp. Ver. Contratos" via crm.deal.fields, cacheado (§15.7)
   suggestions.js         # sugestões dos usuários — CRUD + moveToReview/respond/listFaq (Kanban do Admin + FAQ, §15.5)
   conversationAnalysisGrants.js # quem tem acesso à Auditoria de Conversas (conversation_analysis_grants), espelha blockedOwners.js (§15.6)
   conversationAnalysisAudit.js  # auditoria de acesso ao painel acima (conversation_analysis_audit) — nunca conteúdo de mensagem (§15.6)
@@ -1700,8 +1763,10 @@ src/
     settings.js          # rotas REST /api/settings/* (paleta de cores POR USUÁRIO, HANDOFF Parte DL + geração de token de API)
     suggestions.js        # rotas REST /api/suggestions/* (sugestões dos usuários)
     conversationAnalysis.js # rotas REST /api/conversation-analysis/* (Auditoria de Conversas, acesso restrito, §15.6)
+    cardGroup.js           # rotas REST /api/card-group/* ("Criar grupo" no card do negócio, §15.7)
+    internalNotes.js        # rotas REST /api/internal-notes/* (nota interna, nunca visível ao cliente, §15.7)
 public/
-  index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância no cabeçalho
+  index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância, "Criar grupo"/switch Cliente-Grupo e nota interna no cabeçalho (§15.7)
   dashboard.html        # Análise de Conversas
   chat.html             # Chat — inbox com todas as conversas + painel de detalhes do contato (Bitrix)
   campaign.html         # Campanha (disparo em massa)

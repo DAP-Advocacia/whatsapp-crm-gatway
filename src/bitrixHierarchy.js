@@ -259,4 +259,28 @@ async function getEmployeePhone(bitrixUserId) {
   return users[0].PERSONAL_MOBILE || null;
 }
 
-module.exports = { getSubordinates, ensureHierarchyCacheFresh, refreshHierarchyCache, listEmployees, getEmployeePhone };
+// Nome + celular de UMA pessoa, por ID numérico do Bitrix — usado pela
+// feature "Criar grupo" do card (ver src/routes/cardGroup.js), que precisa
+// exibir nome de cada participante resolvido (Responsável, Verificação,
+// quem clicou), não só o telefone (diferente de getEmployeePhone acima,
+// que só serve o fluxo de notificação de sugestão, sem exibir nome em
+// nenhuma tela). `null` se o usuário não existir/HR indisponível —
+// best-effort, quem chama trata como "não resolvido".
+async function getEmployeeInfo(bitrixUserId) {
+  const users = await callBitrixHR('user.get', { ID: bitrixUserId });
+  if (!users || !users.length) return null;
+  const u = users[0];
+  return {
+    name: [u.NAME, u.SECOND_NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
+    phone: u.PERSONAL_MOBILE || null,
+  };
+}
+
+module.exports = {
+  getSubordinates,
+  ensureHierarchyCacheFresh,
+  refreshHierarchyCache,
+  listEmployees,
+  getEmployeePhone,
+  getEmployeeInfo,
+};

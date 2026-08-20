@@ -8122,3 +8122,162 @@ enviadas/recebidas + cálculo de duração testados com mensagens mock.
   essa nota dentro do chat. Ainda não desenhado — próxima tarefa a
   planejar quando a fila anterior estiver concluída.
 
+### Parte DX — "Criar grupo" no card do negócio + Nota interna (2026-08-20)
+
+Pedido novo: dentro da aba DapZap do card do negócio, criar um GRUPO de
+WhatsApp real reunindo automaticamente o Responsável do negócio, a
+pessoa do campo customizado "[AUT] Resp. Ver. Contratos" e quem está
+logado clicando no botão — mais o cliente, já que o print de referência
+(estilo Chatwoot) mostrava o cliente dentro da conversa em grupo. Com o
+cliente dentro do grupo, ficou necessário também um canal de **nota
+interna** — mensagens visíveis só pros internos, nunca pro cliente,
+mesmo estando todos no mesmo grupo. Essa nota interna acabou sendo A
+MESMA infraestrutura já pedida na Parte DW (insight de IA em tempo real
++ nota do gerente pro atendente) — implementada aqui como uma peça só,
+usada nos dois contextos (conversa 1-a-1 e grupo-com-cliente).
+
+Planejado via EnterPlanMode (mapeamento de código em 2 rodadas de
+agente antes de codar — achados completos no plano salvo em
+`snug-cuddling-pillow.md`) e implementado passo a passo, na ordem de
+menor risco: schema → `store.js` → resolução Bitrix isolada → bypass
+no gateway → routers → frontend, testando cada camada isoladamente
+antes de plugar na próxima.
+
+**1) Bug/decisão pré-existente que bloqueava tudo**: `src/whatsapp.js`
+já descartava por completo qualquer mensagem recebida de grupo
+(decisão deliberada anterior, documentada em comentário — grupo
+continuava salvo fisicamente no banco mesmo isolado numa conversa
+arquivada). Sem reverter isso pra grupos "de card", o cliente jamais
+teria uma resposta aparecendo na conversa do card. Decisão confirmada
+com o usuário: reverter **só** pra grupos criados por esta feature —
+qualquer outro grupo (`POST /groups` já existente, tela Contatos/Chat)
+continua descartando exatamente como antes.
+
+**2) Schema (`db/schema.sql`)**: `wa_groups` ganhou `deal_id`/`source`
+(`'manual'` default, `'card'` pros criados por esta feature — só estes
+têm mensagem recebida processada). `messages` ganhou
+`group_sender_phone`/`group_sender_name` (quem mandou DENTRO do grupo —
+necessário porque grupo tem N remetentes possíveis, DM sempre teve só
+1; nunca preenchido em DM). Tabela nova `internal_notes` (associada a
+`conversations.id`, nunca a `messages` — serve DM e grupo igualmente,
+já que os dois são linhas de `conversations`).
+
+**3) O bypass em si (`src/whatsapp.js::_processIncomingMessage`) não
+foi um simples remover-o-`return null`** — achado real durante a
+implementação, não previsto de início: `phoneSource` (a variável que
+vira a identidade da CONVERSA em toda a função) resolveria pro
+PARTICIPANTE de dentro do grupo, não pro grupo — sem tratamento extra,
+cada pessoa que falasse no grupo criaria uma "conversa" própria, nunca
+uma conversa do grupo. Corrigido separando explicitamente: `phone`
+(identidade da conversa) = JID do grupo; `senderPhone`/`senderName`
+(quem mandou) = o participante, resolvido à parte e propagado como
+campos novos no objeto retornado. Sem `participant`/`participantAlt`
+identificável, a mensagem é descartada (não dá pra salvar sem saber
+quem mandou). `pushName` da conversa fica `null` em mensagem de grupo
+(não sobrescreve o nome do GRUPO com o nome de quem falou por
+último). `WhatsAppGateway` ganhou uma propriedade nova `isCardGroup`
+(injetada no construtor, default `async () => false` — nenhum outro
+código que instancie o gateway precisa mudar) — a classe não tem
+NENHUMA dependência de banco, então a consulta (`store.isCardGroupId`)
+é decidida por fora (`SessionManager` → `server.js`), mesmo espírito de
+`authFolder`/`sessionId`. Testado com 5 cenários sintéticos (DM normal,
+grupo comum descartado, grupo de card processado corretamente,
+grupo de card sem participante identificável, mensagem própria dentro
+do grupo) — todos confirmados corretos antes de seguir adiante.
+
+**4) `onMessage` (`src/server.js`)**: pra grupo de card, `dealId` vem
+de `wa_groups.deal_id` (nova `store.getDealForGroup`), nunca de
+`store.getDealForPhone` (que é por telefone de CLIENTE — um JID de
+grupo nunca teria linha lá nesse sentido). Sync automático de contato
+(`contactsStore.upsertContact`) pulado pra mensagem de grupo — não
+existe "contato" pra cadastrar a partir de um JID de grupo.
+
+**5) Resolução do Bitrix (`src/bitrixDealFields.js`, novo)**:
+`resolveCustomFieldName()` chama `crm.deal.fields` e procura, entre os
+`UF_CRM_*`, o rótulo exato "[AUT] Resp. Ver. Contratos" — cacheado em
+memória por processo (24h, nome de campo não muda em produção).
+**Não pôde ser validado contra o portal real nesta sessão** — o
+webhook configurado em `BITRIX_WEBHOOK_URL` (`.env` local) devolveu
+"Invalid request credentials" em QUALQUER chamada `crm.deal.*`
+(testado `crm.deal.fields` e `crm.deal.get`), não só a de propósito
+específico desta feature. Usuário confirmou explicitamente pra seguir
+sem essa validação (o próprio pedido original já previa resolver isso
+"em tempo de implementação", sem fornecer o código do campo). Código
+degrada graciosamente: sem webhook, `resolveCustomFieldName`/rotas que
+dependem dele devolvem `null`/erro tratado (502 com mensagem clara),
+nunca um crash — testado via `curl` contra o servidor real, confirmado
+o 502 tratado (não um 500 cru). **Próximo passo real, fora do controle
+desta sessão**: corrigir o webhook (token expirado/credencial
+inválida) e então validar a forma exata do payload de
+`crm.deal.fields` — o código atual assume a forma mais comum
+documentada, mas isso é hipótese, não fato confirmado.
+
+**6) Backend novo**: `src/routes/cardGroup.js` (`/api/card-group`) —
+`GET /participants` resolve os 3 papéis (Responsável via
+`ASSIGNED_BY_ID`, só o principal — 2º Responsável/Supervisor do
+Responsável ficam de fora, decisão confirmada com o usuário —,
+Verificação via o campo customizado, quem está logado via
+`bitrixUserIdFromOwnerId`), com nome+telefone de cada um via
+`getEmployeeInfo` (novo em `src/bitrixHierarchy.js`, ao lado de
+`getEmployeePhone` já existente); `POST /` cria o grupo reusando
+`gateway.createGroup` (sem NENHUMA mudança nele) e marca
+`source='card'`; `GET /` devolve o grupo já criado pro negócio (ou
+`null`), alimentando o switch do frontend. `src/routes/internalNotes.js`
+(`/api/internal-notes`, router PRÓPRIO — nota interna não é exclusiva
+do fluxo de grupo) — `GET`/`POST` simples, `author_owner_id` sempre
+`req.ownerId` (nunca do client, mesma regra de `sent_by` em
+`POST /send`), broadcast via WebSocket (`type: 'internal-note'` novo)
+pra outra aba ver em tempo real.
+
+**7) Frontend (`public/index.html`)**: botão "Criar grupo" no
+cabeçalho (só na aba de Negócio, só se ainda não existe grupo pra esse
+`dealId`) abre um modal (CSS/estrutura replicados de `chat.html`,
+`index.html` não importa nada de outra tela) mostrando os 3
+participantes resolvidos + telefone do cliente, com aviso claro quando
+alguém não tem celular cadastrado. Depois de criado, um switch
+"Cliente"/"Grupo" aparece no cabeçalho — trocar de modo é literalmente
+trocar `state.phone` (telefone do cliente ↔ JID do grupo) e recarregar
+`loadHistory()`, reaproveitando 100% da renderização de bolha/mídia/
+reply já existente (as rotas de histórico/WebSocket já aceitavam JID
+de grupo como "phone" antes desta feature). Bolha recebida no modo
+Grupo mostra o nome de quem mandou acima do conteúdo (usa
+`groupSenderName`/`groupSenderPhone`, novos no payload de
+`GET /history` — `store.getHistory` também precisou ser estendido pra
+selecionar essas 2 colunas, ajuste que não estava explícito no plano
+escrito mas era necessário pra fechar a funcionalidade). Nota interna:
+ícone de cadeado no cabeçalho abre um painel lateral com aviso fixo
+"Nunca visível ao cliente", visual deliberadamente distinto de
+mensagem real (fundo âmbar) — reaproveita o padrão já usado em
+`chat.html` de `myBitrixName` via `BX24.callMethod('user.current', ...)`
+pro rótulo de autor.
+
+**Validação realizada nesta sessão**: sintaxe de todos os arquivos
+(`node -c`/`new Function` nos 3 blocos `<script>`); schema aplicado e
+confirmado no banco real (colunas, `check` constraint testado
+rejeitando valor inválido); todas as funções novas de `store.js`
+testadas isoladamente contra o banco de dev, com limpeza de dados de
+teste (incluindo o teste crítico: nota interna NUNCA aparece em
+`getHistory`); bypass de grupo testado com 5 cenários sintéticos
+(listados no item 3); servidor real subido numa porta de teste —
+confirma boot sem erro e as rotas novas exigindo autenticação; fluxo
+completo das rotas novas testado via `curl` com token real
+(nota interna criar/listar, grupo consultar, participantes com erro
+tratado, autorização 403 pra sessão alheia) — dados de teste sempre
+limpos depois.
+
+**Pendências reais, fora do controle desta sessão**:
+- Webhook do Bitrix (`BITRIX_WEBHOOK_URL`) com credencial inválida —
+  precisa ser corrigido antes de `GET /api/card-group/participants`
+  funcionar de fato em qualquer ambiente (local ou produção, se o
+  mesmo webhook for usado lá).
+- Validar a forma exata do payload de `crm.deal.fields` contra o
+  portal real assim que o webhook for corrigido — é a maior incerteza
+  técnica do que foi implementado.
+- Teste end-to-end real (criar um grupo de verdade, confirmar que
+  mensagem de um participante aparece no modo Grupo, confirmar volume
+  de notificação/timeline gerado) — só possível depois do webhook
+  corrigido e com uma instância WhatsApp online de teste.
+- Deploy em produção ainda não confirmado (mesma régua de sempre —
+  ver deploy automático via EasyPanel, autoDeploy historicamente
+  `false`, Partes DH+).
+

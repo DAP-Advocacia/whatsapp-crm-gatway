@@ -429,6 +429,18 @@ create table if not exists wa_groups (
 
 create index if not exists idx_wa_groups_session on wa_groups (session_id);
 
+-- Grupos criados PELA feature "Criar grupo" do card do negócio (aba
+-- DapZap, ver src/routes/cardGroup.js) — diferente de wa_groups "manuais"
+-- (POST /groups já existente, tela Contatos/Chat, "grupo em comum"). Só
+-- grupos com source='card' têm mensagem recebida processada/salva (ver
+-- bypass condicional em src/whatsapp.js::_processIncomingMessage,
+-- isCardGroup) — qualquer outro grupo continua descartando mensagem
+-- recebida por completo, sem nenhuma mudança de comportamento.
+alter table wa_groups add column if not exists deal_id text;
+alter table wa_groups add column if not exists source text not null default 'manual' check (source in ('manual', 'card'));
+
+create index if not exists idx_wa_groups_deal on wa_groups (deal_id) where deal_id is not null;
+
 -- Histórico persistido de notificações (hoje: só mensagem recebida numa
 -- conversa não silenciada) — por dono do Bitrix (owner_id), não por
 -- instância, já que o mesmo usuário pode ter várias sessões de WhatsApp e
@@ -793,3 +805,38 @@ create table if not exists user_palette (
   bg_color text,
   updated_at timestamptz not null default now()
 );
+
+-- Quem mandou a mensagem DENTRO de um grupo de card (telefone/nome de quem
+-- está no grupo, não da empresa) — só preenchido em mensagens 'in' de
+-- conversas cujo "phone" é o JID de um wa_groups.source='card' (ver
+-- bypass em src/whatsapp.js). DM 1-a-1 nunca preenche isso: o remetente
+-- já É a conversa inteira, sem ambiguidade. Necessário porque um grupo
+-- tem N remetentes possíveis (a bolha recebida precisa mostrar "quem"),
+-- enquanto uma DM sempre tem só 1.
+alter table messages add column if not exists group_sender_phone text;
+alter table messages add column if not exists group_sender_name text;
+
+-- Nota interna — mensagem visível SÓ para internos (Responsável,
+-- Verificação, atendente), NUNCA para o cliente, mesmo estando todos no
+-- mesmo grupo de WhatsApp (feature de "Criar grupo" do card). Serve tanto
+-- conversa 1-a-1 quanto grupo-com-cliente igualmente — associada a
+-- `conversations` (não a `messages`/`wa_groups`), já que as duas já são
+-- linhas de `conversations` (grupo entra ali pelo mesmo mecanismo que já
+-- trata `phone` como JID de grupo). É a MESMA peça de infraestrutura
+-- pedida antes (HANDOFF Parte DW: insight de IA em tempo real + nota do
+-- gerente pro atendente) — tratada aqui como uma coisa só, não duas.
+-- Nunca lida pelas rotas normais de histórico/envio (GET /history,
+-- POST /send) — rota própria e dedicada (src/routes/internalNotes.js),
+-- pra nunca vazar por engano no mesmo payload que alimenta a bolha de
+-- conversa real, nem ser confundida com envio de verdade ao WhatsApp.
+create table if not exists internal_notes (
+  id bigserial primary key,
+  conversation_id bigint not null references conversations(id) on delete cascade,
+  text text not null,
+  author_owner_id text not null,
+  author_name text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_internal_notes_conversation
+  on internal_notes (conversation_id, created_at);

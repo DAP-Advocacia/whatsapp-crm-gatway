@@ -16,10 +16,10 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, isCardGroup }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
-    this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory) => void
+    this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageStatus = onMessageStatus; // (sessionId, phone, messageId, status) => void
     this.onPresence = onPresence; // (sessionId, phone, state) => void
@@ -28,6 +28,11 @@ class SessionManager {
     // histórico) — diferente de onMessage/pushName, que só vem em mensagem
     // NOVA recebida (nunca em histórico). Ver WhatsAppGateway._extractContactInfo.
     this.onContact = onContact; // (sessionId, phone, name) => void
+    // Repassado direto pro construtor de cada WhatsAppGateway (ver
+    // whatsapp.js) — decide se uma mensagem de grupo é "de card" (feature
+    // de Negócio) ou deve continuar sendo descartada, comportamento padrão
+    // de sempre. Opcional — WhatsAppGateway já tem um default seguro.
+    this.isCardGroup = isCardGroup;
     this.sessions = new Map(); // sessionId -> WhatsAppGateway
   }
 
@@ -52,9 +57,12 @@ class SessionManager {
     const gateway = new WhatsAppGateway({
       authFolder: path.join(this.baseFolder, id),
       sessionId: id,
+      isCardGroup: this.isCardGroup,
     });
     gateway.on('status', (status) => this.onStatus(id, status));
-    gateway.on('message', ({ phone, message, pushName, isHistory }) => this.onMessage(id, phone, message, pushName, isHistory));
+    gateway.on('message', ({ phone, message, pushName, isHistory, senderPhone, senderName }) =>
+      this.onMessage(id, phone, message, pushName, isHistory, senderPhone, senderName)
+    );
     gateway.on('reaction', ({ phone, targetId, emoji, direction }) => this.onReaction?.(id, phone, targetId, emoji, direction));
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
