@@ -301,7 +301,12 @@ do sistema, isoladas numa seção própria desde a HANDOFF Parte DO, 2026-08-18;
 antes ficavam misturadas em Workspace/Configuração). A seção Admin fica
 inteira escondida (não só os 2 itens individualmente) até que pelo menos
 um deles seja revelado pra quem está logado — super admin vê os 2, quem só
-tem grant de Auditoria de Conversas vê só esse. A paleta
+tem grant de Auditoria de Conversas vê só esse. A revelação anima via
+`max-height`/`transition` (HANDOFF Parte DQ, 2026-08-20) em vez de
+aparecer com `display:none → block` instantâneo — sem isso, a sidebar
+"pulava" de repente quando a confirmação de acesso chegava (2 requests
+de rede sequenciais em `admin.html`: confirmar com o Bitrix, depois
+confirmar super admin), bem na área que a pessoa estava olhando. A paleta
 editada ali é **por usuário** desde a HANDOFF Parte DL (2026-08-18) —
 antes era um único registro global pra toda a instalação; hoje cada
 `ownerId` tem a própria linha em `user_palette` e só vê a própria cor,

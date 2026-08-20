@@ -201,6 +201,11 @@
   }
   .nav-section:first-child .nav-section-label{ padding-top:2px; }
   html.sidebar-collapsed .nav-section-label{ display:none; }
+  /* Seção "Admin" (HANDOFF Parte DO) — nesta tela nunca é revelada (sem
+     nenhuma lógica de autenticação, decisão deliberada), então continua
+     sempre com 0px de altura — nenhuma classe .revealed é adicionada
+     aqui, mas a regra fica por consistência com as outras 15 telas. */
+  #navSectionAdmin{ max-height:0; overflow:hidden; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -427,7 +432,7 @@
         não tem NENHUMA lógica de autenticação/API (decisão deliberada,
         ver HANDOFF), então nada aqui é revelado nunca, igual já era
         pros 2 itens antes de existir esta seção (HANDOFF Parte DO). -->
-   <div class="nav-section" id="navSectionAdmin" hidden>
+   <div class="nav-section" id="navSectionAdmin">
     <div class="nav-section-label">Admin</div>
     <!-- Escondido por padrão — só revelado por JS (ver GET
          /conversation-analysis/whoami) depois de confirmar acesso (super

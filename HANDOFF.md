@@ -7781,3 +7781,58 @@ jsdom, não é dependência do projeto) — 8 casos: boot aplica pessoal
 por cima do global; reset remove só o cache pessoal, sem tocar no
 global; cache do brand e da paleta pessoal nunca se misturam.
 
+### Parte DQ — "Pisca" ao clicar em Admin era layout shift, não cor (2026-08-20)
+
+Usuário reportou de novo "a tela pisca" ao clicar em Admin — mesmo
+depois da correção de cache de paleta (Parte DP), já confirmada em
+produção (container com 25h de vida, `personalPalette_` já presente
+no `admin.html` do container). Perguntado pra descrever melhor o que
+via, antes de arriscar outra rodada de edição especulativa: confirmou
+que é **a sidebar mudando de tamanho/pulando**, não cor.
+
+**Causa**: a seção "Admin" (label + 2 itens, Parte DO) começava com o
+atributo `hidden` (= `display:none`, ocupa 0 espaço) tanto no HTML
+quanto nos 2 `<a>` dentro dela — só era revelada depois de `init()`
+confirmar acesso via rede (em `admin.html`: `resolveOwner()` →
+`verifyAuth()` → `POST /api/auth/verify` contra o Bitrix real, DEPOIS
+`GET /admin/whoami` — 2 requests sequenciais, nada instantâneo). Ao
+carregar a página, a sidebar renderizava SEM a seção Admin; quando a
+confirmação chegava, a seção surgia de repente, empurrando o resto
+da sidebar — um "pulo" de layout bem na área que a pessoa estava
+olhando (ela clicou num link *dentro* dessa mesma seção).
+
+**Correção**: troca de mecanismo — `#navSectionAdmin` deixa de usar
+o atributo `hidden` e passa a usar `max-height:0; overflow:hidden;`
+por padrão, com `transition:max-height .25s ease`; a classe
+`.revealed` (adicionada via JS quando confirma acesso) expande até
+`max-height:300px`. Sem atributo `hidden`, o CSS sozinho já mantém
+0px de altura até a confirmação chegar — quando chega, a expansão é
+ANIMADA (suave) em vez de instantânea. Não reserva espaço vazio pra
+quem nunca vai ter acesso (continua em 0px pra sempre, igual antes).
+`conversation-analysis.html` (onde a seção já vem sempre visível,
+por conter o próprio item ativo da página) e `onboarding.html` (sem
+nenhuma lógica de auth, nunca revela) só ganharam a regra CSS de
+consistência, sem a transição/classe (não precisam).
+
+**Bug de regressão encontrado no processo, não relacionado ao
+"pisca" em si**: `lead-metrics.html` e `notifications.html` nunca
+tinham recebido a atualização de JS da Parte DO
+(`revealAdminSectionIfAnyItemVisible`) — a função ficou parada na
+versão de ANTES dessa parte, chamando só `item.hidden = false` nos 2
+itens individuais, sem nunca revelar a SEÇÃO em si. Resultado: nessas
+2 telas específicas, a seção "Admin" nunca aparecia pra ninguém,
+nem super admin — bug real, silencioso, só encontrado agora ao
+conferir arquivo por arquivo antes de trocar `.hidden` por
+`.classList.add('revealed')`. Corrigido junto.
+
+**Validação**: `vm.Script` + checagem automatizada (nenhum atributo
+`hidden` solto em `navSectionAdmin`, regra CSS presente, nenhuma
+chamada residual de `.hidden = false` pra revelar a seção) nas 16
+telas. Teste funcional com mock de `classList`/`getElementById` — 3
+cenários: nenhum item revelado ainda (seção sem a classe), só grant
+de Auditoria revelado (seção ganha a classe), super admin com os 2
+itens (idempotente, continua com a classe).
+
+**Pendente**: deploy em produção + confirmação visual de que a
+transição está suave (não dá pra medir isso fora do navegador real).
+

@@ -201,6 +201,16 @@
   }
   .nav-section:first-child .nav-section-label{ padding-top:2px; }
   html.sidebar-collapsed .nav-section-label{ display:none; }
+  /* Seção "Admin" (HANDOFF Parte DO) só é revelada depois de confirmar
+     acesso via rede (whoami) — antes disso ela ficava com o atributo
+     `hidden` (display:none), então quando a confirmação chegava a
+     sidebar "pulava" de repente, ganhando altura na área que a pessoa
+     já estava olhando (usuário reportou como "pisca", HANDOFF Parte
+     DQ). max-height + transition troca o pulo instantâneo por uma
+     expansão suave — sem atributo `hidden`, o CSS sozinho já mantém
+     0px de altura até a classe `.revealed` ser adicionada via JS. */
+  #navSectionAdmin{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
+  #navSectionAdmin.revealed{ max-height:300px; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -523,7 +533,7 @@
         menos 1 dos 2 itens dentro dela seja revelado — sem isso, o
         rótulo "Admin" apareceria vazio pra quem não tem acesso a nada
         aqui (HANDOFF Parte DO). -->
-   <div class="nav-section" id="navSectionAdmin" hidden>
+   <div class="nav-section" id="navSectionAdmin">
     <div class="nav-section-label">Admin</div>
     <!-- Escondido por padrão — só revelado por JS (ver GET
          /conversation-analysis/whoami) depois de confirmar acesso (super
@@ -860,12 +870,27 @@
     send();
     setInterval(send, 30000);
   }
+  // Revela a seção "Admin" da sidebar assim que QUALQUER um dos 2 itens
+  // dentro dela for revelado (não precisa esperar os 2) — sem isso, a
+  // label "Admin" ficaria vazia/nunca apareceria mesmo com 1 item já
+  // visível (HANDOFF Parte DO). Usa classList em vez de .hidden — a
+  // seção anima via max-height/transition (HANDOFF Parte DQ), não some
+  // com display:none instantâneo, pra não "pular" a sidebar de repente
+  // quando a confirmação de acesso chega.
+  function revealAdminSectionIfAnyItemVisible() {
+    const section = document.getElementById('navSectionAdmin');
+    if (!section) return;
+    const admin = document.getElementById('navAdminItem');
+    const analysis = document.getElementById('navConversationAnalysisItem');
+    if ((admin && !admin.hidden) || (analysis && !analysis.hidden)) section.classList.add('revealed');
+  }
+
   function revealAdminNavItemIfSuperAdmin() {
     apiFetch(`${API_BASE}/whatsapp/admin/whoami`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navAdminItem');
-        if (item && data?.isSuperAdmin) item.hidden = false;
+        if (item && data?.isSuperAdmin) { item.hidden = false; revealAdminSectionIfAnyItemVisible(); }
       })
       .catch(() => {});
     // Auditoria de Conversas (HANDOFF Parte DK) — mesmo padrão do item
@@ -878,7 +903,7 @@
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navConversationAnalysisItem');
-        if (item && data?.hasAccess) item.hidden = false;
+        if (item && data?.hasAccess) { item.hidden = false; revealAdminSectionIfAnyItemVisible(); }
       })
       .catch(() => {});
   }

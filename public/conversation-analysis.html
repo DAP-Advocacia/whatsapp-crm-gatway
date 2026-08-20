@@ -194,6 +194,13 @@
   }
   .nav-section:first-child .nav-section-label{ padding-top:2px; }
   html.sidebar-collapsed .nav-section-label{ display:none; }
+  /* Seção "Admin" (HANDOFF Parte DO) — nesta tela ela já vem visível de
+     cara (o item Auditoria de Conversas é o desta própria página, nunca
+     hidden), então não precisa do tratamento de max-height das outras
+     15 telas (HANDOFF Parte DQ) — mesmo assim a regra fica aqui por
+     consistência com o seletor usado no restante do arquivo, mesmo que
+     a classe `.revealed` nunca seja necessária aqui. */
+  #navSectionAdmin{ max-height:none; overflow:visible; }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
