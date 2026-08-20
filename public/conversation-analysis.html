@@ -383,8 +383,14 @@
     background: var(--bg); border:1px solid var(--border); border-radius: var(--radius);
     width:100%; max-width:640px; max-height:82vh; display:flex; flex-direction:column; overflow:hidden;
   }
-  .history-modal-head{ display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .history-modal-head{ display:flex; align-items:flex-start; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border); flex-shrink:0; gap:10px; }
   .history-modal-head h3{ font-family:'Fraunces',serif; font-size:15px; margin:0; }
+  .history-modal-stats{
+    display:flex; flex-wrap:wrap; gap:10px; margin-top:5px; font-size:11.5px; color:var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .history-modal-stats span{ display:inline-flex; align-items:center; gap:4px; }
+  .history-modal-stats b{ color:var(--text); font-weight:600; }
   .history-modal-close{ background:none; border:none; color:var(--text-faint); cursor:pointer; font-size:18px; padding:2px 6px; }
   .history-modal-close:hover{ color:var(--text); }
   .history-messages{ flex:1; overflow-y:auto; padding:16px 18px; display:flex; flex-direction:column; }
@@ -405,7 +411,24 @@
   .bubble-row.mine .bubble{ background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 3px; }
   .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
   .bubble .caption-text{ margin-top: 4px; }
-  .media-frame img, .media-frame video{ max-width: 100%; border-radius: 8px; display:block; }
+  .media-frame img, .media-frame video{ max-width: 100%; border-radius: 8px; display:block; background:#000; }
+  /* Fallback visível quando a mídia falha — mesmo mecanismo de chat.html
+     (HANDOFF Parte DW). Aqui era mais grave: `src` direto (sem hidratação
+     autenticada) fazia TODA mídia falhar sempre, não só em falhas
+     pontuais — imagem quebrada mostrando o `alt`, áudio parado em
+     0:00/0:00, sem nenhuma pista visível do que estava errado. */
+  .media-frame{ position: relative; min-width: 160px; min-height: 80px; border-radius: 8px; overflow: hidden; background:#000; }
+  .media-frame-audio{ background: transparent; min-width: 0; min-height: 0; }
+  .media-frame-audio .media-error{ min-height: 0; padding: 8px 4px; }
+  .media-error{
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    padding: 16px 12px; text-align: center; font-size: 12px; color: var(--text-muted); min-height: 80px;
+  }
+  .media-error .media-retry-btn{
+    background: none; border: 1px solid var(--border); color: var(--gold-dim);
+    font-size: 11.5px; padding: 4px 11px; border-radius: 100px; cursor: pointer; font-family: inherit;
+  }
+  .media-error .media-retry-btn:hover{ color: var(--gold); border-color: var(--gold-dim); }
 </style>
 </head>
 <body>
@@ -625,7 +648,10 @@
 <div class="history-overlay" id="historyOverlay" hidden>
   <div class="history-modal">
     <div class="history-modal-head">
-      <h3 id="historyModalTitle">Conversa</h3>
+      <div>
+        <h3 id="historyModalTitle">Conversa</h3>
+        <div class="history-modal-stats" id="historyModalStats"></div>
+      </div>
       <button type="button" class="history-modal-close" id="historyModalClose">&times;</button>
     </div>
     <div class="history-messages" id="historyMessages"></div>
@@ -1028,17 +1054,78 @@
     return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
   }
 
+  // Cache de blob URLs por URL relativa — evita rebuscar a mesma mídia
+  // quando ela aparece em mais de uma mensagem renderizada (mesmo padrão
+  // de chat.html::mediaBlobCache).
+  const historyMediaBlobCache = new Map();
+
+  function setMediaSrc(el, value) {
+    if (el.tagName === 'A') el.href = value; else el.src = value;
+  }
+  function showMediaError(el) {
+    el.style.display = 'none';
+    const box = el.parentElement && el.parentElement.querySelector('.media-error');
+    if (box) box.hidden = false;
+  }
+  function hideMediaError(el) {
+    el.style.display = '';
+    const box = el.parentElement && el.parentElement.querySelector('.media-error');
+    if (box) box.hidden = true;
+  }
+
+  async function hydrateOneHistoryMedia(el, url) {
+    if (!url.startsWith('/')) { setMediaSrc(el, url); return; }
+    if (historyMediaBlobCache.has(url)) { setMediaSrc(el, historyMediaBlobCache.get(url)); return; }
+    try {
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('falha ao buscar mídia');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      historyMediaBlobCache.set(url, blobUrl);
+      setMediaSrc(el, blobUrl);
+    } catch (err) {
+      console.error('Erro ao carregar mídia:', url, err);
+      showMediaError(el);
+    }
+  }
+
+  // Rotas de mídia (GET /api/whatsapp/media/:filename) exigem
+  // Authorization: Bearer via requireAuth — um `src=` direto nunca
+  // consegue mandar esse header, então precisa buscar autenticado
+  // (apiFetch) e converter em blob URL. Mesmo mecanismo de
+  // chat.html::hydrateMedia (HANDOFF Parte DW), adaptado pro modal
+  // read-only desta tela.
+  async function hydrateHistoryMedia(container) {
+    const els = container.querySelectorAll('[data-media-url]');
+    for (const el of els) {
+      const url = el.getAttribute('data-media-url');
+      el.removeAttribute('data-media-url');
+      if (el.tagName !== 'A') {
+        el.addEventListener('error', () => showMediaError(el), { once: true });
+        const retryBtn = el.parentElement && el.parentElement.querySelector('.media-retry-btn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            hideMediaError(el);
+            historyMediaBlobCache.delete(url);
+            hydrateOneHistoryMedia(el, url);
+          });
+        }
+      }
+      await hydrateOneHistoryMedia(el, url);
+    }
+  }
+
   function renderBubbleBody(msg) {
     if (msg.type === 'image' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><img src="${escapeHtml(msg.mediaUrl)}" alt="imagem" /></div>${caption}`;
+      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" /><div class="media-error" hidden><span>Não foi possível carregar a imagem.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'video' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><video controls src="${escapeHtml(msg.mediaUrl)}"></video></div>${caption}`;
+      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video><div class="media-error" hidden><span>Não foi possível carregar o vídeo.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'audio' && msg.mediaUrl) {
-      return `<audio controls src="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio>`;
+      return `<div class="media-frame media-frame-audio"><audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio><div class="media-error" hidden><span>Não foi possível carregar o áudio.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>`;
     }
     if (msg.type === 'document' && msg.mediaUrl) {
       return `<a href="${escapeHtml(msg.mediaUrl)}" target="_blank" rel="noopener">${escapeHtml(msg.fileName || 'Documento')}</a>`;
@@ -1066,11 +1153,45 @@
     });
     container.innerHTML = html || '<div class="empty-state">Nenhuma mensagem nessa conversa ainda.</div>';
     container.scrollTop = container.scrollHeight;
+    hydrateHistoryMedia(container);
+  }
+
+  // Tempo de diálogo (primeira → última mensagem) + contagem
+  // enviadas/recebidas — tudo já vem no payload de .../history, sem
+  // precisar de rota nova no backend.
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '—';
+    const totalMin = Math.round(ms / 60000);
+    const days = Math.floor(totalMin / 1440);
+    const hours = Math.floor((totalMin % 1440) / 60);
+    const min = totalMin % 60;
+    const parts = [];
+    if (days) parts.push(`${days}d`);
+    if (hours) parts.push(`${hours}h`);
+    if (min || !parts.length) parts.push(`${min}min`);
+    return parts.join(' ');
+  }
+
+  function renderHistoryStats(messages) {
+    const box = document.getElementById('historyModalStats');
+    if (!box) return;
+    if (!messages.length) { box.innerHTML = ''; return; }
+    const sent = messages.filter((m) => m.direction === 'out').length;
+    const received = messages.length - sent;
+    const first = new Date(messages[0].createdAt).getTime();
+    const last = new Date(messages[messages.length - 1].createdAt).getTime();
+    const duration = formatDuration(last - first);
+    box.innerHTML = `
+      <span title="Da primeira à última mensagem">⏱ <b>${escapeHtml(duration)}</b></span>
+      <span title="Mensagens enviadas pelo atendente">↑ enviadas: <b>${sent}</b></span>
+      <span title="Mensagens recebidas do cliente">↓ recebidas: <b>${received}</b></span>
+    `;
   }
 
   async function openHistory(sessionId, phone, contactLabel) {
     const overlay = document.getElementById('historyOverlay');
     document.getElementById('historyModalTitle').textContent = contactLabel || phone;
+    document.getElementById('historyModalStats').innerHTML = '';
     document.getElementById('historyMessages').innerHTML = '<div class="skeleton-row">Carregando…</div>';
     overlay.hidden = false;
     try {
@@ -1078,6 +1199,7 @@
       if (!res.ok) throw new Error('falha ao carregar histórico');
       const data = await res.json();
       renderHistoryMessages(data.messages || []);
+      renderHistoryStats(data.messages || []);
     } catch (err) {
       document.getElementById('historyMessages').innerHTML = `<div class="empty-state">${escapeHtml(err.message)}</div>`;
     }

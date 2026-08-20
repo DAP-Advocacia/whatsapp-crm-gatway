@@ -833,6 +833,22 @@
   .media-frame img, .media-frame video{ display: block; width: 100%; max-width: 260px; max-height: 320px; object-fit: cover; background: #000; }
   .caption-text{ padding: 7px 4px 0; }
   .bubble audio{ accent-color: var(--gold); height: 34px; }
+  /* Fallback visível quando a mídia falha — no fetch (rede/timeout) ou na
+     decodificação (evento `error` nativo do elemento, ex: codec sem
+     suporte no navegador) — ver hydrateMedia/showMediaError, HANDOFF
+     Parte DW. Sem isso, ficava um player vazio sem nenhuma explicação. */
+  .media-frame{ min-width: 180px; min-height: 90px; }
+  .media-frame-audio{ background: transparent; min-width: 0; min-height: 0; }
+  .media-error{
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+    padding: 18px 14px; text-align: center; font-size: 12.5px; color: var(--text-muted);
+    min-height: 90px;
+  }
+  .media-error .media-retry-btn{
+    background: none; border: 1px solid var(--border); color: var(--gold-dim);
+    font-size: 12px; padding: 5px 12px; border-radius: 100px; cursor: pointer; font-family: inherit;
+  }
+  .media-error .media-retry-btn:hover{ color: var(--gold); border-color: var(--gold-dim); }
 
   /* Cartão de documento (PDF, PPT, DOCX, planilha, zip...) — o WhatsApp não
      tem como renderizar um anexo genérico como mídia embutida, então mostra
@@ -3275,16 +3291,24 @@
     // uma versão anterior sobrepunha o horário em cima da foto (sem legenda),
     // e ficou ambíguo/confuso visualmente; agora imagem, vídeo e texto usam
     // o mesmo `<span class="timestamp">` de sempre, gerado por renderMessages.
+    // .media-error some junto do próprio elemento de mídia (ver
+    // hydrateMedia/showMediaError) — cobre 2 falhas distintas: o FETCH não
+    // completar (rede, timeout) e o arquivo baixar mas o navegador não
+    // conseguir DECODIFICAR (evento `error` nativo do <video>/<img>/<audio>,
+    // ex: codec sem suporte). Antes qualquer uma das duas deixava um player
+    // vazio sem nenhuma explicação — usuário reportou vídeo "não carregando"
+    // sem dar pra saber se era rede, servidor ou o arquivo em si (HANDOFF
+    // Parte DW).
     if (msg.type === 'image' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" /></div>${caption}`;
+      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" /><div class="media-error" hidden><span>Não foi possível carregar a imagem.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'video' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video></div>${caption}`;
+      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video><div class="media-error" hidden><span>Não foi possível carregar o vídeo.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'audio' && msg.mediaUrl) {
-      return `<audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio>`;
+      return `<div class="media-frame media-frame-audio"><audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio><div class="media-error" hidden><span>Não foi possível carregar o áudio.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>`;
     }
     if (msg.type === 'document' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
@@ -3308,23 +3332,55 @@
     else el.src = value;
   }
 
+  // Mostra/esconde o fallback "Não foi possível carregar" — usado tanto
+  // pelo catch do fetch (rede/timeout) quanto pelo listener de `error`
+  // nativo do próprio elemento (arquivo baixou, mas o navegador não
+  // conseguiu DECODIFICAR — ex: codec sem suporte). `el` é sempre
+  // video/img/audio (nunca <a>, que não tem esse tipo de falha).
+  function showMediaError(el) {
+    el.style.display = 'none';
+    const box = el.parentElement && el.parentElement.querySelector('.media-error');
+    if (box) box.hidden = false;
+  }
+  function hideMediaError(el) {
+    el.style.display = '';
+    const box = el.parentElement && el.parentElement.querySelector('.media-error');
+    if (box) box.hidden = true;
+  }
+
+  async function hydrateOneMedia(el, url) {
+    if (!url.startsWith('/')) { setMediaSrc(el, url); return; }
+    if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); return; }
+    try {
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('falha ao buscar mídia');
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      mediaBlobCache.set(url, blobUrl);
+      setMediaSrc(el, blobUrl);
+    } catch (err) {
+      console.error('Erro ao carregar mídia:', url, err);
+      showMediaError(el);
+    }
+  }
+
   async function hydrateMedia(container) {
     const els = container.querySelectorAll('[data-media-url]');
     for (const el of els) {
       const url = el.getAttribute('data-media-url');
       el.removeAttribute('data-media-url');
-      if (!url.startsWith('/')) { setMediaSrc(el, url); continue; }
-      if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); continue; }
-      try {
-        const res = await apiFetch(url);
-        if (!res.ok) throw new Error('falha ao buscar mídia');
-        const blob = await res.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        mediaBlobCache.set(url, blobUrl);
-        setMediaSrc(el, blobUrl);
-      } catch (err) {
-        console.error('Erro ao carregar mídia:', url, err);
+      if (el.tagName !== 'A') {
+        el.addEventListener('error', () => showMediaError(el), { once: true });
+        const retryBtn = el.parentElement && el.parentElement.querySelector('.media-retry-btn');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            hideMediaError(el);
+            mediaBlobCache.delete(url); // pode ter ficado um blob inválido em cache
+            hydrateOneMedia(el, url);
+          });
+        }
       }
+      await hydrateOneMedia(el, url);
     }
   }
 

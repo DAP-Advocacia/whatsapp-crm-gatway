@@ -8033,3 +8033,92 @@ que já foi eliminado (cor, Parte DP; container da seção, Parte DQ).
 Se persistir depois deste deploy, o vídeo (ou uma descrição de ONDE
 exatamente na tela o pisca aparece) é necessário pra continuar.
 
+### Parte DW — Mídia quebrada no Chat e na Auditoria de Conversas: 2 bugs distintos com a mesma sintoma (2026-08-20)
+
+Usuário reportou 2 vezes que vídeo "não carrega" no Chat, e depois
+mandou print específico do MODAL de histórico da Auditoria de
+Conversas mostrando imagem quebrada (`[imagem]`/alt text) e player de
+áudio parado em `0:00 / 0:00`. Investigação revelou serem **dois
+problemas diferentes**, cada um na sua tela.
+
+**1) `chat.html` — causa técnica não confirmada, corrigido com
+robustez.** Servidor testado ponta a ponta e correto: `curl` direto na
+rota `GET /api/whatsapp/media/:filename` devolve o arquivo completo
+(H.264 confirmado via inspeção manual de bytes — `avc1` presente,
+`hvc1`/`hev1` ausentes, formato universalmente suportado), CORS
+correto (`Access-Origin: *`), `Accept-Ranges: bytes`, sem timeout.
+Logs do container (`docker logs --since 48h`) sem nenhum erro de
+mídia/vídeo/supabase. Causa raiz não pôde ser confirmada com o que
+estava disponível (o vídeo que o usuário tentou mandar mostrando o
+erro nunca chegou, só stills sem relação clara). Implementado como
+resposta um **fallback visível**: `hydrateMedia` agora escuta também
+o evento `error` nativo do elemento (cobre falha de DECODIFICAÇÃO no
+navegador, não só falha de FETCH/rede — as duas causas possíveis do
+sintoma "player vazio"), mostrando "Não foi possível carregar
+[imagem/vídeo/áudio]" com botão "Tentar de novo" (limpa o cache de
+blob e refaz a busca). Antes, qualquer uma das duas falhas deixava um
+player mudo sem nenhuma pista visual do que aconteceu.
+
+**2) `conversation-analysis.html` — causa raiz CONFIRMADA e
+corrigida.** `renderBubbleBody` (modal de histórico da Auditoria)
+usava `src="${msg.mediaUrl}"` **direto** no HTML pra image/video/audio
+— igual ao padrão que `chat.html` usa, exceto pelo detalhe crítico:
+as rotas de mídia exigem `Authorization: Bearer` (`requireAuth`), e um
+atributo `src` de `<img>`/`<video>`/`<audio>` **nunca** consegue
+mandar um header customizado. Diferente do bug do Chat (falha
+ocasional, causa incerta), aqui a mídia **sempre** falhava, sem
+exceção — só que sem nenhum feedback visual (por isso "imagem quebrada
+com alt text" e áudio preso em 0:00, exatamente o que o print mostrou).
+Provavelmente essa tela é a origem real do primeiro relato de "vídeo
+não carrega" do usuário, não o Chat. Corrigido replicando o mesmo
+mecanismo de `chat.html`: `renderBubbleBody` passou a gerar
+`data-media-url` em vez de `src`, com uma função nova
+`hydrateHistoryMedia(container)` (mesma lógica de
+`hydrateOneMedia`/`showMediaError`/`hideMediaError`, com um
+`historyMediaBlobCache` próprio da tela) chamada logo depois de
+`renderHistoryMessages` dentro de `openHistory`. CSS de `.media-error`/
+`.media-retry-btn`/`.media-frame-audio` replicado de `chat.html`.
+
+**Extra na mesma tela, pedido em seguida pelo usuário**: cabeçalho do
+modal de histórico agora mostra tempo de diálogo (primeira → última
+mensagem, `formatDuration`) e contagem de mensagens enviadas
+(`direction === 'out'`) vs recebidas (`direction === 'in'`) — tudo
+calculado no frontend a partir do mesmo payload de
+`GET .../history`, sem rota nova. Novo elemento
+`#historyModalStats` abaixo do título, populado por
+`renderHistoryStats(messages)`.
+
+**Validação**: sintaxe dos 3 blocos `<script>` de
+`conversation-analysis.html` validada com `new Function()`;
+`formatDuration` testado com 9 casos de borda (zero, minuto único
+com arredondamento, horas, dias, `NaN`/negativo → `—`); contagem
+enviadas/recebidas + cálculo de duração testados com mensagens mock.
+
+**Pendente / próximos passos**:
+- Confirmar com o usuário se o fallback do Chat (item 1) resolve a
+  percepção de "vídeo não carrega" — dado que a causa raiz REAL
+  provavelmente sempre esteve na Auditoria de Conversas (item 2), o
+  vídeo no Chat pode nunca ter tido bug nenhum além de falta de
+  feedback visual em falhas raras de rede.
+- Fila de pedidos ainda não iniciados nesta sessão: botão "Limpar
+  filtros" na Auditoria de Conversas; menu de "3 pontos" na tabela de
+  Usuários do Admin (em vez de todas as ações expandidas por linha);
+  histórico de resumos de IA (hoje `conversations.ai_summary` é campo
+  único, sobrescrito a cada geração — precisa de tabela de histórico
+  nova, salvando a cada "mudança de contexto" da conversa).
+- **Pedido novo (2026-08-20), ainda não iniciado — feature grande**:
+  insight de IA **em tempo real** durante o atendimento (não só
+  filtro histórico como na Auditoria), no estilo do painel do
+  Chatwoot mostrado pelo usuário — gerente vê o insight gerado
+  enquanto a conversa acontece, e pode mandar uma **nota interna**
+  pro atendente (visível pra atendente + gerente, **nunca** pro
+  cliente) sugerindo como aplicar aquele insight. Precisa de: geração
+  de insight incremental por conversa ativa (gatilho ainda a definir
+  — por volume de mensagens? por período de silêncio? por trecho
+  novo desde o último insight?), canal de mensagem interna
+  (provavelmente nova tabela, distinta de `messages`, já que não é
+  uma mensagem do WhatsApp e não pode nunca ser enviada ao contato
+  por engano), e UI tanto pro gerente enviar quanto pro atendente ver
+  essa nota dentro do chat. Ainda não desenhado — próxima tarefa a
+  planejar quando a fila anterior estiver concluída.
+

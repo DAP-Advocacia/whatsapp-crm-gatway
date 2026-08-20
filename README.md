@@ -381,7 +381,13 @@ manualmente nas 13 cópias.
   conversa, decisão consciente de simplicidade). O frontend
   (`hydrateMedia()` em `chat.html`/`index.html`) já sabia buscar URLs relativas
   de forma autenticada antes dessa mudança — nenhuma alteração de frontend foi
-  necessária.
+  necessária **em quem já usava esse mecanismo**. Qualquer tela nova/futura que
+  renderize bolhas de mensagem PRECISA usar o mesmo padrão
+  (`data-media-url` + `apiFetch` + blob, nunca `src=` direto) — esquecer isso é
+  exatamente o bug real encontrado e corrigido em `conversation-analysis.html`
+  na Parte DW do HANDOFF (§15.6), onde a mídia falhava silenciosamente porque
+  um `src` puro nunca consegue mandar o header `Authorization: Bearer` que
+  `GET /media/:filename` exige.
 - **Nome do arquivo prefixado por instância**: `saveMedia(sessionId, id, buffer,
   mimetype)` salva em `<sessionId>/<id>.<ext>`, não só `<id>.<ext>`. `id` é o
   `key.id` que o próprio WhatsApp/Baileys atribui à mensagem — único dentro de
@@ -1387,7 +1393,18 @@ concedido nominalmente (ver HANDOFF Parte DK).
   período), métricas agregadas do filtro atual, lista de conversas
   paginada no servidor (o universo é o sistema todo, não as
   instâncias de 1 dono), e o histórico completo de uma conversa em
-  bolhas **somente leitura** ao clicar numa linha.
+  bolhas **somente leitura** ao clicar numa linha. O cabeçalho desse
+  modal de histórico mostra também o tempo de diálogo (primeira →
+  última mensagem) e a contagem de mensagens enviadas/recebidas
+  (HANDOFF Parte DW) — tudo calculado no frontend a partir do mesmo
+  payload de histórico, sem rota nova.
+- **Mídia no histórico usa hidratação autenticada** (`data-media-url`
+  + `apiFetch` + blob, mesmo mecanismo de `chat.html` — ver §9), não
+  `src=` direto: como as rotas de mídia exigem `Authorization: Bearer`,
+  um `src` puro nunca conseguiria enviar esse header, e a mídia
+  falhava silenciosamente (bug real corrigido na Parte DW do HANDOFF —
+  não confundir com a robustez adicionada em `chat.html` na mesma
+  parte, que é uma causa diferente e não totalmente confirmada).
 - **Insight de IA sobre o conjunto filtrado**: amostra até 60
   conversas/400 mensagens (teto fixo, evita prompt gigante com um
   filtro amplo) — a resposta sempre mostra "baseado em N de T
