@@ -599,6 +599,7 @@
 
   <div class="panel">
     <h2 style="font-family:'Fraunces',serif; font-size:15px; margin:0 0 10px;">Conversas</h2>
+    <div id="activeFiltersSummary" style="display:none; margin-bottom:10px; font-size:12px; color:var(--text-muted);"></div>
     <div id="conversationsWrap">
       <div class="skeleton-row">Carregando…</div>
     </div>
@@ -925,7 +926,39 @@
     return c.lastText;
   }
 
+  // Resumo visível de "o que está filtrando agora" — chamado sempre que
+  // state.filters muda (via URL, ver applyFiltersFromUrl, ou via "Aplicar
+  // filtros" manual) pra deixar claro que um filtro está ativo, mesmo que
+  // o select correspondente não mostre a seleção (ex: sentBy de alguém
+  // sem instância própria — o filtro é real, só não aparece marcado no
+  // <select>, ver applyFiltersFromUrl). Mesmo raciocínio já usado na
+  // tabela de Usuários do Admin (HANDOFF Parte DM).
+  function updateActiveFiltersSummary() {
+    const summary = document.getElementById('activeFiltersSummary');
+    if (!summary) return;
+    const labels = [];
+    if (state.filters.search) labels.push(`busca "${state.filters.search}"`);
+    if (state.filters.sessionId) {
+      const opt = document.querySelector(`#filterInstance option[value="${CSS.escape(state.filters.sessionId)}"]`);
+      labels.push(`instância: ${opt ? opt.textContent : state.filters.sessionId}`);
+    }
+    if (state.filters.sentBy) {
+      const opt = document.querySelector(`#filterSentBy option[value="${CSS.escape(state.filters.sentBy)}"]`);
+      labels.push(`atendente: ${opt ? opt.textContent : state.filters.sentBy}`);
+    }
+    if (state.filters.from) labels.push(`de ${state.filters.from}`);
+    if (state.filters.to) labels.push(`até ${state.filters.to}`);
+    if (labels.length) {
+      summary.style.display = '';
+      summary.innerHTML = `Filtrando por: <b>${escapeHtml(labels.join(' + '))}</b>`;
+    } else {
+      summary.style.display = 'none';
+      summary.innerHTML = '';
+    }
+  }
+
   async function loadConversations() {
+    updateActiveFiltersSummary();
     const wrap = document.getElementById('conversationsWrap');
     const pager = document.getElementById('conversationsPager');
     wrap.innerHTML = '<div class="skeleton-row">Carregando…</div>';

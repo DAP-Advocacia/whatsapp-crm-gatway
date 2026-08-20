@@ -7930,3 +7930,57 @@ dependência do projeto, nunca tocou o `package.json` nem
 não fazem parte de nenhum commit, o usuário baixa direto do
 scratchpad pra fazer o upload no Bitrix.
 
+### Parte DU — "Ver conversas" (Parte DS) não filtrava — investigação extensa, causa não confirmada (2026-08-20)
+
+Usuário testou "Ver conversas" (Parte DS) e reportou que o clique
+levou pra Auditoria de Conversas, mas SEM o filtro daquela pessoa
+aplicado — só a lista geral. Investigado a fundo, com deploy já
+confirmado em produção (container com o código novo) antes de
+qualquer suspeita de bug:
+
+- **Backend**: testado `conversationAnalysisStore.listAll` direto
+  (sem HTTP) contra o banco real com um `sentBy` de verdade — sem
+  filtro, 50.688 conversas; com filtro, 31. Filtra corretamente.
+- **Geração do link**: simulado com um `ownerId` real (Leticia
+  Saldanha, `2c39349ea593c27fd3092b4fe2c47de7_123242`, confirmada com
+  70 mensagens no banco) — o HTML do `<a href="...">` sai correto,
+  sem problema de encoding.
+- **Boot completo simulado** (não só a função isolada,
+  `applyFiltersFromUrl`, já testada na Parte DS): instalado `jsdom`
+  ISOLADO no scratchpad (mesmo cuidado do ícone, Parte DT — não é
+  dependência do projeto), carregando `conversation-analysis.html`
+  de verdade com `?sentBy=<ownerId real>` na URL, mockando
+  `window.BX24` e `fetch` (precisou remover do HTML o `<script src>`
+  real do SDK do Bitrix24 antes de passar pro jsdom — ele tenta
+  buscar a rede de verdade e falha fora de um iframe real,
+  interrompendo os scripts seguintes da página). Resultado: a
+  requisição real de `/conversations` E `/metrics` saem com
+  `sentBy=<ownerId>` corretamente montado. Não foi possível
+  reproduzir o bug reportado com esse teste.
+- Descartado também: nenhum listener de clique intercepta o link
+  (`usersBody` só usa `e.target.closest('[data-*]')`, sem
+  `preventDefault` incondicional); nenhuma tag `<base target>`;
+  nenhum redirect HTTP no servidor (`curl -IL` direto na URL real
+  com query string, 200 direto); `Cache-Control: no-cache` já
+  configurado pra todo estático (`express.static`).
+
+**Não corrigido porque a causa raiz não foi confirmada** — mas
+adicionada uma melhoria de UI que ajuda de qualquer forma: resumo
+visível "Filtrando por: atendente: <nome>" acima da lista de
+conversas (`#activeFiltersSummary`, atualizado dentro de
+`loadConversations()` — cobre tanto o filtro vindo da URL quanto o
+"Aplicar filtros" manual), mesmo padrão já usado na tabela de
+Usuários do Admin (Parte DM). Resolve pelo menos a hipótese de o
+usuário não ter percebido visualmente que o filtro estava de fato
+aplicado.
+
+**Pendente real**: se o usuário testar de novo (depois do deploy
+desta correção de UI) e o filtro CONTINUAR não aparecendo — nem no
+resumo novo, nem no `<select>` "Atendente" —, a causa está em algo
+que só acontece no navegador real dele (extensão, cache específico,
+comportamento de iframe do Bitrix não reproduzível fora dele), não
+no código testado aqui. Próximo passo nesse caso: pedir prints do
+`<select>` "Atendente" e do card "Conversas" logo depois do clique,
+e confirmar a URL exata que aparece na barra de endereço (se o
+navegador mostrar isso dentro do iframe do Bitrix).
+
