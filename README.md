@@ -482,9 +482,11 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   em vez de só as iniciais do nome, quando disponível — cai pras iniciais
   se não houver foto ou a privacidade do contato bloquear. Buscada sob
   demanda e cacheada em `conversations.avatar_url` (`GET
-  /api/whatsapp/avatar`, sem TTL — nunca revalida uma foto já salva), numa
-  fila sequencial no front (`fetchMissingAvatars`, 250ms entre pedidos) pra
-  não disparar tudo de uma vez numa lista grande.
+  /api/whatsapp/avatar`, sem TTL — nunca revalida uma foto já salva), em
+  lotes de 4 em paralelo no front (`fetchMissingAvatars`, 150ms entre
+  lotes, HANDOFF Parte DR, 2026-08-20 — era 1 por vez com 250ms entre
+  cada, usuário reportou demora real numa lista com várias fotos ainda
+  sem cache) pra não disparar tudo de uma vez numa lista grande.
 - **Conversa**: mesmo conjunto de recursos da aba do card — texto, imagem, áudio
   (gravado ou anexado), vídeo, tags por conversa, indicador de status da conexão.
   O campo de mensagem tem scrollbar customizado (fino, cor da identidade visual

@@ -2589,15 +2589,28 @@
     }
   }
 
+  // Processa em pequenos LOTES em paralelo (era 1 por vez com 250ms entre
+  // cada — usuário reportou demora real pra carregar as fotos, HANDOFF
+  // Parte DR). getProfilePicture nunca lança (sempre devolve null em
+  // qualquer falha, ver Parte BS), então paralelizar não arrisca travar a
+  // fila numa falha isolada. Delay só ENTRE lotes, não entre cada item —
+  // ainda dá um respiro pra API do WhatsApp sem multiplicar a espera total
+  // pelo número de conversas na lista.
   let avatarQueueRunning = false;
   async function fetchMissingAvatars() {
     if (avatarQueueRunning) return;
     avatarQueueRunning = true;
+    const BATCH_SIZE = 4;
+    const BATCH_DELAY_MS = 150;
     try {
-      for (const conv of state.conversations.filter((c) => !c.avatarUrl)) {
-        if (!state.conversations.includes(conv)) continue; // lista mudou (nova busca/instância) enquanto isso rodava
-        await fetchAvatarFor(conv.sessionId, conv.phone);
-        await new Promise((r) => setTimeout(r, 250));
+      const pending = state.conversations.filter((c) => !c.avatarUrl);
+      for (let i = 0; i < pending.length; i += BATCH_SIZE) {
+        const batch = pending
+          .slice(i, i + BATCH_SIZE)
+          .filter((conv) => state.conversations.includes(conv)); // lista mudou (nova busca/instância) enquanto isso rodava
+        if (!batch.length) continue;
+        await Promise.all(batch.map((conv) => fetchAvatarFor(conv.sessionId, conv.phone)));
+        await new Promise((r) => setTimeout(r, BATCH_DELAY_MS));
       }
     } finally {
       avatarQueueRunning = false;

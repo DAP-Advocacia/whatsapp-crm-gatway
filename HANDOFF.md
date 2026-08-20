@@ -7836,3 +7836,40 @@ itens (idempotente, continua com a classe).
 **Pendente**: deploy em produção + confirmação visual de que a
 transição está suave (não dá pra medir isso fora do navegador real).
 
+### Parte DR — Fotos de perfil demoravam pra carregar no Chat (2026-08-20)
+
+Usuário reportou: na aba de Chat, as fotos demoram pra carregar.
+Investigado o mecanismo (`fetchMissingAvatars`, `chat.html`, Parte
+BS, 2026-07-16) — decisão original era **1 conversa por vez, 250ms
+de intervalo artificial ENTRE cada uma**, nunca medida contra o
+tempo real de resposta, só conservadora por padrão ("como buscar
+poderia ser lento pra muitas conversas de uma vez"). Com N conversas
+sem foto ainda em cache (comum ao abrir a lista pela primeira vez, ou
+depois de conectar uma instância nova), o tempo total escala
+linearmente com N — cada foto "pipoca" na tela uma de cada vez,
+percebido como demora real.
+
+**Correção**: processa em LOTES de 4 em paralelo (`Promise.all`),
+com o delay de 150ms só ENTRE lotes, não entre cada item —
+`getProfilePicture` (`src/whatsapp.js`) já nunca lança, sempre
+devolve `null` em qualquer falha (sessão offline, contato sem foto,
+privacidade bloqueando), então paralelizar não arrisca travar a fila
+numa falha isolada; o pior caso é uma foto individual não aparecer,
+igual já acontecia antes. Mantém a flag `avatarQueueRunning` (evita 2
+filas correndo ao mesmo tempo) e o `filter` que descarta uma
+conversa se a lista mudou (nova busca/instância) no meio do
+processamento — nenhuma dessas 2 proteções mudou.
+
+**Validação**: `vm.Script`. Teste funcional com mock de latência
+(sem bater na API real do WhatsApp) — 5 casos: só busca quem ainda
+não tem `avatarUrl`; roda de fato em paralelo (não 1 por vez);
+respeita o teto de 4 simultâneas; termina bem mais rápido que o
+modelo sequencial anterior no mesmo cenário (380ms vs os ~1400ms que
+o código antigo levaria); uma 2ª chamada concorrente não duplica o
+trabalho (a flag `avatarQueueRunning` continua funcionando).
+
+**Não alterado, fora de escopo**: o cache em si continua *para
+sempre* (dívida já registrada na Parte BS — foto trocada no WhatsApp
+não é revalidada). O objetivo aqui era só a velocidade da PRIMEIRA
+busca, não o TTL do cache.
+
