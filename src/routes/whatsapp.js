@@ -1244,6 +1244,24 @@ function createWhatsappRouter({ sessions, broadcast }) {
     }
   });
 
+  // ---------------------------------------------------------------
+  // GET /conversations/summary-history?session=&phone=
+  // Todo resumo já gerado pra essa conversa (não só o atual, devolvido
+  // junto de GET /history) — mais recente primeiro. Alimenta o link "Ver
+  // histórico" no painel de detalhes do contato (Chat).
+  // ---------------------------------------------------------------
+  router.get('/conversations/summary-history', requireSession((req) => req.query.session), async (req, res) => {
+    const { session, phone } = req.query;
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    try {
+      const history = await store.listConversationSummaryHistory(session, phone);
+      res.json({ history });
+    } catch (err) {
+      console.error('[conversations:summary-history] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   // Busca a mensagem citada (se `replyToId` vier preenchido) no formato que
   // WhatsAppGateway.sendMessage/sendMedia espera — usado por /send e
   // /send-media. `null` tanto pra "sem resposta" quanto pra "citou uma

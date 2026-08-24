@@ -464,6 +464,27 @@
   .action-link.danger:hover{ color:#e88b83; }
   .actions-cell{ display:flex; gap:10px; flex-wrap:wrap; }
 
+  /* Menu de "3 pontos" na tabela de Usuários — substitui as 4 ações
+     (Detalhado/Revogar/Auditoria/Ver conversas) expandidas por linha,
+     que ficavam largas demais com a tabela cheia de colunas. */
+  .actions-cell{ position:relative; display:flex; justify-content:flex-end; }
+  .kebab-btn{
+    background:none; border:1px solid transparent; color:var(--text-muted); cursor:pointer;
+    width:30px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center;
+    font-family:inherit; transition: background .15s, color .15s, border-color .15s;
+  }
+  .kebab-btn:hover, .kebab-btn.open{ background:var(--surface-2); border-color:var(--border); color:var(--gold); }
+  .kebab-menu{
+    position:absolute; top:100%; right:0; z-index:20; margin-top:4px; min-width:190px;
+    background:var(--surface); border:1px solid var(--border); border-radius:9px;
+    box-shadow:0 10px 28px rgba(0,0,0,.45); display:flex; flex-direction:column; padding:5px;
+  }
+  .kebab-menu[hidden]{ display:none; }
+  .kebab-menu .action-link{
+    display:block; width:100%; text-align:left; text-decoration:none; padding:7px 9px; border-radius:6px;
+  }
+  .kebab-menu .action-link:hover{ background:var(--surface-2); }
+
   /* ======================================================
      Modal "Detalhado" — padrão .overlay/.overlay.open/.modal já usado no
      resto do sistema (chat.html/contacts.html/etc, ver HANDOFF Parte CY)
@@ -1327,10 +1348,15 @@
           <td>${escapeHtml(formatPageName(u.favoritePage))}</td>
           <td>
             <div class="actions-cell">
-              <button class="action-link" data-detail="${escapeHtml(u.ownerId)}">Detalhado</button>
-              ${revokeAction}
-              ${analysisAction}
-              ${viewConversationsAction}
+              <button type="button" class="kebab-btn" data-kebab-toggle title="Mais ações">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg>
+              </button>
+              <div class="kebab-menu" hidden>
+                <button class="action-link" data-detail="${escapeHtml(u.ownerId)}">Detalhado</button>
+                ${revokeAction}
+                ${analysisAction}
+                ${viewConversationsAction}
+              </div>
             </div>
           </td>
         </tr>
@@ -1571,7 +1597,35 @@
     }
   });
 
+  // Menu de "3 pontos" — só um aberto por vez (fecha qualquer outro antes
+  // de abrir o clicado); clicar fora ou escolher uma ação fecha também.
+  function closeAllKebabMenus(except) {
+    document.querySelectorAll('.kebab-menu:not([hidden])').forEach((menu) => {
+      if (menu === except) return;
+      menu.hidden = true;
+      menu.previousElementSibling?.classList.remove('open');
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.actions-cell')) closeAllKebabMenus();
+  });
+
   document.getElementById('usersBody').addEventListener('click', async (e) => {
+    const kebabBtn = e.target.closest('[data-kebab-toggle]');
+    if (kebabBtn) {
+      const menu = kebabBtn.nextElementSibling;
+      const wasOpen = !menu.hidden;
+      closeAllKebabMenus();
+      menu.hidden = wasOpen;
+      kebabBtn.classList.toggle('open', !wasOpen);
+      return;
+    }
+    // Qualquer ação dentro do menu (Detalhado/Revogar/Auditoria/Ver
+    // conversas) fecha o menu antes de processar — os handlers abaixo
+    // continuam disparando normalmente pelos mesmos data-*, essa troca é
+    // só de onde os botões vivem visualmente.
+    if (e.target.closest('.kebab-menu')) closeAllKebabMenus();
+
     const detailBtn = e.target.closest('[data-detail]');
     if (detailBtn) return openUserDetail(detailBtn.dataset.detail);
 

@@ -305,6 +305,26 @@ async function setConversationSummary(sessionId, phone, { title, subtitle, summa
   );
 }
 
+// Todo resumo já gerado pra essa conversa (não só o atual, ver
+// getConversationSummary acima) — ordem cronológica REVERSA (mais recente
+// primeiro), já que quem consome isso quer ver "como o caso evoluiu" a
+// partir de agora, olhando pra trás. `conversation_summaries` já é
+// alimentada automaticamente por setConversationSummary, uma linha por
+// geração — sem migração de dado antigo (o histórico só existe a partir
+// de quando essa tabela foi criada; resumos gerados antes disso não
+// deixaram rastro além do snapshot único que já havia em ai_summary).
+async function listConversationSummaryHistory(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select cs.title, cs.subtitle, cs.summary, cs.created_at as "createdAt"
+     from conversation_summaries cs
+     join conversations c on c.id = cs.conversation_id
+     where c.session_id = $1 and c.phone = $2
+     order by cs.created_at desc`,
+    [sessionId, phone]
+  );
+  return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+}
+
 // Histórico persistido de notificações (db/schema.sql, tabela `notifications`)
 // — por dono do Bitrix, não por instância. `target` é
 // {sessionId, phone, contactName}, usado pra navegar ao clicar num card.
@@ -824,6 +844,7 @@ module.exports = {
   getConversationNotifPrefs,
   getConversationSummary,
   setConversationSummary,
+  listConversationSummaryHistory,
   addNotification,
   listNotifications,
   listLatestUnreadNotifications,

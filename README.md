@@ -579,10 +579,14 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
     persiste).
   - **Resumo da conversa via IA**: card **estruturado em título + subtítulo +
     resumo** (não um parágrafo só), grudado no fim do painel (logo acima do
-    rodapé). **Sem botão de regenerar manual** — gerado sozinho **uma única
-    vez** por conversa (na primeira vez que se abre uma conversa com
-    mensagens e ainda sem resumo salvo) e nunca mais atualizado
-    automaticamente depois disso, mesmo com mensagens novas chegando. Chama
+    rodapé). **Sem botão de regenerar manual** (removido a pedido do
+    usuário) — mas se regenera **sozinho** conforme a conversa continua:
+    gerado na primeira vez que se abre uma conversa com mensagens e ainda
+    sem resumo salvo, e depois disso re-executado automaticamente a cada
+    mensagem nova (qualquer direção) recebida via WebSocket, com debounce
+    de 15s pra não regenerar a cada mensagem individual numa rajada
+    (`scheduleSummaryRefresh`, HANDOFF Parte DY corrigiu esta descrição —
+    o comportamento antigo era "gera uma vez só e nunca mais"). Chama
     `POST /api/whatsapp/conversations/summary` `{ session, phone,
     contactName? }`, que reprocessa até as últimas 80 mensagens da conversa
     (`store.getHistory`) via OpenAI (`gpt-4o-mini`, `response_format:
@@ -596,6 +600,15 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
     summary}` ou `null`), sem round-trip extra ao abrir a conversa. Sem
     `OPENAI_API_KEY`, a geração automática falha silenciosamente (sem
     toast).
+  - **Histórico de resumos** (HANDOFF Parte DY): cada regeneração
+    automática grava também uma linha nova em `conversation_summaries`
+    (mesma query atômica de `store.setConversationSummary`, via CTE) —
+    vira um registro de como o caso foi evoluindo ao longo do
+    atendimento, não só o snapshot mais recente. Link "Ver histórico"
+    (perto de "Atualizado X" no card do resumo, só aparece com pelo
+    menos 1 resumo salvo) abre um modal com todas as versões, mais
+    recente primeiro. `GET /api/whatsapp/conversations/summary-history?
+    session=&phone=` → `store.listConversationSummaryHistory`.
 - Todo o cabeçalho de página (logo da sidebar, cabeçalho da lista, cabeçalho da
   conversa e do painel de contato) e os dois rodapés (sidebar e o selo
   "Desenvolvido por") usam duas alturas fixas compartilhadas (`--header-h`,
@@ -1241,6 +1254,13 @@ acesso, tempo total (30d), página favorita e bloqueio.
   Conversas já filtrada pelas conversas que ESSA pessoa atendeu
   (`messages.sent_by`, não pela instância/dono). A tela de Auditoria lê
   esse parâmetro 1x no boot (`applyFiltersFromUrl`).
+- **As 4 ações acima (Detalhado/Revogar/Auditoria/Ver conversas) vivem
+  num menu de "3 pontos" por linha** (`.kebab-btn`/`.kebab-menu`,
+  HANDOFF Parte DY) — ficavam largas demais expandidas direto na
+  célula, com a tabela já cheia de colunas. Puramente apresentação:
+  os mesmos `data-*`/delegação de evento em `#usersBody` de sempre,
+  nenhum handler mudou. Só um menu aberto por vez; fecha ao clicar
+  fora ou ao escolher uma ação.
 - **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
   **inteiro** (tabela `blocked_owners`) — `POST
   /admin/users/:ownerId/block`|`unblock`. Verificado dentro de
@@ -1390,7 +1410,11 @@ concedido nominalmente (ver HANDOFF Parte DK).
 - **O que a tela mostra**: filtros (termo de busca no CONTEÚDO da
   mensagem, instância, atendente — por mensagem individual que essa
   pessoa escreveu, não por quem é o responsável atual da conversa —,
-  período), métricas agregadas do filtro atual, lista de conversas
+  período, com botão "Limpar filtros" ao lado de "Aplicar filtros",
+  HANDOFF Parte DY — zera os 5 campos + a query string da URL, pra um
+  F5 depois de limpar não reaplicar um `?sentBy=` antigo vindo do link
+  "Ver conversas" do Admin), métricas agregadas do filtro atual, lista
+  de conversas
   paginada no servidor (o universo é o sistema todo, não as
   instâncias de 1 dono), e o histórico completo de uma conversa em
   bolhas **somente leitura** ao clicar numa linha. O cabeçalho desse
@@ -1534,6 +1558,7 @@ revelar que o recurso existe).
 | `conversations/archive` | POST | Body `{ session, phone, archived }`. Arquiva/desarquiva uma conversa — só organiza a lista, não afeta envio/recebimento. |
 | `conversations/notifications` | POST | Body `{ session, phone, enabled }`. Silencia/dessilencia notificações de uma conversa — notifica por padrão (§9). |
 | `conversations/summary` | POST | Body `{ session, phone, contactName? }`. Gera (OpenAI) e persiste o resumo estruturado da conversa (até as últimas 80 mensagens), devolve `{title, subtitle, summary, updatedAt}` — ver §9. |
+| `conversations/summary-history?session=&phone=` | GET | Devolve `{history: [{title,subtitle,summary,createdAt}, ...]}`, mais recente primeiro — toda versão de resumo já gerada pra essa conversa, não só a atual (§9, HANDOFF Parte DY). |
 | `groups?session=` | GET | Lista os grupos do WhatsApp já criados pela(s) instância(s) (aceita várias separadas por vírgula). |
 | `groups` | POST | Body `{ session, name, phones:[...] }`. Cria um grupo de verdade no WhatsApp (`sock.groupCreate`) — usado em `contacts.html` e no botão "Novo grupo" do Chat (§9). |
 | `contacts/groups?session=&phone=` | GET | Lista os grupos da instância dos quais esse telefone é participante (`{ groups: [{id, name}] }`) — usado em "grupos em comum" no painel de contato do Chat (§9). Uma chamada ao WhatsApp por grupo da instância; best-effort com participantes `@lid` sem telefone resolvido. |

@@ -8281,3 +8281,95 @@ limpos depois.
   ver deploy automático via EasyPanel, autoDeploy historicamente
   `false`, Partes DH+).
 
+### Parte DY — "Limpar filtros" na Auditoria + menu "⋮" no Admin + Histórico de resumos de IA (2026-08-24)
+
+Deploy da Parte DX confirmado em produção antes de seguir pra esta
+parte — usuário mandou print do domínio real do EasyPanel
+(`whatsapp.bmdholding.com.br`, achado via aba Domains do painel — o
+`.env` local só tinha um ngrok de referência, não a URL real), e
+`curl` contra esse domínio confirmou as strings novas (`createGroupBtn`/
+`viewSwitch`/`notesDrawer`) e as rotas `/api/card-group`/
+`/api/internal-notes` respondendo 401 (existem, exigem auth), não 404.
+
+**Nota lateral, fora de escopo desta sessão**: usuário pediu pra
+enviar uma mensagem de teste ("Oi, teste") pro Bitrix Messenger de um
+contato via chat — esclarecido que não há (e nunca houve) nenhuma
+integração deste projeto com a API de mensageria do Bitrix
+(`im.message.add`), só com WhatsApp via Baileys. Não implementado —
+decisão do usuário de deixar pra quando houver necessidade real, não
+só teste.
+
+**1) Botão "Limpar filtros" (`public/conversation-analysis.html`)** —
+ao lado de "Aplicar filtros" na Auditoria de Conversas, mesmo texto/
+padrão que já existia (sem eu saber de antemão) no botão equivalente
+da tabela de Usuários do Admin (`usersFiltersClear`). Zera os 5 campos
+do form + `state.filters`, volta pra página 1, e limpa a query string
+da URL via `history.replaceState` (sem recarregar) — necessário porque
+essa tela pode chegar com `?sentBy=...` do link "Ver conversas" do
+Admin (Parte DS); sem limpar a URL, um F5 depois de "limpar" reaplicaria
+o filtro antigo de novo (`applyFiltersFromUrl` roda no boot).
+
+**2) Menu de "3 pontos" (`public/admin.html`)** — as 4 ações por linha
+da tabela de Usuários (Detalhado/Revogar/Auditoria/Ver conversas, ver
+Partes DS/DK) ficavam largas demais com a tabela cheia de colunas.
+Botão `.kebab-btn` abre um `.kebab-menu` (`position:absolute`) com as
+mesmas 4 ações — **nenhum handler existente foi tocado**: todos já
+usavam delegação de evento em `#usersBody` via `e.target.closest('[data-*]')`,
+então mover os botões pra dentro de um menu escondido é puramente
+mudança de apresentação. Lógica nova: só um menu aberto por vez
+(`closeAllKebabMenus`), fecha ao clicar fora (listener em `document`) ou
+ao escolher qualquer ação dentro do menu. Testado com jsdom isolado no
+scratchpad (14 cenários: toggle, exclusividade entre 2 linhas, clicar
+fora fecha, clicar em ação fecha E dispara o handler original com o
+`ownerId` certo) — todos confirmados antes de aplicar no arquivo real.
+
+**3) Histórico de resumos de IA — descoberta real: já estava
+95% pronto, sem ninguém saber.** Investigação antes de escrever
+qualquer linha revelou que a tabela `conversation_summaries` (schema)
+e a escrita (`store.setConversationSummary`, dentro da mesma query
+atômica que atualiza `conversations.ai_summary`) **já existiam e já
+estavam em uso havia dias** — 1807 linhas reais no banco de produção,
+uma conversa chegando a 43 versões diferentes de resumo. O resumo já
+se regenera sozinho a cada mensagem nova (`scheduleSummaryRefresh` em
+`chat.html`, debounce de 15s) desde antes desta sessão — exatamente o
+"a cada mudança de contexto deve ser salvo" que o usuário pediu
+originalmente já estava acontecendo. Só faltava **expor isso**: nenhuma
+rota lia a tabela, nenhuma tela mostrava.
+
+*Nota*: o comentário em `chat.html` perto de `renderSummarySection`
+("sem botão de regenerar manual... o resumo não se atualiza sozinho")
+está desatualizado — descreve um comportamento de ANTES do
+`scheduleSummaryRefresh` existir. Não corrigido nesta sessão (fora do
+escopo desta tarefa específica) — mencionado aqui pra quem for mexer
+ali de novo não se confundir com o texto antigo.
+
+- **Backend**: `store.listConversationSummaryHistory(sessionId, phone)`
+  (nova) — join simples com `conversations`, ordem cronológica
+  REVERSA (mais recente primeiro). Rota nova `GET
+  /api/whatsapp/conversations/summary-history?session=&phone=`, mesmo
+  padrão de `requireSession` do resto do router. Testado com dado REAL
+  já existente no banco (não precisou criar dado de teste) — 30/43
+  versões devolvidas corretamente via `curl` autenticado contra o
+  servidor rodando.
+- **Achado lateral, não é bug desta sessão**: uma conversa testada
+  tinha `conversations.session_id` com um sufixo
+  (`..._180388__mt1uabmknozf`) que não corresponde a nenhuma linha de
+  `instances` — `assertOwnsSession` corretamente devolve 403 pra esse
+  `session_id`, mesmo pro dono certo. Não investigado a fundo (fora do
+  escopo aqui) — só confirma que a rota nova respeita a mesma regra de
+  posse do resto do sistema, rejeitando acesso que não bate.
+- **Frontend (`chat.html`)**: link "Ver histórico" (sublinhado,
+  discreto) ao lado de "Atualizado X" no painel "Resumo da conversa" —
+  só aparece quando já existe pelo menos 1 resumo. Abre modal novo
+  (`#summaryHistoryModal`, mesmo padrão `.overlay`/`.modal` de
+  `#viewGroupsModal` já existente) listando cada versão (título +
+  subtítulo + texto + data/hora), mais recente primeiro, reaproveitando
+  as classes `.contact-summary-*` já usadas no painel principal.
+
+**Validação geral desta parte**: sintaxe (`new Function`) em
+`admin.html`/`chat.html`/`conversation-analysis.html`; lógica do kebab
+menu testada isoladamente com jsdom (14 cenários); rota de histórico
+testada com dado real via `curl` (servidor de teste subido/derrubado
+em porta isolada); nenhum dado de teste criado precisou de limpeza
+nesta parte (só leitura de dado já existente).
+

@@ -611,6 +611,7 @@
         <input type="date" id="filterTo">
       </div>
       <button type="button" class="btn primary" id="applyFiltersBtn">Aplicar filtros</button>
+      <button type="button" class="btn secondary" id="clearFiltersBtn">Limpar filtros</button>
     </div>
   </div>
 
@@ -1262,6 +1263,26 @@
   document.getElementById('applyFiltersBtn').addEventListener('click', () => {
     state.filters = currentFiltersFromForm();
     state.page = 1;
+    loadMetrics();
+    loadConversations();
+  });
+
+  // Limpar filtros — zera os 5 campos do form + state.filters, volta pra
+  // página 1. Também limpa a query string da URL (ex: ?sentBy=... vindo do
+  // link "Ver conversas" do Admin, ver applyFiltersFromUrl) SEM recarregar
+  // a página — senão um F5 reaplicaria o filtro antigo de novo, e "limpar"
+  // pareceria não ter funcionado de verdade depois de um refresh.
+  document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+    document.getElementById('filterSearch').value = '';
+    document.getElementById('filterInstance').value = '';
+    document.getElementById('filterSentBy').value = '';
+    document.getElementById('filterFrom').value = '';
+    document.getElementById('filterTo').value = '';
+    state.filters = {};
+    state.page = 1;
+    if (window.location.search) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     loadMetrics();
     loadConversations();
   });

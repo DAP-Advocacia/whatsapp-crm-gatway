@@ -700,6 +700,18 @@
   .contact-summary-text{ font-size:12px; line-height:1.5; color:var(--text-muted); margin:0; }
   .contact-summary-text.empty-summary{ color:var(--text-faint); font-style:italic; }
   .contact-summary-meta{ font-size:9.5px; color:var(--text-faint); margin:6px 0 0; }
+  .contact-summary-history-link{
+    background:none; border:none; color:var(--gold-dim); font-size:9.5px; cursor:pointer;
+    padding:0; text-decoration:underline; font-family:inherit; margin-left:6px;
+  }
+  .contact-summary-history-link:hover{ color:var(--gold); }
+
+  /* Modal de histórico de resumos — cada versão é um bloco próprio,
+     reaproveita as classes .contact-summary-* já usadas no painel. */
+  .summary-history-list{ display:flex; flex-direction:column; gap:14px; max-height:56vh; overflow-y:auto; }
+  .summary-history-item{ padding-bottom:14px; border-bottom:1px solid var(--border); }
+  .summary-history-item:last-child{ border-bottom:none; padding-bottom:0; }
+  .summary-history-empty{ font-size:12px; color:var(--text-faint); font-style:italic; }
   .header-info{ min-width: 0; flex: 1; }
   .header-info .name{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .header-info .meta{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
@@ -1170,6 +1182,21 @@
     <div class="checkbox-list" id="viewGroupsList" style="max-height:320px"></div>
     <div class="modal-actions">
       <button class="btn secondary" id="viewGroupsCancel">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Histórico de resumos de IA — cada versão gerada da conversa, mais
+     recente primeiro (o resumo se regenera sozinho a cada ~15s depois de
+     mensagem nova, ver scheduleSummaryRefresh); "Resumo da conversa" no
+     painel de detalhes sempre mostra só a versão MAIS RECENTE, este modal
+     é onde dá pra ver como o caso foi evoluindo ao longo do atendimento. -->
+<div class="overlay" id="summaryHistoryModal">
+  <div class="modal">
+    <h3>Histórico de resumos</h3>
+    <div class="summary-history-list" id="summaryHistoryList"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="summaryHistoryCancel">Fechar</button>
     </div>
   </div>
 </div>
@@ -1685,6 +1712,8 @@
       if (!window.BX24) return;
       BX24.openPath(info.kind === 'lead' ? `/crm/lead/details/${info.id}/` : `/crm/contact/details/${info.id}/`);
     });
+    const historyBtn = document.getElementById('summaryHistoryBtn');
+    if (historyBtn) historyBtn.addEventListener('click', openSummaryHistoryModal);
     hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
   }
 
@@ -1713,10 +1742,50 @@
               `
               : `<p class="contact-summary-text empty-summary">Sem resumo ainda.</p>`
         }
-        ${hasSummary && aiSummaryUpdatedAt ? `<p class="contact-summary-meta">Atualizado ${formatListTime(aiSummaryUpdatedAt)}</p>` : ''}
+        ${hasSummary && aiSummaryUpdatedAt ? `
+          <p class="contact-summary-meta">
+            Atualizado ${formatListTime(aiSummaryUpdatedAt)}
+            <button type="button" class="contact-summary-history-link" id="summaryHistoryBtn">Ver histórico</button>
+          </p>
+        ` : ''}
       </div>
     `;
   }
+
+  // Modal de histórico de resumos — todas as versões já geradas pra essa
+  // conversa (não só a mais recente, mostrada no painel), mais recente
+  // primeiro. GET /conversations/summary-history (novo).
+  async function openSummaryHistoryModal() {
+    const a = state.active;
+    if (!a) return;
+    const modal = document.getElementById('summaryHistoryModal');
+    const list = document.getElementById('summaryHistoryList');
+    list.innerHTML = '<p class="summary-history-empty">Carregando…</p>';
+    modal.classList.add('open');
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/summary-history?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar histórico');
+      const data = await res.json();
+      const history = data.history || [];
+      if (!history.length) {
+        list.innerHTML = '<p class="summary-history-empty">Nenhum resumo gerado ainda.</p>';
+        return;
+      }
+      list.innerHTML = history.map((h) => `
+        <div class="summary-history-item">
+          ${h.title ? `<p class="contact-summary-headline">${escapeHtml(h.title)}</p>` : ''}
+          ${h.subtitle ? `<p class="contact-summary-subtitle">${escapeHtml(h.subtitle)}</p>` : ''}
+          <p class="contact-summary-text">${escapeHtml(h.summary)}</p>
+          <p class="contact-summary-meta">${formatDayLabel(h.createdAt)} · ${formatListTime(h.createdAt)}</p>
+        </div>
+      `).join('');
+    } catch (err) {
+      list.innerHTML = `<p class="summary-history-empty">${escapeHtml(err.message)}</p>`;
+    }
+  }
+  document.getElementById('summaryHistoryCancel').addEventListener('click', () => {
+    document.getElementById('summaryHistoryModal').classList.remove('open');
+  });
 
   async function generateConversationSummary(silent) {
     const a = state.active;
