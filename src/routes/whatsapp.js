@@ -1931,16 +1931,27 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
-  // POST /admin/feed-post  { title?, message }
+  // POST /admin/feed-post  { title?, content }
   // Publica no Feed nativo do Bitrix24 (Live Feed, "Para todos os
   // colaboradores") — SEMPRE manual, disparado só quando o super admin
   // clica "Publicar" no Painel Admin depois de revisar o texto (decisão
   // confirmada com o usuário: nunca automático a partir de deploy/commit).
   // Registrado em feed_posts mesmo em falha, pra nunca perder o rastro de
   // uma tentativa que não foi ao ar.
+  //
+  // O campo do BODY se chama "content", não "message" (nome da coluna no
+  // banco, mantido só internamente) — descoberto em teste real
+  // (2026-08-25) que algo na infraestrutura de produção (proxy/WAF fora
+  // do nosso controle, nunca chega a este Express — confirmado pela
+  // ausência de X-Powered-By/Ratelimit-* na resposta 502) bloqueia
+  // especificamente POST nesta rota quando o body tem uma chave literal
+  // "message" — GET na mesma rota, e POST com "title" sozinho ou outro
+  // nome de campo, sempre funcionaram normalmente. Renomear o campo
+  // externo contorna sem depender de alterar a infraestrutura.
   // ---------------------------------------------------------------
   router.post('/admin/feed-post', requireSuperAdmin, async (req, res) => {
-    const { title, message } = req.body || {};
+    const { title, content } = req.body || {};
+    const message = content;
     if (!message || !String(message).trim()) {
       return res.status(400).json({ error: 'a mensagem é obrigatória' });
     }

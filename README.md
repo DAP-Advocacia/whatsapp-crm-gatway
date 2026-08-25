@@ -1385,9 +1385,14 @@ verdade (o Bitrix é o dono real do post), só um registro pra não
 duplicar anúncio; grava mesmo em falha (`status:'failed'` + o erro),
 mostrado em vermelho na lista.
 
-Rotas: `POST /api/whatsapp/admin/feed-post` `{ title?, message }` e
+Rotas: `POST /api/whatsapp/admin/feed-post` `{ title?, content }` e
 `GET /api/whatsapp/admin/feed-posts` (últimos 100) — ambas restritas a
-`requireSuperAdmin` (ver §17, `src/adminAuth.js`).
+`requireSuperAdmin` (ver §17, `src/adminAuth.js`). O campo do body se
+chama `content`, não `message` (nome usado internamente/na coluna do
+banco) — uma proteção na infraestrutura de produção bloqueia POST
+nesta rota especificamente quando o body tem uma chave literal
+`message` (confirmado não chegar no Express — sem `X-Powered-By`/
+`Ratelimit-*` na resposta), descoberto em teste real 2026-08-25.
 
 ### Sugestões — Kanban (3 colunas) restrito a super admin
 
@@ -1715,7 +1720,7 @@ revelar que o recurso existe).
 | `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds, dateRegister}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
 | `admin/diagnostics/sessions` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura. `{ sessions:[{sessionId, status, hasSock}] }` — sessões WhatsApp já em memória no processo (`SessionManager.listActive()`), SEM criar nenhuma sessão nova (diferente de acessar via `session=` em qualquer outra rota, que cria+inicia se ainda não existir). Usada pra saber quais instâncias têm um socket Baileys de verdade conectado agora — pré-requisito de `resolve-lid` abaixo. Ferramenta de diagnóstico permanente (HANDOFF Parte CP), não removida depois de usada. |
 | `admin/diagnostics/resolve-lid` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura (não altera nenhuma linha do banco, não envia nada pro WhatsApp). Body `{ sessionId, lidNumbers:[...] }` (máx. 500). Tenta resolver cada número do sistema LID do WhatsApp pro telefone real, via o socket JÁ CONECTADO daquela sessão (`signalRepository.lidMapping`) — `null` no resultado se não conseguir. 400 se a sessão não estiver `online` agora. Usada pra medir/corrigir conversas antigas salvas com o LID cru no lugar do telefone — ver `scripts/fix-lid-phones.js`/`fix-lid-contacts.js` e HANDOFF Parte CP. |
-| `admin/feed-post` | POST | Restrito a `requireSuperAdmin`. Body `{ title?, message }`. Publica no Feed nativo do Bitrix (§14.5, `src/bitrixFeed.js`) e registra em `feed_posts` (sucesso ou falha). 400 sem `message`; 502 se a publicação em si falhar (webhook não configurado, erro da API do Bitrix). |
+| `admin/feed-post` | POST | Restrito a `requireSuperAdmin`. Body `{ title?, content }` — o nome é `content`, não `message` (ver §14.5, o bloqueio real descoberto em produção). Publica no Feed nativo do Bitrix (`src/bitrixFeed.js`) e registra em `feed_posts` (sucesso ou falha). 400 sem `content`; 502 se a publicação em si falhar (webhook não configurado, erro da API do Bitrix). |
 | `admin/feed-posts` | GET | Restrito a `requireSuperAdmin`. `{ posts:[{id, ownerId, title, message, bitrixPostId, status, error, createdAt}] }` — histórico LOCAL, últimos 100, mais recente primeiro. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)

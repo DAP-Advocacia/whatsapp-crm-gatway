@@ -1756,7 +1756,10 @@
       const res = await apiFetch(`${API_BASE}/admin/feed-post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: titleEl.value.trim(), message }),
+        // Campo chamado "content" no corpo, não "message" — ver comentário
+        // em POST /admin/feed-post (src/routes/whatsapp.js) sobre o bloqueio
+        // real descoberto em produção.
+        body: JSON.stringify({ title: titleEl.value.trim(), content: message }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'falha ao publicar');

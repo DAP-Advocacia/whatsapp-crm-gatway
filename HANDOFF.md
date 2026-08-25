@@ -8913,13 +8913,26 @@ limit (`Ratelimit-Remaining` alto), não é o processo caindo (outras
 rotas continuam 200 durante e depois), não é CORS/auth (roda depois
 de passar por `requireSuperAdmin` — sem token dá 401 normal do
 Express), não é tamanho de payload, não é `message` em outra rota
-(funciona em `presence/heartbeat`). Só reproduz na combinação exata
-`POST /api/whatsapp/admin/feed-post` + campo `message` presente —
-não investigado até o fim (precisa de acesso aos logs do container no
-EasyPanel no momento exato da requisição, ainda não obtido). Local
-(`.env`) funciona perfeitamente — só produção com este sintoma.
-**Retomar**: pedir pro usuário abrir a aba de Logs (não Deployment
-History) do serviço no EasyPanel durante uma tentativa nova.
+(funciona em `presence/heartbeat`, e num campo diferente — `body` —
+na MESMA rota `/admin/feed-post`, que devolveu 400 normal). Isolado
+100%: só reproduz na combinação exata `POST /api/whatsapp/admin/
+feed-post` + uma chave JSON literal chamada `message` no corpo — algo
+na infraestrutura de produção (proxy/WAF fora do nosso controle, não
+identificado ao certo — hipótese mais provável é uma assinatura
+genérica anti-spam de blog/comentário, comum em WAFs, reagindo a
+"postar" + "message" juntos) bloqueia isso antes de chegar no
+processo Node.
+
+**Contornado, não pela causa raiz (fora do nosso controle) — renomeado
+o campo externo**: `POST /admin/feed-post` agora espera `{ title?,
+content }` no corpo (era `{ title?, message }`) — só o nome da chave
+JSON exposta na rota HTTP mudou; internamente (variável local, coluna
+`feed_posts.message` no banco, `publishFeedPost`/`recordFeedPost`)
+continua tudo `message`, sem nenhuma migração necessária.
+`admin.html` (`feedPostPublishBtn` handler) atualizado pra mandar
+`content` no `JSON.stringify`. Testado local com sucesso (post real
+publicado com `content`, depois removido) — falta confirmar em
+produção depois deste deploy.
 
 **Bug real encontrado e corrigido: "seção Admin pisca e some" ao
 navegar entre `onboarding.html` e as outras 13 telas com sidebar**.
