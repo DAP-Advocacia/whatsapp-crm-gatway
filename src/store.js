@@ -925,6 +925,19 @@ async function classifyRecipients(sessionId, phones) {
   return rows;
 }
 
+// Contagem de conversas de UMA instância — usada pelo snapshot diário de
+// métricas do Alerta de instância caída (src/instanceHealthStore.js).
+// Deliberadamente uma query de count(*), não listConversations(...).length
+// (aquela devolve no máximo 200 linhas — um limit pensado pra UI, não pra
+// métrica real).
+async function countConversations(sessionId) {
+  const { rows } = await pool.query(
+    `select count(*)::int as n from conversations where session_id = $1`,
+    [sessionId]
+  );
+  return rows[0].n;
+}
+
 module.exports = {
   addMessage,
   getHistory,
@@ -972,4 +985,5 @@ module.exports = {
   setInternalNoteCompleted,
   listInternalNoteRevisions,
   classifyRecipients,
+  countConversations,
 };

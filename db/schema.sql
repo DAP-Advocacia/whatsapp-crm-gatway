@@ -891,3 +891,54 @@ create table if not exists feed_posts (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_feed_posts_created on feed_posts (created_at desc);
+
+-- Alerta de instância caída/desconectada — histórico de QUEDAS (uma
+-- linha por evento, não snapshot periódico, já que o dado é uma
+-- transição discreta: caiu, voltou). `kind` distingue os 2 casos que o
+-- usuário pediu (sem certeza de "banido pelo WhatsApp" especificamente
+-- — decisão confirmada: "provavelmente perdida, reconecte" é
+-- suficiente):
+--   'temporary' -> gateway tentando reconectar sozinho (queda comum de
+--                  rede, esperada e frequente nesse tipo de integração)
+--   'attention' -> needsAttention ou loggedOut — parou de tentar
+--                  reconectar sozinho, precisa ação manual (reconectar
+--                  ou trocar de número)
+-- `instance_id` é o session_id (mesmo identificador usado em
+-- instances/conversations), não uma FK — histórico precisa sobreviver
+-- mesmo se a instância for removida depois (mesmo padrão já usado pras
+-- 27 instâncias órfãs, ver HANDOFF Parte ED).
+create table if not exists instance_connection_events (
+  id bigserial primary key,
+  instance_id text not null,
+  kind text not null check (kind in ('temporary', 'attention')),
+  reason text,
+  started_at timestamptz not null default now(),
+  ended_at timestamptz,
+  duration_ms bigint,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_instance_conn_events_instance
+  on instance_connection_events (instance_id, started_at desc);
+-- Índice parcial — só a queda EM ABERTO de cada instância, consultada a
+-- cada mudança de status (deve achar no máximo 1 linha instantaneamente).
+create index if not exists idx_instance_conn_events_open
+  on instance_connection_events (instance_id) where ended_at is null;
+
+-- Alerta de instância caída — série de MÉTRICAS, snapshot diário (não
+-- por evento, já que contagem de conversa/contato evolui devagar e
+-- continuamente, sem uma transição discreta natural como a queda
+-- acima). `contact_count_real` conta pela tabela `contacts` (dado
+-- persistido e completo); `contact_count_baileys` é só
+-- auxiliar/comparativo (o acumulado do Baileys zera a cada boot do
+-- processo, não confiável como métrica histórica de longo prazo —
+-- daria quedas artificiais na série a cada deploy).
+create table if not exists instance_metrics_daily (
+  instance_id text not null,
+  snapshot_date date not null,
+  conversation_count int not null default 0,
+  contact_count_real int not null default 0,
+  contact_count_baileys int,
+  group_count int,
+  created_at timestamptz not null default now(),
+  primary key (instance_id, snapshot_date)
+);

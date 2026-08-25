@@ -18,6 +18,18 @@ async function listContacts(ownerId) {
   return rows;
 }
 
+// Contagem de contatos de UM owner — usada pelo snapshot diário de
+// métricas do Alerta de instância caída (src/instanceHealthStore.js).
+// count(*) dedicado, não listContacts(...).length (aquela devolve o
+// array completo, desnecessário só pra saber o total).
+async function countContacts(ownerId) {
+  const { rows } = await pool.query(
+    `select count(*)::int as n from contacts where owner_id = $1`,
+    [ownerId]
+  );
+  return rows[0].n;
+}
+
 async function upsertContact(ownerId, { name, phone, dealId }) {
   const { rows } = await pool.query(
     `insert into contacts (owner_id, phone, name, deal_id)
@@ -175,6 +187,7 @@ async function deleteContactList(id, ownerId) {
 
 module.exports = {
   listContacts,
+  countContacts,
   upsertContact,
   updateContact,
   deleteContact,

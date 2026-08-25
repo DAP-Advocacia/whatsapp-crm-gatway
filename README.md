@@ -53,6 +53,8 @@ pode rodar de novo a qualquer momento sem duplicar nada):
 |---|---|
 | `conversations` / `messages` | Histórico de mensagens por `(sessionId, phone)`, dedupe por `wa_message_id`. |
 | `instances` | Registro de instâncias de WhatsApp por dono (`id`, `owner_id`, `label`). |
+| `instance_connection_events` / `instance_metrics_daily` | Alerta de instância caída (§14) — histórico de quedas/retomadas (uma linha por evento) e série diária de métricas (conversas/contatos/grupos). `instance_id` é sempre o `session_id` cru, nunca FK — sobrevive à remoção da instância. |
+| `feed_posts` | Histórico LOCAL de posts publicados no Feed do Bitrix24 (§14.5) — nunca é a fonte de verdade, só registro pra não duplicar anúncio. |
 | `contacts` / `contact_lists` / `contact_list_members` | Contatos próprios e listas personalizadas, por **dono** (não por instância — se uma instância cai e o usuário conecta outra, os mesmos contatos/listas continuam aparecendo) — usados na Campanha. |
 | `message_templates` | Modelos de mensagem reutilizáveis (corpo com `{{nome}}`/`{{telefone}}`). |
 | `campaigns` / `campaign_results` | Histórico de disparos em massa (cabeçalho + resultado por destinatário). |
@@ -1155,6 +1157,33 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
   servidor inteiro e cada tentativa nova prolongava o próprio bloqueio do
   WhatsApp). "Tentar reconectar" usa as credenciais já salvas (não apaga
   nada); se não resolver, "Remover" e parear de novo continua disponível.
+- **Alerta de instância caída** — histórico de quedas + duração no card +
+  push, complementar ao "Precisa de atenção" acima:
+  - Enquanto a queda está em aberto, o card mostra **"Fora do ar há
+    Xh"** (âmbar, discreto) se for queda temporária reconectando sozinha,
+    ou o bloco vermelho "Precisa de atenção" já existente se for
+    permanente — nunca os dois juntos. Duração calculada no client a
+    partir de um timestamp absoluto (`openConnectionEvent.startedAt`,
+    `GET /instances`), atualiza a cada 30s.
+  - Botão **"Ver histórico"** (aparece pro dono E pro delegado — rota de
+    LEITURA, diferente das de ação abaixo) abre modal com a lista de
+    quedas/retomadas (mais recente primeiro, com duração e motivo) + uma
+    tabela da série diária de métricas (conversas, contatos, grupos) —
+    `GET /instances/:id/health?owner=`.
+  - **Push**: quando uma queda escala pra "precisa de atenção" (nunca
+    numa queda temporária isolada — inundaria o usuário), o dono e todos
+    os delegados recebem uma notificação na Central de Notificações
+    (§15) e, se a permissão do navegador já tiver sido concedida antes
+    (mesma Web Notification API de `notifications.html`/`chat.html`),
+    também um alerta do sistema — sem garantia de entrega dentro do
+    iframe do Bitrix, por isso a Central continua sendo o registro
+    confiável.
+  - Backend: `instance_connection_events` (uma linha por queda) +
+    `instance_metrics_daily` (snapshot diário, job de 1h em
+    `src/server.js`) — ver `src/instanceHealthStore.js`. Detecção
+    reaproveita 100% o que já existia (`needsAttention`/`loggedOut`/
+    `lastDisconnectReason`, ver acima) — só passou a ser persistida e
+    conectada a notificação, nada novo do lado da conexão em si.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
@@ -1633,11 +1662,12 @@ revelar que o recurso existe).
 | `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
 | `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
-| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` (ver §14); resposta também traz `limit`. |
+| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `openConnectionEvent` (Alerta de instância caída, §14) — resposta também traz `limit`. |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |
 | `instances/:id` | PUT | Body `{ owner, label }`. Renomeia. |
 | `instances/:id?owner=` | DELETE | Desconecta e remove a instância. |
 | `instances/:id/reconnect?owner=` | POST | Botão "Tentar reconectar" (§14) — só faz efeito se a instância estiver marcada `needsAttention`; tenta reconectar com as credenciais já salvas, sem apagar nada. 404 se a instância não existe ou não está ativa no processo. |
+| `instances/:id/health?owner=` | GET | Alerta de instância caída (§14). `{ openEvent, events, metrics }` — histórico de quedas + série diária de métricas. Rota de LEITURA — diferente de `reconnect`/`delete`/`put` acima (só dono), esta aceita também DELEGADO (`instance_delegates`). 404 pra quem não é dono nem delegado. |
 | `qr?session=` | GET | Cria/inicia a instância e devolve `{ qr, status }`. |
 | `status?session=` | GET | `{ status }` — `'connecting' \| 'online' \| 'offline'`. |
 | `history?session=&dealId=&phone=` | GET | Histórico de mensagens + `connectionStatus` + `aiSummary`/`aiSummaryUpdatedAt` (resumo salvo, se já foi gerado). Também salva o vínculo telefone → negócio. |

@@ -1,0 +1,109 @@
+const { pool } = require('./db');
+
+/**
+ * Alerta de instância caída/desconectada — histórico de queda/retorno
+ * (`instance_connection_events`) + série de métricas diárias
+ * (`instance_metrics_daily`), ver db/schema.sql.
+ *
+ * `instance_id` aqui é sempre o `session_id` (mesmo identificador usado em
+ * `instances`/`conversations`) — NUNCA uma FK pra `instances`, de propósito:
+ * o histórico precisa sobreviver mesmo se a instância for removida depois
+ * (mesmo raciocínio já aplicado às 27 instâncias órfãs, ver
+ * `instancesStore.listAll()` e HANDOFF Parte ED).
+ */
+
+// Fecha qualquer evento aberto esquecido e abre um novo — protege contra
+// duplicidade se `handleStatusForHealth` (src/server.js) disparar fora de
+// ordem (ex: 2 eventos 'attention' seguidos sem um 'online' no meio).
+async function openConnectionEvent(instanceId, kind, reason) {
+  await closeOpenConnectionEvent(instanceId);
+  const { rows } = await pool.query(
+    `insert into instance_connection_events (instance_id, kind, reason)
+     values ($1, $2, $3)
+     returning id, instance_id as "instanceId", kind, reason,
+               started_at as "startedAt", ended_at as "endedAt", duration_ms as "durationMs"`,
+    [instanceId, kind, reason || null]
+  );
+  return rows[0];
+}
+
+// Fecha a queda em aberto (se houver) calculando a duração real no próprio
+// Postgres (evita depender do relógio do processo Node, que pode ter
+// reiniciado entre a abertura e o fechamento do evento).
+async function closeOpenConnectionEvent(instanceId) {
+  const { rows } = await pool.query(
+    `update instance_connection_events
+     set ended_at = now(),
+         duration_ms = extract(epoch from (now() - started_at)) * 1000
+     where instance_id = $1 and ended_at is null
+     returning id, instance_id as "instanceId", kind, reason,
+               started_at as "startedAt", ended_at as "endedAt", duration_ms as "durationMs"`,
+    [instanceId]
+  );
+  return rows[0] || null;
+}
+
+// A queda em aberto AGORA, se houver — alimenta o indicador de duração no
+// card (GET /instances já estende cada instância com isto, ver src/routes/whatsapp.js).
+async function getOpenConnectionEvent(instanceId) {
+  const { rows } = await pool.query(
+    `select id, instance_id as "instanceId", kind, reason, started_at as "startedAt"
+     from instance_connection_events
+     where instance_id = $1 and ended_at is null
+     limit 1`,
+    [instanceId]
+  );
+  return rows[0] || null;
+}
+
+async function listConnectionEvents(instanceId, limit = 50) {
+  const { rows } = await pool.query(
+    `select id, instance_id as "instanceId", kind, reason,
+            started_at as "startedAt", ended_at as "endedAt", duration_ms as "durationMs"
+     from instance_connection_events
+     where instance_id = $1
+     order by started_at desc
+     limit $2`,
+    [instanceId, limit]
+  );
+  return rows;
+}
+
+// `on conflict` — idempotente, seguro rodar mais de 1x no mesmo dia (o job
+// de snapshot em src/server.js roda a cada hora, só a última chamada do dia
+// prevalece).
+async function snapshotDailyMetrics(instanceId, { conversationCount, contactCountReal, contactCountBaileys, groupCount }) {
+  await pool.query(
+    `insert into instance_metrics_daily
+       (instance_id, snapshot_date, conversation_count, contact_count_real, contact_count_baileys, group_count)
+     values ($1, current_date, $2, $3, $4, $5)
+     on conflict (instance_id, snapshot_date) do update set
+       conversation_count = excluded.conversation_count,
+       contact_count_real = excluded.contact_count_real,
+       contact_count_baileys = excluded.contact_count_baileys,
+       group_count = excluded.group_count`,
+    [instanceId, conversationCount, contactCountReal, contactCountBaileys ?? null, groupCount ?? null]
+  );
+}
+
+async function listMetricsDaily(instanceId, days = 90) {
+  const { rows } = await pool.query(
+    `select snapshot_date as "snapshotDate", conversation_count as "conversationCount",
+            contact_count_real as "contactCountReal", contact_count_baileys as "contactCountBaileys",
+            group_count as "groupCount"
+     from instance_metrics_daily
+     where instance_id = $1 and snapshot_date >= current_date - $2::int
+     order by snapshot_date asc`,
+    [instanceId, days]
+  );
+  return rows.map((r) => ({ ...r, snapshotDate: r.snapshotDate.toISOString().slice(0, 10) }));
+}
+
+module.exports = {
+  openConnectionEvent,
+  closeOpenConnectionEvent,
+  getOpenConnectionEvent,
+  listConnectionEvents,
+  snapshotDailyMetrics,
+  listMetricsDaily,
+};

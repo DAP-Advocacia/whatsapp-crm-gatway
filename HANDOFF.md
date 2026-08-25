@@ -8753,3 +8753,133 @@ preencher `BITRIX_FEED_WEBHOOK_URL` em produção — só depois disso o
 primeiro post real pode confirmar (ou corrigir) a hipótese de payload
 do `log.blogpost.add`.
 
+### Parte EF — Alerta de instância caída: histórico, duração no card, distinção temporária/atenção, push (2026-08-25)
+
+Segundo pedido da mesma leva da Parte EE. Usuário: aviso quando a
+instância cai; card mostrando o período que ficou fora do ar;
+distinguir "caiu momentaneamente, reconectando sozinha" de "sessão
+encerrada/possível ban, precisa trocar de número"; histórico com
+métricas (conversas, contatos) ao longo do tempo. Decisões confirmadas
+antes de implementar: "provavelmente perdida, reconecte" é suficiente
+(não é preciso confirmar 100% que foi banido); aviso vai pra dono +
+delegados; push usa a notificação nativa do navegador já usada em
+`notifications.html`/`chat.html` + a Central de Notificações já
+existente como garantia real de entrega (não Web Push real
+Service Worker+VAPID, que quase certamente não funcionaria dentro do
+iframe do Bitrix).
+
+**Achado-chave, investigado antes de desenhar**: `WhatsAppGateway`
+(`src/whatsapp.js`) já tinha TODA a detecção pronta —
+`needsAttention`/`loggedOut`/`lastDisconnectReason`/
+`consecutiveFailures` já calculados corretamente pelo Baileys — só
+nunca persistidos nem conectados a notificação. O evento `'status'`
+emitido só carregava a string genérica, sem a distinção. Não foi
+preciso inventar detecção nenhuma, só persistir + conectar o que já
+existia.
+
+**Bug real encontrado e corrigido durante a implementação** (antes de
+qualquer teste, por leitura cuidadosa do código): `connection.update`
+(`src/whatsapp.js`, ramo `connection === 'close'`) emite
+`this.emit('status', this.status)` **ANTES** de atualizar
+`needsAttention`/`loggedOut`/`lastDisconnectReason` — essas atribuições
+só acontecem depois, dentro do mesmo handler síncrono. Como
+`EventEmitter` dispara listeners de forma síncrona e imediata, ler o
+gateway no mesmo tick do `onStatus` leria os campos ainda com o valor
+da queda ANTERIOR. Corrigido com `await new Promise((resolve) =>
+setImmediate(resolve))` no início de `handleStatusForHealth`, antes de
+ler o gateway — adia a leitura pro próximo tick, depois que o handler
+síncrono já terminou de rodar por completo. Sem isso, a 1ª queda de
+cada janela de atenção seria classificada errado (registrada como
+`'temporary'`, sem notificar).
+
+**Schema** (`db/schema.sql`): `instance_connection_events` (uma linha
+por QUEDA — transição discreta, não snapshot; `kind`
+`'temporary'`/`'attention'`, `reason`, `started_at`/`ended_at`/
+`duration_ms`, índice parcial `where ended_at is null` pra achar a
+queda em aberto instantaneamente) e `instance_metrics_daily`
+(snapshot diário — contagem evolui devagar e continuamente, sem
+transição discreta natural; `conversation_count`/`contact_count_real`/
+`contact_count_baileys`/`group_count`, PK composta
+`(instance_id, snapshot_date)`). `instance_id` é sempre o `session_id`
+cru, nunca FK pra `instances` — histórico sobrevive mesmo se a
+instância for removida depois (mesmo raciocínio já aplicado às 27
+órfãs, ver Parte ED).
+
+**Contagens novas** (não existiam): `store.countConversations
+(sessionId)` e `contactsStore.countContacts(ownerId)` — `count(*)`
+dedicado, não `list*(...).length` (aquelas devolvem array completo/
+limitado a 200, desnecessário só pra saber o total).
+
+**Módulo `src/instanceHealthStore.js`**: `openConnectionEvent` (fecha
+qualquer evento aberto esquecido antes de abrir um novo — protege
+contra duplicidade se o evento `'status'` disparar fora de ordem),
+`closeOpenConnectionEvent` (duration_ms calculado no próprio Postgres,
+não no relógio do processo Node), `getOpenConnectionEvent`,
+`listConnectionEvents`, `snapshotDailyMetrics` (`on conflict` —
+idempotente), `listMetricsDaily`.
+
+**Conectado ao evento `'status'` já existente** (`src/server.js`,
+dentro do `onStatus` já existente, sem mudar a assinatura do evento):
+`handleStatusForHealth` guarda em memória (`Map`, reseta a cada boot —
+aceitável) o último estado relevante por sessão, só age em MUDANÇA
+real. `currentState`: `'online'` se status online; `'attention'` se
+`needsAttention || loggedOut`; `'temporary'` se offline sem os dois
+acima; ignora `'connecting'`. Notifica (Central de Notificações, dono
++ delegados) só ao ENTRAR em `'attention'` vindo de um estado
+diferente — nunca em `'temporary'` isolado (queda de rede comum e
+esperada; notificar a cada uma inundaria o usuário, mesmo problema já
+visto com histórico de mensagem, 2325 notificações falsas).
+
+**Job de snapshot diário** (`src/server.js`, `setInterval` de 1h +
+disparo no boot com 30s de atraso): grava 1x/dia por instância de fato
+(o `on conflict` garante isso, reintentar a cada hora só se recupera
+sozinho de uma falha pontual). Pula instâncias ÓRFÃS no cálculo POR
+OWNER (`contactCountReal: 0` explícito, nunca um dono adivinhado) mas
+grava `conversation_count` sempre (por `session_id`, sempre válido).
+
+**Rota nova `GET /instances/:id/health?owner=`**: seguindo o padrão
+real confirmado nas rotas de instância já existentes
+(`requireOwnerMatch` + checagem manual) — mas, DIFERENTE de
+`reconnect`/`delete`/`put` (rotas de AÇÃO, restritas só ao dono real),
+esta é uma rota de LEITURA e aceita também DELEGADO, coerente com
+"dono + delegados" ser a mesma audiência da notificação. Testado
+end-to-end: dono real (200), delegado (200 — diferente do mesmo
+delegado tentando `reconnect`, que dá 404), estranho (404), spoofing
+de identidade via query (403, bloqueado antes de chegar no handler).
+`GET /instances` estendido com `openConnectionEvent` (evita N+1 no
+card).
+
+**Frontend `instances.html`**: indicador de duração no card
+(`.instance-downtime`, âmbar/discreto — só quando `'temporary'`, já
+que `'attention'` já tem seu próprio bloco vermelho existente e não
+precisa repetir; "há Xh" calculado no client a partir do timestamp
+absoluto ISO, atualiza a cada 30s); botão "Ver histórico" (dono OU
+delegado) abrindo modal novo (`#historyModal`, mesmo padrão
+`.overlay`/`.modal` já usado 4x nesta página) com a lista de eventos
+(mais recente primeiro, com duração formatada) + tabela da série de
+métricas diárias. WebSocket novo nesta tela (ausente antes) — reaproveita
+o mesmo hub de broadcast já usado em `chat.html`
+(`/stream?session=<id>`, sem `phone` = sessão inteira), 1 socket por
+instância visível, recarrega via `loadInstances()` ao receber qualquer
+`'status'`. Push via Web Notification API — mesmo padrão exato já
+usado em `notifications.html`/`chat.html` (só dispara se a permissão
+já foi concedida, nunca pede aqui; fallback garantido é a Central de
+Notificações, que já recebe o registro do lado do servidor
+independente do push funcionar no client) — dedupe em memória por
+sessão, notifica só ao entrar em `needsAttention`, reseta ao voltar
+online.
+
+**Validação**: as 2 tabelas confirmadas no banco real (colunas, tipos,
+índices); `countConversations`/`countContacts` testados contra dados
+reais; as 6 funções de `instanceHealthStore` testadas isoladamente
+(10 cenários, incluindo a proteção contra duplicidade); a lógica de
+`handleStatusForHealth` testada isoladamente (6 transições de estado,
+incluindo o bug do `setImmediate` já corrigido); job de snapshot
+testado com 1 instância real + 1 órfã (órfã grava
+`conversation_count` real mas `contactCountReal: 0`); os 4 cenários de
+autorização de `GET /instances/:id/health` testados via curl contra
+servidor real; `formatDuration` testado com 8 casos (incluindo os
+limites 24h→1d); `maybeNotifyInstanceDown` testado isoladamente (5
+cenários de dedupe, espelhando a mesma regra do backend). Todos os
+dados de teste (delegado, eventos, métricas) removidos do banco depois.
+

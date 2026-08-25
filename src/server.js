@@ -44,6 +44,7 @@ const { logMessageToTimeline, logStatusToTimeline } = require('./bitrix');
 const { verifyBitrixToken, ownerIdFor, issueAppToken, verifyAppToken, requireAuth, TOKEN_TTL_MS } = require('./auth');
 const { assertOwnsSession } = require('./authz');
 const instancesStore = require('./instances');
+const instanceHealthStore = require('./instanceHealthStore');
 
 const PORT = process.env.PORT || 3333;
 const AUTH_FOLDER = process.env.AUTH_FOLDER || './auth_session';
@@ -340,6 +341,77 @@ function broadcast(sessionId, phone, payload) {
   }
 }
 
+// Alerta de instância caída/desconectada (ver src/instanceHealthStore.js,
+// db/schema.sql) — guarda em memória qual foi o último estado "relevante"
+// já processado por sessão, pra só agir em MUDANÇA real de estado, não a
+// cada emissão redundante do evento 'status' (ex: cada tentativa de
+// reconexão dentro do mesmo backoff dispara 'offline' de novo). Reseta a
+// cada boot do processo — aceitável: a próxima mudança real de estado
+// resolve sozinha (fecha o evento aberto anterior antes de abrir um novo,
+// ver instanceHealthStore.openConnectionEvent).
+const lastHealthState = new Map(); // sessionId -> 'online' | 'temporary' | 'attention'
+
+async function handleStatusForHealth(sessionId, status) {
+  if (status === 'connecting') return; // estado transitório, não é queda nem retomada
+
+  // IMPORTANTE: connection.update (src/whatsapp.js) emite 'status' ANTES de
+  // atualizar needsAttention/loggedOut/lastDisconnectReason (essas
+  // atribuições acontecem depois, dentro do mesmo handler síncrono) — ler o
+  // gateway agora leria os campos ainda com o valor da queda ANTERIOR.
+  // setImmediate adia a leitura pro próximo tick, depois que o handler
+  // síncrono do 'connection.update' já terminou de rodar por completo.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const gateway = sessions.getActiveGateway(sessionId);
+  if (!gateway) return; // sessão já não está mais em memória (ex: removida)
+
+  let currentState;
+  if (status === 'online') currentState = 'online';
+  else if (gateway.needsAttention || gateway.loggedOut) currentState = 'attention';
+  else currentState = 'temporary';
+
+  const previousState = lastHealthState.get(sessionId) || null;
+  if (currentState === previousState) return; // nada mudou de fato, ignora
+  lastHealthState.set(sessionId, currentState);
+
+  try {
+    if (currentState === 'online') {
+      await instanceHealthStore.closeOpenConnectionEvent(sessionId);
+      return;
+    }
+
+    const reason = gateway.loggedOut ? 'loggedOut' : gateway.lastDisconnectReason;
+    await instanceHealthStore.openConnectionEvent(sessionId, currentState, reason);
+
+    // Notifica só ao ENTRAR em 'attention' vindo de um estado que não era
+    // 'attention' (evita notificar de novo numa escalada dentro da mesma
+    // janela de atenção). Nunca notifica em 'temporary' isolado — queda de
+    // rede comum com reconexão automática é esperada e frequente nesse tipo
+    // de integração (mesmo raciocínio já documentado em src/whatsapp.js);
+    // notificar a cada uma inundaria o usuário — mesmo problema já visto
+    // antes com histórico de mensagem (2325 notificações falsas, ver
+    // onMessage acima).
+    if (currentState === 'attention' && previousState !== 'attention') {
+      const ownerId = await instancesStore.ownerOf(sessionId);
+      const delegates = await instancesStore.listDelegates(sessionId);
+      const recipients = [ownerId, ...delegates.map((d) => d.delegateOwnerId)];
+      const inst = await instancesStore.get(sessionId);
+      const label = inst?.label || sessionId;
+      const body = gateway.loggedOut
+        ? 'A sessão foi encerrada pelo celular — escaneie o QR de novo pra reconectar.'
+        : 'A conexão parou de tentar reconectar sozinha — tente reconectar manualmente, ou troque de número se persistir.';
+      await Promise.all(recipients.map((recipientOwnerId) => store.addNotification({
+        ownerId: recipientOwnerId,
+        title: `Instância "${label}" precisa de atenção`,
+        body,
+        target: { page: '/instances.html', sessionId },
+      })));
+    }
+  } catch (err) {
+    console.error(`[whatsapp:${sessionId}] falha ao processar histórico de status:`, err.message);
+  }
+}
+
 // avisa todas as abas abertas daquela sessão (qualquer telefone)
 function broadcastStatus(sessionId, status) {
   const prefix = `${sessionId}::`;
@@ -361,6 +433,9 @@ const sessions = new SessionManager({
   onStatus: (sessionId, status) => {
     console.log(`[whatsapp:${sessionId}] status:`, status);
     broadcastStatus(sessionId, status);
+    handleStatusForHealth(sessionId, status).catch((err) =>
+      console.error(`[whatsapp:${sessionId}] falha ao processar histórico de status:`, err.message)
+    );
   },
   onMessage: async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
     try {
@@ -570,6 +645,54 @@ setInterval(() => {
     console.error('[page-session] falha ao fechar sessões órfãs:', err.message)
   );
 }, 60000);
+
+// Alerta de instância caída — snapshot diário da série de métricas
+// (instance_metrics_daily, ver src/instanceHealthStore.js). Roda a cada
+// hora, mas grava só 1x por dia por instância de fato — o próprio
+// `on conflict (instance_id, snapshot_date)` do insert garante isso
+// (chamadas depois da 1ª no mesmo dia só atualizam com o valor mais
+// recente, não duplicam linha). Reintentar a cada hora (em vez de 1x/dia
+// fixo) existe só pra se recuperar sozinho de uma falha pontual (ex:
+// banco fora do ar por alguns minutos) sem esperar até o dia seguinte.
+//
+// Pula instâncias ÓRFÃS (isOrphan, ver instancesStore.listAll() e HANDOFF
+// Parte ED) no cálculo POR OWNER — não há dono real pra contar contatos
+// contra. Grava só conversation_count (sempre válido, é por session_id)
+// e deixa contact_count_real como 0 explicitamente pra essas (nunca um
+// valor adivinhado).
+async function runDailyMetricsSnapshot() {
+  const instances = await instancesStore.listAll();
+  for (const inst of instances) {
+    try {
+      const conversationCount = await store.countConversations(inst.id);
+      const contactCountReal = inst.isOrphan ? 0 : await contactsStore.countContacts(inst.ownerId);
+      const gateway = sessions.getActiveGateway(inst.id);
+      const contactCountBaileys = gateway ? gateway.getContactCount() : null;
+      const groupCount = gateway ? await gateway.getGroupCount() : null;
+      await instanceHealthStore.snapshotDailyMetrics(inst.id, {
+        conversationCount,
+        contactCountReal,
+        contactCountBaileys,
+        groupCount,
+      });
+    } catch (err) {
+      console.error(`[instance-health] falha ao gerar snapshot de métricas de ${inst.id}:`, err.message);
+    }
+  }
+}
+setInterval(() => {
+  runDailyMetricsSnapshot().catch((err) =>
+    console.error('[instance-health] falha ao rodar snapshot diário de métricas:', err.message)
+  );
+}, 60 * 60 * 1000);
+// Dispara 1x já no boot (com um pequeno atraso, pra não competir com o
+// escalonamento de reconexão de sessões salvas — startAllExisting acima),
+// pra não esperar até 1h depois de um deploy pra ter o 1º dado do dia.
+setTimeout(() => {
+  runDailyMetricsSnapshot().catch((err) =>
+    console.error('[instance-health] falha ao rodar snapshot inicial de métricas:', err.message)
+  );
+}, 30000);
 
 // ---------------------------------------------------------------
 // POST /api/auth/verify { accessToken }

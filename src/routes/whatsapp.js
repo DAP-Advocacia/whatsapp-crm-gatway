@@ -9,6 +9,7 @@ const { computeCampaignMetrics } = require('../campaignStore');
 const scheduledStore = require('../scheduledCampaigns');
 const scheduler = require('../scheduler');
 const instancesStore = require('../instances');
+const instanceHealthStore = require('../instanceHealthStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
@@ -300,7 +301,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // visível (não é só "desconectada", como uma queda de rede comum).
         const needsAttention = gateway?.needsAttention || false;
         const lastDisconnectReason = gateway?.lastDisconnectReason || null;
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason };
+        // Alerta de instância caída (ver src/instanceHealthStore.js) — a
+        // queda em aberto AGORA, se houver, alimenta o indicador de duração
+        // no card ("fora do ar há Xh") sem precisar de uma 2ª chamada por
+        // instância visível na tela.
+        const openConnectionEvent = await instanceHealthStore.getOpenConnectionEvent(i.id);
+        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {
@@ -444,6 +450,37 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[instances:delegates] erro:', err.message);
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /instances/:id/health?owner=
+  // Alerta de instância caída — histórico de queda/retorno + série de
+  // métricas diárias (ver src/instanceHealthStore.js). Diferente das
+  // rotas de AÇÃO acima (reconnect/delete/put, restritas só ao DONO
+  // real) — esta é uma rota de LEITURA, então aceita também DELEGADO
+  // (instance_delegates), coerente com "dono + delegados" ser a mesma
+  // audiência que recebe a notificação de queda (ver handleStatusForHealth
+  // em src/server.js). requireOwnerMatch só impede spoofing de identidade
+  // (o owner do query precisa bater com o token) — a checagem de posse
+  // de fato é a de baixo.
+  // ---------------------------------------------------------------
+  router.get('/instances/:id/health', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    const owner = req.query.owner;
+    try {
+      const inst = await instancesStore.get(req.params.id);
+      const delegates = inst ? await instancesStore.listDelegates(req.params.id) : [];
+      const hasAccess = inst && (inst.ownerId === owner || delegates.some((d) => d.delegateOwnerId === owner));
+      if (!hasAccess) return res.status(404).json({ error: 'instância não encontrada' });
+      const [openEvent, events, metrics] = await Promise.all([
+        instanceHealthStore.getOpenConnectionEvent(req.params.id),
+        instanceHealthStore.listConnectionEvents(req.params.id),
+        instanceHealthStore.listMetricsDaily(req.params.id),
+      ]);
+      res.json({ openEvent, events, metrics });
+    } catch (err) {
+      console.error('[instances:health] erro:', err.message);
+      res.status(502).json({ error: err.message });
     }
   });
 

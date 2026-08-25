@@ -375,6 +375,45 @@
     font-size: 12px; color: var(--text-muted); line-height: 1.5;
   }
   .instance-attention strong{ color: var(--red); }
+
+  /* Alerta de instância caída — indicador de duração no card (queda EM
+     ABERTO agora, ver GET /instances openConnectionEvent). Âmbar/discreto
+     pra 'temporary' (queda comum, reconectando sozinha — não é a mesma
+     urgência de needsAttention, que já tem seu próprio aviso vermelho
+     acima e não precisa repetir aqui). */
+  .instance-downtime{
+    display:flex; align-items:center; gap:6px; margin-top:8px;
+    padding:6px 10px; border-radius:8px; font-size:11.5px; line-height:1.4;
+    background: rgba(var(--gold-rgb),.08); border: 1px solid rgba(var(--gold-rgb),.25);
+    color: var(--text-muted);
+  }
+  .instance-downtime strong{ color: var(--gold); }
+  .instance-history-btn{
+    background:none; border:1px solid var(--border); color: var(--text-muted);
+    font-size: 11.5px; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+  }
+  .instance-history-btn:hover{ color: var(--gold); border-color: var(--gold-dim); }
+
+  #historyModal .modal{ max-width: 560px; text-align: left; max-height: 82vh; overflow-y: auto; }
+  #historyModal .modal h3{ text-align: left; }
+  .history-section-title{ font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
+  .history-section-title:first-of-type{ margin-top: 0; }
+  .history-event{
+    display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+    padding:8px 0; border-bottom: 1px solid var(--border); font-size: 12.5px;
+  }
+  .history-event:last-child{ border-bottom: none; }
+  .history-event-kind{ font-weight: 600; }
+  .history-event-kind.attention{ color: var(--red); }
+  .history-event-kind.temporary{ color: var(--gold); }
+  .history-event-kind.online{ color: var(--green); }
+  .history-event-meta{ color: var(--text-faint); font-size: 11.5px; text-align: right; flex-shrink: 0; }
+  .history-metrics-table{ width: 100%; border-collapse: collapse; font-size: 12px; }
+  .history-metrics-table th{ text-align: right; color: var(--text-faint); font-weight: 500; padding: 5px 6px; border-bottom: 1px solid var(--border); }
+  .history-metrics-table th:first-child, .history-metrics-table td:first-child{ text-align: left; }
+  .history-metrics-table td{ text-align: right; padding: 5px 6px; font-variant-numeric: tabular-nums; }
+  .history-metrics-wrap{ overflow-x: auto; }
+
   .instance-phone{ font-size: 13px; color: var(--text-muted); }
   .instance-delegated-tag{ color: var(--gold); }
   .modal-hint{ font-size: 12.5px; color: var(--text-muted); margin: -4px 0 10px; line-height: 1.5; }
@@ -729,6 +768,26 @@
     <div class="modal-actions">
       <button class="btn secondary" id="newInstanceCancel">Cancelar</button>
       <button class="btn" id="newInstanceCreate">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="historyModal">
+  <div class="modal">
+    <h3>Histórico — <span id="historyInstanceLabel"></span></h3>
+    <div class="history-section-title">Quedas de conexão</div>
+    <div id="historyEventsList"></div>
+    <div class="history-section-title">Métricas por dia</div>
+    <div class="history-metrics-wrap">
+      <table class="history-metrics-table">
+        <thead>
+          <tr><th>Data</th><th>Conversas</th><th>Contatos</th><th>Grupos</th></tr>
+        </thead>
+        <tbody id="historyMetricsBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="historyModalClose">Fechar</button>
     </div>
   </div>
 </div>
@@ -1117,6 +1176,73 @@
     } catch {}
   }
 
+  // ---------------- Tempo real (Alerta de instância caída) ----------------
+  // Esta tela não tinha WebSocket nenhum antes — status só era lido no boot
+  // e após ações do próprio usuário (não atualizava sozinho se a tela
+  // ficasse aberta durante uma queda real de terceiros). Reaproveita o
+  // mesmo hub de broadcast já usado em chat.html (/stream?session=<id>,
+  // sem "phone" = inscrição na sessão inteira) — sem inventar nenhum
+  // mecanismo de transporte novo. Ao receber qualquer 'status', recarrega
+  // via loadInstances() (já traz openConnectionEvent/needsAttention
+  // atualizados) — mais simples e seguro que tentar remendar só 1 card no
+  // DOM a partir de um payload parcial.
+  const openInstanceSockets = new Map(); // sessionId -> WebSocket
+
+  function openInstanceStatusSockets(sessionIds) {
+    sessionIds.forEach((id) => {
+      if (openInstanceSockets.has(id)) return; // já aberto, não duplica
+      let socket;
+      try {
+        const wsUrl = API_BASE.replace(/^http/, 'ws') + `/stream?session=${encodeURIComponent(id)}&token=${encodeURIComponent(appToken)}`;
+        socket = new WebSocket(wsUrl);
+      } catch (err) {
+        console.warn('[instances] realtime indisponível para', id, err);
+        return;
+      }
+      socket.onmessage = (event) => {
+        let payload;
+        try { payload = JSON.parse(event.data); } catch { return; }
+        if (payload.type !== 'status') return;
+        maybeNotifyInstanceDown(id, payload.status);
+        loadInstances();
+      };
+      socket.onclose = () => openInstanceSockets.delete(id);
+      openInstanceSockets.set(id, socket);
+    });
+  }
+
+  // Push (Web Notification API) — mesmo padrão já usado em
+  // notifications.html/chat.html: só dispara se a permissão do navegador já
+  // foi concedida (nunca pede aqui, silenciosamente ignora se não foi —
+  // quem concede é a Central de Notificações/Chat), sempre com fallback
+  // garantido pro toast in-app (window.showToast, chamado por
+  // checkNewNotifications de qualquer forma, já que handleStatusForHealth
+  // no backend também grava na Central). Confiabilidade dentro do iframe
+  // do Bitrix não é garantida (mesma pendência documentada nas outras 2
+  // telas) — por isso a Central continua sendo a garantia real de entrega.
+  //
+  // Notifica só ao ENTRAR em needsAttention (não em toda mensagem
+  // 'offline' — teria o mesmo problema de inundação já visto com mensagem/
+  // histórico) — dedupe simples em memória por sessão, reseta ao recarregar
+  // a página (aceitável: a Central de Notificações já tem o histórico
+  // completo e persistido, isto aqui é só o "aviso imediato" complementar).
+  const notifiedAttentionSessions = new Set();
+  function maybeNotifyInstanceDown(sessionId, status) {
+    if (status === 'online') { notifiedAttentionSessions.delete(sessionId); return; }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (notifiedAttentionSessions.has(sessionId)) return;
+    const inst = (lastInstancesList || []).find((i) => i.id === sessionId);
+    if (!inst?.needsAttention) return; // só 'attention' — nunca em queda temporária isolada
+    notifiedAttentionSessions.add(sessionId);
+    try {
+      new Notification(`Instância "${inst.label}" precisa de atenção`, {
+        body: 'A conexão parou de tentar reconectar sozinha — veja o card em Instâncias.',
+      });
+    } catch { /* iframe pode bloquear silenciosamente — Central de Notificações garante o registro */ }
+  }
+
+  let lastInstancesList = [];
+
   async function loadInstances() {
     try {
       if (!myOwnerId) myOwnerId = await resolveSession();
@@ -1126,7 +1252,13 @@
       const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
       if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar instâncias');
       const data = await res.json();
-      renderInstances(data.instances || [], data.limit);
+      lastInstancesList = data.instances || [];
+      renderInstances(lastInstancesList, data.limit);
+      // Abre 1 socket por instância visível (própria + delegada +
+      // hierárquica) — idempotente, openInstanceStatusSockets já ignora
+      // quem já está aberto, então chamar de novo a cada loadInstances()
+      // (inclusive o disparado pelo próprio 'status' recebido) é seguro.
+      openInstanceStatusSockets(lastInstancesList.map((i) => i.id));
     } catch (err) {
       instancesWrap.innerHTML = `<p class="empty">Falha ao carregar: ${escapeHtml(err.message)}</p>`;
       console.error(err);
@@ -1143,6 +1275,13 @@
     forbidden: 'o WhatsApp recusou o acesso a esse número (pode ser uma restrição temporária da conta)',
     connectionReplaced: 'outro aparelho assumiu essa conexão',
     badSession: 'a sessão salva ficou inválida',
+    // 'loggedOut' não é um dos PERMANENT_CODES acima (é um caminho
+    // separado em connection.update, ver src/whatsapp.js) — mas
+    // handleStatusForHealth (src/server.js) grava esse texto literal como
+    // `reason` do evento 'attention' quando é esse o caso, e o histórico
+    // (renderHistoryEvents) usa o mesmo mapa pra traduzir — sem esta
+    // entrada, apareceria "loggedOut" cru no modal.
+    loggedOut: 'a sessão foi encerrada pelo celular (deslogado do WhatsApp Web)',
   };
 
   function renderInstances(list, limit) {
@@ -1178,10 +1317,15 @@
           <div class="instance-attention">
             <span><strong>Precisa de atenção:</strong> ${DISCONNECT_REASON_LABEL[i.lastDisconnectReason] || 'a conexão parou sozinha e não volta automaticamente'}. Pare de usar por algumas horas e tente reconectar, ou remova e pareie de novo se persistir.</span>
           </div>
+        ` : i.openConnectionEvent ? `
+          <div class="instance-downtime" data-downtime-since="${i.openConnectionEvent.startedAt}">
+            <span><strong>Fora do ar</strong> há <span data-downtime-text>—</span> — reconectando sozinha.</span>
+          </div>
         ` : ''}
         <div class="instance-actions">
           ${i.needsAttention ? `<button type="button" data-reconnect="${i.id}">Tentar reconectar</button>` : ''}
           ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Ver QR</button>` : ''}
+          <button type="button" class="instance-history-btn" data-history="${i.id}" data-label="${escapeHtml(i.label)}">Ver histórico</button>
           ${i.delegated ? '' : `
             <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
             <button type="button" data-share="${i.id}" data-label="${escapeHtml(i.label)}">Compartilhar acesso</button>
@@ -1190,6 +1334,22 @@
         </div>
       </div>
     `).join('')}</div>`;
+
+    // "Fora do ar há Xh" — calculado no client a partir de um timestamp
+    // absoluto ISO (i.openConnectionEvent.startedAt), não sincronização de
+    // relógios entre partes: é só aritmética de UM timestamp real contra
+    // Date.now(), sempre seguro. Atualiza a cada 30s pra não ficar
+    // "congelado" enquanto a tela fica aberta durante a queda.
+    function updateDowntimeLabels() {
+      instancesWrap.querySelectorAll('[data-downtime-since]').forEach((el) => {
+        const startedAt = new Date(el.dataset.downtimeSince).getTime();
+        const target = el.querySelector('[data-downtime-text]');
+        if (target) target.textContent = formatDuration(Date.now() - startedAt);
+      });
+    }
+    updateDowntimeLabels();
+    clearInterval(window.__downtimeLabelInterval);
+    window.__downtimeLabelInterval = setInterval(updateDowntimeLabels, 30000);
 
     instancesWrap.querySelectorAll('[data-qr]').forEach((btn) => {
       btn.addEventListener('click', () => openQrModal(btn.dataset.qr));
@@ -1206,6 +1366,22 @@
     instancesWrap.querySelectorAll('[data-share]').forEach((btn) => {
       btn.addEventListener('click', () => openDelegatesModal(btn.dataset.share, btn.dataset.label));
     });
+    instancesWrap.querySelectorAll('[data-history]').forEach((btn) => {
+      btn.addEventListener('click', () => openHistoryModal(btn.dataset.history, btn.dataset.label));
+    });
+  }
+
+  // "Fora do ar há Xh32min" / "há 45min" / "há 12s" — mesma ideia de
+  // formatPageName em outras telas (um formatador só, reaproveitado).
+  function formatDuration(ms) {
+    const totalMinutes = Math.floor(ms / 60000);
+    if (totalMinutes < 1) return `${Math.max(1, Math.floor(ms / 1000))}s`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours < 1) return `${minutes}min`;
+    if (hours < 24) return `${hours}h${minutes ? minutes + 'min' : ''}`;
+    const days = Math.floor(hours / 24);
+    return `${days}d${hours % 24 ? (hours % 24) + 'h' : ''}`;
   }
 
   // ---------------- Nova instância / QR ----------------
@@ -1543,6 +1719,74 @@
       if (window.showToast) window.showToast(err.message, 'error');
     }
   });
+
+  // ---------------- Histórico (Alerta de instância caída) ----------------
+  // Modal com o histórico completo de quedas/retomadas + série de métricas
+  // diárias (ver GET /instances/:id/health, src/instanceHealthStore.js).
+  // Aberto sob demanda (não pré-carregado com o card, que já vem com o
+  // openConnectionEvent mais recente via GET /instances) — dono OU
+  // delegado pode ver (rota de leitura aceita os dois, diferente de
+  // reconnect/remover).
+
+  const historyModal = document.getElementById('historyModal');
+  const HISTORY_KIND_LABEL = { attention: 'Precisou de atenção', temporary: 'Queda temporária', online: 'Conectada' };
+
+  async function openHistoryModal(instanceId, label) {
+    document.getElementById('historyInstanceLabel').textContent = label || '';
+    document.getElementById('historyEventsList').innerHTML = '<p class="empty">Carregando…</p>';
+    document.getElementById('historyMetricsBody').innerHTML = '';
+    historyModal.classList.add('open');
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/${instanceId}/health?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar histórico');
+      const data = await res.json();
+      renderHistoryEvents(data.events || []);
+      renderHistoryMetrics(data.metrics || []);
+    } catch (err) {
+      document.getElementById('historyEventsList').innerHTML = `<p class="empty">Falha ao carregar: ${escapeHtml(err.message)}</p>`;
+      console.error(err);
+    }
+  }
+
+  function renderHistoryEvents(events) {
+    const el = document.getElementById('historyEventsList');
+    if (!events.length) {
+      el.innerHTML = '<p class="empty">Nenhuma queda registrada ainda.</p>';
+      return;
+    }
+    el.innerHTML = events.map((e) => {
+      const started = new Date(e.startedAt).toLocaleString('pt-BR');
+      const durationText = e.endedAt
+        ? `durou ${formatDuration(Number(e.durationMs))}`
+        : 'em aberto agora';
+      const reasonText = e.reason ? ` · ${escapeHtml(DISCONNECT_REASON_LABEL[e.reason] || e.reason)}` : '';
+      return `
+        <div class="history-event">
+          <span class="history-event-kind ${e.kind}">${HISTORY_KIND_LABEL[e.kind] || e.kind}</span>
+          <span class="history-event-meta">${started}<br>${durationText}${reasonText}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  function renderHistoryMetrics(metrics) {
+    const el = document.getElementById('historyMetricsBody');
+    if (!metrics.length) {
+      el.innerHTML = '<tr><td colspan="4" class="empty">Sem dados ainda — o snapshot roda a cada hora.</td></tr>';
+      return;
+    }
+    // mais recente primeiro (a rota já devolve em ordem crescente de data)
+    el.innerHTML = metrics.slice().reverse().map((m) => `
+      <tr>
+        <td>${new Date(m.snapshotDate + 'T00:00:00').toLocaleDateString('pt-BR')}</td>
+        <td>${m.conversationCount}</td>
+        <td>${m.contactCountReal}</td>
+        <td>${m.groupCount != null ? m.groupCount : '—'}</td>
+      </tr>
+    `).join('');
+  }
+
+  document.getElementById('historyModalClose').addEventListener('click', () => historyModal.classList.remove('open'));
 
   // ---------------- Tentar reconectar (needsAttention) ----------------
   // HANDOFF Parte CQ — botão que aparece só quando o backend marcou
