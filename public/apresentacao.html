@@ -37,16 +37,22 @@
       // tom a mais que as outras) — derivam igual ao resto.
       return { surface: lighten(8), surface2: lighten(15), surface3: lighten(23), border: lighten(26), borderSoft: lighten(20) };
     }
-    window.__applyPalette = function (b) {
+    // `prefix` opcional (padrão 'palette_', a global/marca) — 'personalPalette_'
+    // pra paleta por usuário (Configurações/Aparência), mesmo padrão das
+    // outras 13 telas (2 caches SEPARADOS, ver HANDOFF Parte DP): evita um
+    // flash "pessoal → global → pessoal" quando os 2 fetches (brand global +
+    // paleta pessoal) completam em momentos diferentes.
+    window.__applyPalette = function (b, prefix) {
+      prefix = prefix || 'palette_';
       var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
           document.documentElement.style.setProperty(MAP[k], values[k]);
-          localStorage.setItem('palette_' + k, values[k]);
+          localStorage.setItem(prefix + k, values[k]);
           if (RGB_MAP[k]) {
             var rgbStr = hexToRgbStr(values[k]);
             document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
-            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
+            localStorage.setItem(prefix + k + '_rgb', rgbStr);
           }
           if (k === 'bg') {
             var surf = deriveSurfaces(values[k]);
@@ -55,18 +61,18 @@
             document.documentElement.style.setProperty('--surface-3', surf.surface3);
             document.documentElement.style.setProperty('--border', surf.border);
             document.documentElement.style.setProperty('--border-soft', surf.borderSoft);
-            localStorage.setItem('palette_surface', surf.surface);
-            localStorage.setItem('palette_surface2', surf.surface2);
-            localStorage.setItem('palette_surface3', surf.surface3);
-            localStorage.setItem('palette_border', surf.border);
-            localStorage.setItem('palette_borderSoft', surf.borderSoft);
+            localStorage.setItem(prefix + 'surface', surf.surface);
+            localStorage.setItem(prefix + 'surface2', surf.surface2);
+            localStorage.setItem(prefix + 'surface3', surf.surface3);
+            localStorage.setItem(prefix + 'border', surf.border);
+            localStorage.setItem(prefix + 'borderSoft', surf.borderSoft);
           }
         } else {
           document.documentElement.style.removeProperty(MAP[k]);
-          localStorage.removeItem('palette_' + k);
+          localStorage.removeItem(prefix + k);
           if (RGB_MAP[k]) {
             document.documentElement.style.removeProperty(RGB_MAP[k]);
-            localStorage.removeItem('palette_' + k + '_rgb');
+            localStorage.removeItem(prefix + k + '_rgb');
           }
           if (k === 'bg') {
             document.documentElement.style.removeProperty('--surface');
@@ -74,35 +80,43 @@
             document.documentElement.style.removeProperty('--surface-3');
             document.documentElement.style.removeProperty('--border');
             document.documentElement.style.removeProperty('--border-soft');
-            localStorage.removeItem('palette_surface');
-            localStorage.removeItem('palette_surface2');
-            localStorage.removeItem('palette_surface3');
-            localStorage.removeItem('palette_border');
-            localStorage.removeItem('palette_borderSoft');
+            localStorage.removeItem(prefix + 'surface');
+            localStorage.removeItem(prefix + 'surface2');
+            localStorage.removeItem(prefix + 'surface3');
+            localStorage.removeItem(prefix + 'border');
+            localStorage.removeItem(prefix + 'borderSoft');
           }
         }
       });
     };
-    Object.keys(MAP).forEach(function (k) {
-      var cached = localStorage.getItem('palette_' + k);
-      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-      if (RGB_MAP[k]) {
-        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
-        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-      }
-      if (k === 'bg' && cached) {
-        var cachedSurface = localStorage.getItem('palette_surface');
-        var cachedSurface2 = localStorage.getItem('palette_surface2');
-        var cachedSurface3 = localStorage.getItem('palette_surface3');
-        var cachedBorder = localStorage.getItem('palette_border');
-        var cachedBorderSoft = localStorage.getItem('palette_borderSoft');
-        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
-        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
-        if (cachedSurface3) document.documentElement.style.setProperty('--surface-3', cachedSurface3);
-        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
-        if (cachedBorderSoft) document.documentElement.style.setProperty('--border-soft', cachedBorderSoft);
-      }
-    });
+    function applyCachedPalette(prefix) {
+      Object.keys(MAP).forEach(function (k) {
+        var cached = localStorage.getItem(prefix + k);
+        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+        if (RGB_MAP[k]) {
+          var cachedRgb = localStorage.getItem(prefix + k + '_rgb');
+          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+        }
+        if (k === 'bg' && cached) {
+          var cachedSurface = localStorage.getItem(prefix + 'surface');
+          var cachedSurface2 = localStorage.getItem(prefix + 'surface2');
+          var cachedSurface3 = localStorage.getItem(prefix + 'surface3');
+          var cachedBorder = localStorage.getItem(prefix + 'border');
+          var cachedBorderSoft = localStorage.getItem(prefix + 'borderSoft');
+          if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
+          if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
+          if (cachedSurface3) document.documentElement.style.setProperty('--surface-3', cachedSurface3);
+          if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
+          if (cachedBorderSoft) document.documentElement.style.setProperty('--border-soft', cachedBorderSoft);
+        }
+      });
+    }
+    // 2 caches SEPARADOS (mesmo padrão das outras 13 telas, HANDOFF Parte
+    // DP) — 'palette_' pro brand global, 'personalPalette_' pra paleta por
+    // usuário, aplicada por cima assim que o fetch de /api/settings (ver
+    // script de auth no fim do arquivo) completar.
+    applyCachedPalette('palette_');
+    applyCachedPalette('personalPalette_');
   })();
 </script>
 <style>
@@ -483,7 +497,7 @@
     <div class="index-foot">
       Preparado por<br>
       <a href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">Daniel Costa</a><br>
-      Julho de 2026
+      Agosto de 2026
     </div>
   </nav>
 
@@ -507,7 +521,7 @@
         <div class="eyebrow">01 · Sumário executivo</div>
         <h2 class="section-title">Um canal que virou dado.</h2>
         <p class="lede">Construímos um gateway próprio que conecta números de WhatsApp diretamente aos negócios do Bitrix24. O que era uma conversa perdida no celular de cada vendedor passou a ser: histórico vinculado ao negócio, disparo de campanhas com controle e rastreio, agendamento de envios, segmentação de contatos, painéis de métricas e uma central de notificações com histórico próprio — tudo dentro do CRM que a equipe já usa todo dia.</p>
-        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com treze telas e catorze módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
+        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com dezesseis telas e dezesseis módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
       </div>
     </section>
 
@@ -539,7 +553,7 @@
     <section class="section wide" id="solucao">
       <div class="section-inner reveal">
         <div class="eyebrow">03 · A solução</div>
-        <h2 class="section-title">Catorze módulos, um só lugar de trabalho.</h2>
+        <h2 class="section-title">Dezesseis módulos, um só lugar de trabalho.</h2>
         <p class="lede">Tudo acessível de dentro do Bitrix24, sem precisar aprender uma ferramenta nova.</p>
         <div class="grid">
           <div class="card">
@@ -626,6 +640,18 @@
             <p>Uma subaba dentro do próprio Chat, pensada para o gestor acompanhar a equipe sem sair da conversa: desempenho por atendente (volume de conversas, tempo médio de resposta, pendências em aberto), com storytelling gerado por IA sobre os dados daquele número. Quem só recebeu acesso delegado enxerga o próprio desempenho; o dono real da instância enxerga a equipe inteira.</p>
             <div class="card-tag">Analytics</div>
           </div>
+          <div class="card">
+            <div class="card-num">15</div>
+            <h3>Alerta de instância caída</h3>
+            <p>Histórico completo de quedas e retomadas por instância, distinguindo uma queda temporária (reconecta sozinha) de uma que precisa de ação manual — com a duração de cada uma e o motivo. Notificação imediata (Central + aviso do navegador) pro dono e pra quem tem acesso delegado assim que uma conexão para de tentar sozinha, e uma série diária de conversas/contatos/grupos por instância ao longo do tempo.</p>
+            <div class="card-tag">Resiliência</div>
+          </div>
+          <div class="card">
+            <div class="card-num">16</div>
+            <h3>Publicar no Feed do Bitrix24</h3>
+            <p>Anuncia novidades do sistema direto no Feed nativo do Bitrix ("Para todos os colaboradores"), pelo próprio Painel Admin — sempre manual, com histórico do que já foi publicado (ou tentado) pra nunca duplicar um anúncio.</p>
+            <div class="card-tag">Comunicação interna</div>
+          </div>
         </div>
       </div>
     </section>
@@ -697,8 +723,8 @@
         <h2 class="section-title">O que já está construído e rodando.</h2>
         <p class="lede">Fatos de arquitetura — não projeções. Tudo abaixo já está implementado e em uso interno.</p>
         <div class="fact-strip">
-          <div class="fact"><div class="fact-num">14</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões, FAQ, administração e aparência</div></div>
-          <div class="fact"><div class="fact-num">28</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de atribuição de atendente…)</div></div>
+          <div class="fact"><div class="fact-num">16</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões, FAQ, onboarding, administração, apresentação e aparência</div></div>
+          <div class="fact"><div class="fact-num">36</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de instância, delegação de acesso, posts do Feed…)</div></div>
           <div class="fact"><div class="fact-num">1</div><div class="fact-label">Ponto único de trabalho — nenhuma equipe precisa sair do Bitrix24</div></div>
           <div class="fact"><div class="fact-num">0</div><div class="fact-label">Custo de licença por número de WhatsApp conectado</div></div>
         </div>
@@ -709,7 +735,7 @@
       <div class="section-inner reveal">
         <div class="eyebrow">07 · Riscos e transparência</div>
         <h2 class="section-title">O que a diretoria precisa saber antes de escalar.</h2>
-        <p class="lede">Transparência sobre limitações técnicas é parte do trabalho — nenhuma delas é motivo pra não usar o sistema hoje, mas devem orientar a velocidade de expansão. Desde o último relatório, vários pontos já foram fechados: <b>autenticação de ponta a ponta</b> (cada usuário só acessa os próprios dados, verificado contra o Bitrix a cada requisição), <b>privacidade da mídia</b> das conversas (deixou de ser pública na internet), <b>migração pra VPS própria com domínio fixo</b> (saiu do ambiente de testes) e <b>reinício automático</b> do serviço (Docker gerenciado, reinicia sozinho numa falha).</p>
+        <p class="lede">Transparência sobre limitações técnicas é parte do trabalho — nenhuma delas é motivo pra não usar o sistema hoje, mas devem orientar a velocidade de expansão. Desde o último relatório, vários pontos já foram fechados: <b>autenticação de ponta a ponta</b> (cada usuário só acessa os próprios dados, verificado contra o Bitrix a cada requisição), <b>privacidade da mídia</b> das conversas (deixou de ser pública na internet), <b>migração pra VPS própria com domínio fixo</b> (saiu do ambiente de testes), <b>reinício automático</b> do serviço (Docker gerenciado, reinicia sozinho numa falha) e <b>visibilidade de queda por instância</b> (histórico automático de quando e por que cada conexão caiu, módulo 15).</p>
         <div class="risk-list">
           <div class="risk">
             <div class="risk-flag high"></div>
@@ -739,7 +765,7 @@
             <div class="risk-flag med"></div>
             <div>
               <h3>Margem de CPU para o crescimento planejado</h3>
-              <p>Com 136 conexões ativas hoje, indo para 500 até o fim do mês, o volume de mensagens não é problema (folga grande). O que exige atenção é o número de conexões simultâneas: o servidor atual tem só 2 vCPUs, e o tempo de reconexão de todas as instâncias após um deploy sobe de ~35 minutos (hoje) para ~2h05 (com 500) — o intervalo escalonado entre cada sessão reconectando, que evita sobrecarregar o WhatsApp de uma vez, cresce na mesma proporção do número de conexões. Não bloqueia o crescimento, mas pede um upgrade de servidor (2→4 vCPUs) antes de bater a meta.</p>
+              <p>Com 218 instâncias cadastradas hoje — já acima das 136 do último relatório — indo para 500 na meta de crescimento, o volume de mensagens não é problema (folga grande). O que exige atenção é o número de conexões simultâneas: o servidor atual tem só 2 vCPUs, e o tempo de reconexão de todas as instâncias após um deploy já subiu de ~35 minutos (relatório anterior) para <b>~54 minutos hoje</b>, indo para ~2h05 com 500 — o intervalo escalonado entre cada sessão reconectando, que evita sobrecarregar o WhatsApp de uma vez, cresce na mesma proporção do número de conexões. Não bloqueia o crescimento, mas o upgrade de servidor (2→4 vCPUs) fica mais urgente à medida que esse número sobe.</p>
               <div class="risk-severity">Severidade média · recomendado resolver antes de atingir 500 conexões</div>
             </div>
           </div>
@@ -758,7 +784,7 @@
           </div>
           <div class="road">
             <div class="road-when">Curto prazo</div>
-            <div><h3>Investigar a causa raiz da queda de sessões em deploy</h3><p>Escalonar a reconexão (uma instância por vez) reduziu, mas não eliminou quedas de sessão durante um deploy — falta confirmar se o WhatsApp reage ao ritmo de novas conexões ou a outro fator (ex: IP de origem), pra fechar o risco descrito acima de vez.</p></div>
+            <div><h3>Investigar a causa raiz da queda de sessões em deploy</h3><p>Escalonar a reconexão (uma instância por vez) reduziu, mas não eliminou quedas de sessão durante um deploy. O histórico de quedas por instância (módulo 15, "Alerta de instância caída") agora registra automaticamente cada queda com o motivo real — a ferramenta de diagnóstico existe; falta usar o volume de dados que já está sendo acumulado pra confirmar se o WhatsApp reage ao ritmo de novas conexões ou a outro fator (ex: IP de origem).</p></div>
           </div>
           <div class="road">
             <div class="road-when">Curto prazo</div>
@@ -797,7 +823,7 @@
           <a class="btn" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">Falar com o responsável técnico</a>
         </div>
         <div class="credit-row">
-          <span>Relatório preparado para diretoria e CEO · Julho de 2026</span>
+          <span>Relatório preparado para diretoria e CEO · Agosto de 2026</span>
           <span class="credit-badge"><span class="dot"></span>Desenvolvido por <a href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">Daniel Costa</a> e Gabriel Alves</span>
         </div>
       </div>
@@ -840,11 +866,79 @@
   });
 })();
 </script>
+<script src="https://api.bitrix24.com/api/v1/"></script>
 <script>
 (function () {
+  // Paleta POR USUÁRIO (Configurações/Aparência) — antes desta correção
+  // (2026-08-25), esta tela nunca tinha login nenhum (nem sequer carregava
+  // o script api.bitrix24.com), então só aplicava a paleta GLOBAL (/api/
+  // brand), nunca a pessoal — usuário reportou trocar a cor em
+  // Configurações e a Apresentação continuar no dourado padrão. Mesmo
+  // padrão exato já usado nas outras telas (ver onboarding.html), reduzido
+  // ao essencial: sem sidebar/seção Admin nesta página, então sem
+  // revealAdminNavItem* — só autentica e aplica a paleta.
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+  let appToken = null;
+
+  async function verifyAuth() {
+    const auth = window.BX24 && BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  let resolveBrandReady;
+  const brandReady = new Promise((resolve) => { resolveBrandReady = resolve; });
+  async function applyPersonalPalette() {
+    await brandReady;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/settings`);
+      if (!res.ok) return;
+      const p = await res.json();
+      if (window.__applyPalette) {
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
+      }
+    } catch {}
+  }
+
+  if (window.BX24) {
+    BX24.init(async () => {
+      try {
+        await verifyAuth();
+        applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
+      } catch (err) {
+        console.error('[auth] falha ao autenticar:', err.message);
+      }
+    });
+  }
+
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
     if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(function () {});
+  }).catch(function () {}).finally(function () { resolveBrandReady(); });
 })();
 </script>
 </body>

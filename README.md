@@ -288,8 +288,9 @@ Métricas de Sites, Métricas de Campanhas, Agenda de Envios, Instâncias, Centr
 de Notificações, Configurações, Sugestões, Onboarding) são acessadas por
 navegação normal (link) a partir da aba do chat ou entre si (barra de navegação
 lateral em cada página), sempre rodando dentro do iframe do Bitrix. A sidebar é
-retrátil (botão circular dourado na borda, mesmo estilo nas 13 páginas que a têm
-— `index.html`/`apresentacao.html` não usam esse componente) e o estado
+retrátil (botão circular dourado na borda, mesmo estilo nas 14 páginas que a têm
+— `index.html` não usa esse componente; `apresentacao.html` não tem sidebar mas
+já autentica via `BX24.init`, ver §14.6) e o estado
 (aberta/fechada) fica em `localStorage`. Os itens "Sites" e "Métricas de Sites"
 aparecem como um grupo só ("Landing Page", com "Métricas LP" recolhível por uma
 seta — estado também em `localStorage`, chave `navGroupLPOpen`) — ver §11.5/§11.6.
@@ -1409,6 +1410,27 @@ Notificações, §15).
 configurada nas env vars do EasyPanel — o `.env` local é gitignored, não
 viaja com o código. Sem isso, `/admin.html` fica 403 pra todo mundo até
 alguém configurar.
+
+---
+
+## 14.6. Apresentação — relatório executivo (`/apresentacao.html`)
+
+Relatório em formato scrollytelling (rolagem com reveal por seção,
+sumário lateral fixo com destaque automático da seção visível, botão
+"Baixar apresentação" que abre a caixa de impressão do navegador pra
+salvar como PDF) — pensado pra diretoria/CEO, não pra uso operacional
+do dia a dia. Sem sidebar (layout próprio, full-width), mas autentica
+igual às 14 telas com sidebar (`BX24.init` → `verifyAuth` →
+`GET /api/settings`) e aplica a paleta pessoal do usuário por cima da
+global — corrigido em 2026-08-25 (antes disso a página nem carregava
+o script do BX24, então nunca lia a paleta pessoal, só a global via
+`/api/brand`; ver HANDOFF Parte EH).
+
+Conteúdo é HTML estático escrito à mão (não gerado a partir dos dados
+reais do sistema) — números citados (contagem de telas, tabelas,
+conexões ativas) precisam ser **atualizados manualmente** a cada
+mudança relevante de escala ou de escopo do sistema; não há nenhum
+mecanismo automático que os mantenha em dia sozinho.
 
 ---
 

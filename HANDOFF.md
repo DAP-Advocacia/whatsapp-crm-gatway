@@ -8992,3 +8992,47 @@ usuário não completou a checagem via DevTools
 antes da sessão migrar pro achado do onboarding. **Se persistir depois
 da correção do onboarding, retomar com esse comando no Console.**
 
+### Parte EH — Apresentação (`apresentacao.html`): paleta pessoal nunca aplicava + conteúdo desatualizado (2026-08-25)
+
+Usuário reportou (print do relatório executivo, ainda dourado depois
+de trocar pra paleta "WhatsApp") e pediu pra verificar se o conteúdo
+também estava atualizado.
+
+**Causa real, mesma classe de bug do onboarding (Parte EG)**:
+`apresentacao.html` nunca teve `BX24.init`/`verifyAuth`/`apiFetch` —
+nem sequer carregava `<script src="https://api.bitrix24.com/api/v1/">`
+— e `window.__applyPalette` aqui não aceitava um segundo parâmetro
+`prefix` (só gravava sempre em `palette_`, a paleta GLOBAL/marca,
+nunca em `personalPalette_`). Corrigido: adicionado o script do BX24 +
+o mesmo bloco de autenticação mínima já usado no onboarding (sem
+sidebar/seção Admin aqui, então sem `revealAdminNavItem*`) +
+`__applyPalette` e o carregamento síncrono de cache (`applyCachedPalette`)
+adaptados pra aceitar `prefix`, mesmo padrão dos 2 caches separados já
+usado nas outras 13 telas (evita o flash "pessoal → global → pessoal"
+documentado na Parte DP).
+
+**Conteúdo revisado contra o estado real do sistema** (data do
+relatório: "Julho de 2026", 2 meses defasada):
+- Contagem de telas/módulos corrigida de "13/14" pra **16** (16
+  arquivos HTML com sidebar, confirmado via `ls public/*.html`).
+- 2 cards novos adicionados (15 e 16): **Alerta de instância caída**
+  e **Publicar no Feed do Bitrix24** — as 2 features construídas nas
+  Partes EE-EG desta mesma sessão, ausentes do relatório.
+- Fato "28 tabelas" → **36** (contado direto em
+  `information_schema.tables` do banco real).
+- Seção de Riscos: "136 conexões hoje, indo pra 500" → **218**
+  (`select count(*) from instances`, banco real, 25/08) — tempo de
+  reconexão escalonada recalculado de ~35min pra **~54min** hoje (fórmula
+  `(N-1) × SESSION_STAGGER_MS`, mesma já documentada), mantendo ~2h05
+  como teto em 500. Já cita o histórico de conexão (módulo 15) como
+  ferramenta nova disponível pra investigar a causa raiz da queda em
+  massa (item já existia no roadmap como pendente).
+- Data atualizada pra "Agosto de 2026" (2 ocorrências).
+- Parágrafo de "já foi fechado desde o último relatório" (seção de
+  Riscos) ganhou a menção à visibilidade de queda por instância.
+
+**Validação**: sintaxe validada (`node -c`); balanceamento de divs
+confirmado na seção de cards (16 cards, 51 abertos = 51 fechados);
+servido via HTTP local com todas as 7 strings-chave confirmadas
+presentes no HTML real entregue.
+
