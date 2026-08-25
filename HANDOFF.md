@@ -8900,39 +8900,57 @@ comentário em `src/bitrixFeed.js` corrigidos pra exigir os DOIS
 escopos. Local (`.env`) configurado e testado end-to-end com sucesso
 (rota real, registro em `feed_posts`, post real publicado e removido).
 
-**Pendência real, ainda não resolvida**: com `BITRIX_FEED_WEBHOOK_URL`
-configurada em PRODUÇÃO (EasyPanel) e o serviço reiniciado, `POST
-/api/whatsapp/admin/feed-post` volta **502 do PROXY do EasyPanel**
-(nunca chega no processo Express — confirmado pela ausência de
-`X-Powered-By: Express`/`Ratelimit-*` na resposta, presentes em
-qualquer resposta real do nosso backend) — mas só quando o body tem
-um campo `message` não-vazio; `GET /admin/feed-posts` na mesma rota
-funciona normalmente, e `POST` com `title` sozinho (sem `message`)
-também funciona (400 normal, chega no Express). Isolado: não é rate
-limit (`Ratelimit-Remaining` alto), não é o processo caindo (outras
-rotas continuam 200 durante e depois), não é CORS/auth (roda depois
-de passar por `requireSuperAdmin` — sem token dá 401 normal do
-Express), não é tamanho de payload, não é `message` em outra rota
-(funciona em `presence/heartbeat`, e num campo diferente — `body` —
-na MESMA rota `/admin/feed-post`, que devolveu 400 normal). Isolado
-100%: só reproduz na combinação exata `POST /api/whatsapp/admin/
-feed-post` + uma chave JSON literal chamada `message` no corpo — algo
-na infraestrutura de produção (proxy/WAF fora do nosso controle, não
-identificado ao certo — hipótese mais provável é uma assinatura
-genérica anti-spam de blog/comentário, comum em WAFs, reagindo a
-"postar" + "message" juntos) bloqueia isso antes de chegar no
-processo Node.
+**Investigação longa do 502 em produção — causa real era muito mais
+simples do que qualquer hipótese levantada no caminho.** `POST
+/api/whatsapp/admin/feed-post` devolvia **502 puro do proxy do
+EasyPanel** (página genérica "Service is not reachable", sem
+`X-Powered-By: Express`/`Ratelimit-*`) especificamente quando o corpo
+tinha um campo de mensagem preenchido — levantadas e DESCARTADAS, uma
+a uma, com teste real: rate limit, processo caindo, CORS/auth,
+tamanho de payload, nome da chave JSON (`message` vs `content` vs
+`body` — todas reproduziam igual), DNS/egress do container pro
+domínio do Bitrix (testado via `link-preview`, funcionava normal),
+aspas literais corrompendo `DATABASE_URL` (reproduzida só no MEU
+teste Docker local por usar `--env-file` de um jeito que produção não
+usa — descartada depois de confirmar via console real do EasyPanel
+que a variável real não tinha aspas). Reproduzido em container Docker
+idêntico ao de produção (mesmo Dockerfile, Node 22) rodando local —
+funcionou perfeitamente, o que forçou a conclusão de que a diferença
+real só podia estar em alguma variável de ambiente específica do
+container de produção que meu `.env` local não reproduzia.
 
-**Contornado, não pela causa raiz (fora do nosso controle) — renomeado
-o campo externo**: `POST /admin/feed-post` agora espera `{ title?,
-content }` no corpo (era `{ title?, message }`) — só o nome da chave
-JSON exposta na rota HTTP mudou; internamente (variável local, coluna
-`feed_posts.message` no banco, `publishFeedPost`/`recordFeedPost`)
-continua tudo `message`, sem nenhuma migração necessária.
-`admin.html` (`feedPostPublishBtn` handler) atualizado pra mandar
-`content` no `JSON.stringify`. Testado local com sucesso (post real
-publicado com `content`, depois removido) — falta confirmar em
-produção depois deste deploy.
+**Causa raiz real, confirmada via console do próprio EasyPanel**
+(`node -e "console.log(process.env.BITRIX_FEED_WEBHOOK_URL)"` dentro
+do container rodando): a variável simplesmente **nunca tinha sido
+persistida de verdade** nas env vars do serviço em produção — mostrava
+`undefined`, apesar de parecer configurada em tentativas anteriores.
+Confirmado retroativamente pelo próprio registro em `feed_posts`: a
+tentativa ANTES de recolar a variável gravou `status:'failed'` com o
+texto exato "BITRIX_FEED_WEBHOOK_URL não configurado..." — ou seja, a
+requisição SEMPRE chegou certinho no Express e processou tudo
+corretamente (inclusive gravando o erro certo no banco); só o corpo
+da resposta HTTP que o cliente via, no caminho específico de erro
+"variável ausente", virava a página genérica do EasyPanel em vez do
+JSON de erro — mecanismo exato disso não aprofundado mais (o sintoma
+sumiu de vez assim que a variável passou a existir de verdade, não
+foi mais reproduzido pra investigar). Usuário recolou a variável nas
+Environment Variables do serviço, salvou, e clicou Deploy — 3/3
+tentativas de teste real depois disso confirmaram sucesso (post
+publicado + removido a cada vez).
+
+O campo do body continua `content` (renomeado de `message` durante a
+investigação, por uma hipótese que depois se mostrou não ser a causa
+real) — sem motivo pra reverter, funciona perfeitamente e não há
+nenhum custo em manter. `POST /admin/feed-post` espera `{ title?,
+content }`; internamente (variável local, coluna `feed_posts.message`
+no banco) continua tudo `message`, sem nenhuma migração necessária.
+
+**Lição pra próxima vez**: quando um erro só reproduz em produção e
+nunca localmente, checar a env var relevante DENTRO do container real
+(console/terminal do próprio painel, se disponível) antes de
+investigar hipóteses de infraestrutura mais exóticas (proxy/WAF,
+aspas, etc.) — o `undefined` estava visível em 1 comando desde o
+início.
 
 **Bug real encontrado e corrigido: "seção Admin pisca e some" ao
 navegar entre `onboarding.html` e as outras 13 telas com sidebar**.
