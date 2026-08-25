@@ -8883,3 +8883,81 @@ limites 24h→1d); `maybeNotifyInstanceDown` testado isoladamente (5
 cenários de dedupe, espelhando a mesma regra do backend). Todos os
 dados de teste (delegado, eventos, métricas) removidos do banco depois.
 
+### Parte EG — Feed do Bitrix: escopo real + bug real "seção Admin pisca e some" no onboarding (2026-08-25)
+
+**Feed do Bitrix — escopo real descoberto em teste ao vivo**: usuário
+criou o webhook dedicado (Parte EE) marcando só "Rede Social
+(socialnetwork)", como o `.env.example` orientava — `publishFeedPost`
+falhou com `insufficient_scope`. Investigado (`WebSearch`+`WebFetch`
+na doc oficial do Bitrix): `log.blogpost.add` exige o escopo **`log`**
+(Feed/Log de atividades), não "Rede Social" — os dois nomes sugerem
+o oposto do que realmente cobrem. Usuário marcou os DOIS escopos no
+mesmo webhook (sem gerar token novo) e o post real funcionou
+(`log.blogpost.add`→ id real, confirmado publicado e depois removido
+via `log.blogpost.delete` com `POST_ID`, não `ID` — outro parâmetro
+não documentado claramente, descoberto testando). `.env.example` e o
+comentário em `src/bitrixFeed.js` corrigidos pra exigir os DOIS
+escopos. Local (`.env`) configurado e testado end-to-end com sucesso
+(rota real, registro em `feed_posts`, post real publicado e removido).
+
+**Pendência real, ainda não resolvida**: com `BITRIX_FEED_WEBHOOK_URL`
+configurada em PRODUÇÃO (EasyPanel) e o serviço reiniciado, `POST
+/api/whatsapp/admin/feed-post` volta **502 do PROXY do EasyPanel**
+(nunca chega no processo Express — confirmado pela ausência de
+`X-Powered-By: Express`/`Ratelimit-*` na resposta, presentes em
+qualquer resposta real do nosso backend) — mas só quando o body tem
+um campo `message` não-vazio; `GET /admin/feed-posts` na mesma rota
+funciona normalmente, e `POST` com `title` sozinho (sem `message`)
+também funciona (400 normal, chega no Express). Isolado: não é rate
+limit (`Ratelimit-Remaining` alto), não é o processo caindo (outras
+rotas continuam 200 durante e depois), não é CORS/auth (roda depois
+de passar por `requireSuperAdmin` — sem token dá 401 normal do
+Express), não é tamanho de payload, não é `message` em outra rota
+(funciona em `presence/heartbeat`). Só reproduz na combinação exata
+`POST /api/whatsapp/admin/feed-post` + campo `message` presente —
+não investigado até o fim (precisa de acesso aos logs do container no
+EasyPanel no momento exato da requisição, ainda não obtido). Local
+(`.env`) funciona perfeitamente — só produção com este sintoma.
+**Retomar**: pedir pro usuário abrir a aba de Logs (não Deployment
+History) do serviço no EasyPanel durante uma tentativa nova.
+
+**Bug real encontrado e corrigido: "seção Admin pisca e some" ao
+navegar entre `onboarding.html` e as outras 13 telas com sidebar**.
+Usuário reportou com prints. Investigado a fundo (chegou a levantar
+hipótese errada de proxy/WAF bloqueando por conteúdo — descartada
+depois de confirmar `GET /api/whatsapp/admin/whoami` devolvendo
+`isSuperAdmin:true` normalmente contra produção): a causa real era
+**`onboarding.html` nunca teve nenhuma lógica de autenticação**
+(decisão deliberada e documentada desde a Parte DO — "esta tela não
+tem NENHUMA lógica de autenticação/API"), diferente das outras 13
+telas com sidebar, que todas fazem `BX24.init` → `verifyAuth()` →
+`GET /admin/whoami`+`GET /conversation-analysis/whoami` →
+`.revealed` na seção. Sem isso, a seção Admin nunca aparecia dentro
+do onboarding — ao navegar PRA ou DE lá, a seção "pisca" (aparece na
+tela anterior, desaparece na nova, sem transição — cada HTML é uma
+página nova, DOM recriado do zero). Confirmado com o usuário que a
+decisão original não faz mais sentido hoje (a tela já é aberta só
+dentro do app logado) — corrigido adicionando a MESMA autenticação
+mínima das outras telas (`verifyAuth`/`apiFetch`/
+`revealAdminNavItemIfSuperAdmin`/`revealAdminSectionIfAnyItemVisible`
++ `applyPersonalPalette`, sem replicar toast/confirmDialog/heartbeat
+de presença — nada disso é necessário aqui, escopo deliberadamente
+reduzido ao que resolve o sintoma relatado). CSS `.revealed` também
+adicionado (faltava por completo, só existia nas outras 13 telas). A
+mesma causa (falta de auth) também explicava a paleta pessoal nunca
+aplicando nesta tela — corrigido junto, mesmo mecanismo
+(`applyPersonalPalette`/`brandReady`) das demais.
+
+**Achado à parte, investigado mas não é bug**: usuário reportou a
+paleta trocada em Configurações (verde "WhatsApp") não refletindo no
+Dashboard (ainda dourado). `GET /api/settings` testado direto contra
+produção com o token real do usuário — devolveu a paleta certa
+(`#25D366`) corretamente. O código de `dashboard.html` também está
+correto (`applyPersonalPalette`/`brandReady`/ordem de chamadas
+confirmadas certas por leitura). Não confirmado ainda se era só o
+mesmo instante do "pisca" (F5 durante navegação) ou algo mais —
+usuário não completou a checagem via DevTools
+(`getComputedStyle(document.documentElement).getPropertyValue('--gold')`)
+antes da sessão migrar pro achado do onboarding. **Se persistir depois
+da correção do onboarding, retomar com esse comando no Console.**
+

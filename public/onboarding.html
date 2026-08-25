@@ -201,15 +201,23 @@
   }
   .nav-section:first-child .nav-section-label{ padding-top:2px; }
   html.sidebar-collapsed .nav-section-label{ display:none; }
-  /* Seção "Admin" (HANDOFF Parte DO) — nesta tela nunca é revelada (sem
-     nenhuma lógica de autenticação, decisão deliberada), então continua
-     sempre com 0px de altura — nenhuma classe .revealed é adicionada
-     aqui, mas a regra fica por consistência com as outras 15 telas. */
-  #navSectionAdmin{ max-height:0; overflow:hidden; }
-  /* Mesma regra das outras 15 telas, por consistência — esta tela nunca
-     revela nada (sem lógica de auth, decisão deliberada), então os 2
-     itens ficam sempre em max-height:0, igual já era com `hidden`. */
-  #navAdminItem, #navConversationAnalysisItem{ max-height:0; overflow:hidden; padding-top:0; padding-bottom:0; }
+  /* Seção "Admin" — igual às outras 13 telas com login: começa em 0px e
+     só ganha altura quando revelada por JS (revealAdminNavItemIfSuperAdmin/
+     revealAdminSectionIfAnyItemVisible, ver script de auth abaixo). Até
+     2026-08-25 esta tela não tinha NENHUMA lógica de autenticação (decisão
+     deliberada, HANDOFF Parte DO) — por isso a seção nunca era revelada
+     aqui, o que fazia "pisca e some" ao navegar entre esta tela e as
+     outras 13 (usuário reportou). Corrigido adicionando a mesma
+     autenticação/API das demais. */
+  #navSectionAdmin{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
+  #navSectionAdmin.revealed{ max-height:300px; }
+  #navAdminItem, #navConversationAnalysisItem{
+    max-height:0; overflow:hidden; padding-top:0; padding-bottom:0;
+    transition: max-height .2s ease, padding .2s ease;
+  }
+  #navAdminItem.revealed, #navConversationAnalysisItem.revealed{
+    max-height:44px; padding-top:10px; padding-bottom:10px;
+  }
   .nav-item{
     position:relative;
     display:flex; align-items:center; gap:12px;
@@ -432,10 +440,7 @@
    </div>
    <!-- Seção separada de Workspace/Configuração — reúne as 2 telas de
         acesso restrito do sistema (super admin, ou grant explícito no
-        caso da Auditoria). A SEÇÃO inteira fica escondida — esta tela
-        não tem NENHUMA lógica de autenticação/API (decisão deliberada,
-        ver HANDOFF), então nada aqui é revelado nunca, igual já era
-        pros 2 itens antes de existir esta seção (HANDOFF Parte DO). -->
+        caso da Auditoria). Igual às outras 13 telas com login. -->
    <div class="nav-section" id="navSectionAdmin">
     <div class="nav-section-label">Admin</div>
     <!-- Escondido por padrão — só revelado por JS (ver GET
@@ -629,11 +634,109 @@
 </script>
 <script>
 (function () {
+  // Autenticação mínima — antes desta correção (2026-08-25), esta tela não
+  // tinha NENHUMA lógica de login (decisão deliberada, HANDOFF Parte DO),
+  // então nunca sabia se este ownerId é super admin/tem grant, e a seção
+  // Admin da sidebar nunca era revelada aqui — só nas outras 13 telas. Isso
+  // fazia a seção "pisca e some" ao navegar entre esta tela e as demais
+  // (usuário reportou, 2026-08-25). Mesmo padrão exato das outras telas,
+  // reduzido ao essencial (sem heartbeat de presença/toast/confirmDialog —
+  // nada disso é necessário aqui, esta tela não faz mais nada com login
+  // alem de revelar a sidebar e a paleta pessoal).
+  const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
+  let appToken = null;
+
+  async function verifyAuth() {
+    const auth = window.BX24 && BX24.getAuth ? BX24.getAuth() : null;
+    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: auth.access_token }),
+    });
+    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    const data = await res.json();
+    appToken = data.token;
+    return data.ownerId;
+  }
+
+  async function apiFetch(url, opts = {}) {
+    const doFetch = () => fetch(url, {
+      ...opts,
+      headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}`, ...(opts.headers || {}) },
+    });
+    let res = await doFetch();
+    if (res.status === 401) {
+      try {
+        await verifyAuth();
+        res = await doFetch();
+      } catch (err) {
+        console.error('[auth] falha ao reautenticar:', err.message);
+      }
+    }
+    return res;
+  }
+
+  function revealAdminSectionIfAnyItemVisible() {
+    const section = document.getElementById('navSectionAdmin');
+    if (!section) return;
+    const admin = document.getElementById('navAdminItem');
+    const analysis = document.getElementById('navConversationAnalysisItem');
+    if (admin?.classList.contains('revealed') || analysis?.classList.contains('revealed')) section.classList.add('revealed');
+  }
+
+  function revealAdminNavItemIfSuperAdmin() {
+    apiFetch(`${window.location.origin}/api/whatsapp/admin/whoami`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const item = document.getElementById('navAdminItem');
+        if (item && data?.isSuperAdmin) { item.classList.add('revealed'); revealAdminSectionIfAnyItemVisible(); }
+      })
+      .catch(() => {});
+    apiFetch(`${window.location.origin}/api/conversation-analysis/whoami`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        const item = document.getElementById('navConversationAnalysisItem');
+        if (item && data?.hasAccess) { item.classList.add('revealed'); revealAdminSectionIfAnyItemVisible(); }
+      })
+      .catch(() => {});
+  }
+
+  // Paleta POR USUÁRIO (tela Configurações/Aparência) — mesma ordem de
+  // dependência das outras 13 telas: só aplica DEPOIS do fetch de /api/brand
+  // (brandReady) ter rodado, senão uma corrida entre os dois poderia
+  // sobrescrever a pessoal de volta pra global por acidente.
+  let resolveBrandReady;
+  const brandReady = new Promise((resolve) => { resolveBrandReady = resolve; });
+  async function applyPersonalPalette() {
+    await brandReady;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/settings`);
+      if (!res.ok) return;
+      const p = await res.json();
+      if (window.__applyPalette) {
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
+      }
+    } catch {}
+  }
+
+  if (window.BX24) {
+    BX24.init(async () => {
+      try {
+        await verifyAuth();
+        revealAdminNavItemIfSuperAdmin();
+        applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
+      } catch (err) {
+        console.error('[auth] falha ao autenticar:', err.message);
+      }
+    });
+  }
+
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
     if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
     if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(function () {});
+  }).catch(function () {}).finally(function () { resolveBrandReady(); });
 })();
 </script>
 </body>

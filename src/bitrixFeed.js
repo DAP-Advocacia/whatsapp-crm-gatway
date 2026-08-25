@@ -34,19 +34,18 @@ async function callBitrixFeed(method, params = {}) {
   return data.result;
 }
 
-// HIPÓTESE A VALIDAR NO PRIMEIRO TESTE REAL (mesmo padrão já usado neste
-// projeto quando uma API externa não pode ser testada de antemão — o
-// webhook dedicado ainda precisa ser criado pelo usuário no painel do
-// Bitrix antes de qualquer chamada real ser possível). Conforme a
-// documentação pública do Bitrix REST (não confirmado contra este
-// portal específico), log.blogpost.add espera aproximadamente:
+// CONFIRMADO em teste real (2026-08-25): o payload abaixo funciona
+// exatamente como esperado (post criado no Feed real, id devolvido em
+// `result`). O único obstáculo real não foi o payload — foi o ESCOPO do
+// webhook: "Rede Social (socialnetwork)" sozinho NÃO é suficiente pra
+// log.blogpost.add, apesar do nome sugerir o contrário. O escopo exigido
+// é "log" (Feed/Log de atividades) — precisa marcar os DOIS no painel do
+// webhook (Aplicativos > Webhooks de entrada), senão a chamada falha com
+// `insufficient_scope` mesmo com a URL/token corretos.
 //   POST_TITLE: string (título do post, pode ficar vazio)
 //   POST_MESSAGE: string — aceita BB-code básico (ex: [B]texto[/B])
 //   DEST: { AUDIENCE_TYPE: 'ALL' } — "Para todos os colaboradores"
 //         (confirmado via print do usuário ser este destino, não outro)
-// Se o primeiro teste real devolver erro de parâmetro (data.error da
-// API), ajustar SÓ aqui — isolado deste arquivo, não afeta bitrix.js
-// nem nenhuma outra integração já em uso/testada.
 async function publishFeedPost({ title, message }) {
   const trimmed = String(message || '').trim();
   if (!trimmed) throw new Error('a mensagem do post não pode ficar vazia');
