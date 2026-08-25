@@ -8538,3 +8538,55 @@ do app); `renderContactPanelAssignee`/`renderContactPanelLabels`
 testados com 5 cenários (sem atendente, atendente=eu, atendente=outro,
 sem tags, com tags).
 
+### Parte EB — Corrige composers empilhados + bolha de nota estreita + limite de 1h no resumo (2026-08-25)
+
+Usuário mandou print da nota interna (Parte EA) mostrando 2 bugs reais
+e pediu uma mudança nova.
+
+**1) Bug real confirmado — os 2 composers (Responder/Nota interna)
+apareciam JUNTOS, um empilhado embaixo do outro**, em vez de alternar
+ao clicar na aba. Causa: `.composer{ display:flex }` é uma regra de
+CLASSE, com especificidade maior que o atributo `hidden` sozinho (que
+o navegador aplica via `[hidden]{ display:none }`, especificidade
+baixa) — como `#composerNote` tem `class="composer composer--note"`
+E o atributo `hidden`, a classe sempre vencia, deixando o composer de
+nota sempre visível independente do toggle de aba. **Inconsistência
+minha**: eu já tinha corrigido exatamente esse mesmo problema pro
+`.export-menu` na Parte EA (`.export-menu[hidden]{ display:none;
+}`), só esqueci de aplicar a mesma regra em `.composer`. Corrigido com
+`.composer[hidden]{ display: none; }`. Confirmado com jsdom (`getComputedStyle`
+real, não só leitura de código) que antes da correção os dois
+elementos mediam `display:flex` simultaneamente (reproduzindo o bug
+do print), e depois da correção alternam corretamente.
+
+**2) Bolha de nota interna "flutuava" pequena e isolada no meio do
+feed** — `max-width: 520px` fixo em `.bubble-note`, teto baixo demais
+pra telas largas (o print do usuário mostra um monitor amplo, coluna
+de conversa bem maior que 520px). Removido o teto — a nota agora
+ocupa a largura real da coluna de mensagens (`width: 100%` sem
+`max-width`), igual o usuário pediu ("preencher o eixo Y" — no
+sentido de largura útil da coluna, não ficar um balão pequeno no
+centro).
+
+**3) Resumo de IA limitado a 1 regeneração por hora** (pedido novo,
+não bug) — usuário viu o modal de Histórico de resumos (Parte DY) com
+3-4 versões geradas na mesma manhã numa conversa muito ativa, e pediu
+espaçar pra no máximo 1x por hora (reduz custo real de chamadas à
+OpenAI/tokens gastos). `scheduleSummaryRefresh()` (chamada a cada
+mensagem nova via WebSocket) agora compara `Date.now()` contra
+`aiSummaryUpdatedAt` (já existente, atualizado tanto ao gerar quanto
+ao carregar um resumo salvo) — só dispara a geração de fato (com o
+debounce de 15s de sempre) se já tiver passado >= 1h desde a última
+atualização; senão, reagenda o timer pro momento exato em que a hora
+completa (+15s), sem desistir silenciosamente — se mais mensagens
+chegarem antes disso, a função é chamada de novo e só reagenda de
+novo, sem acumular timers duplicados (mesmo `clearTimeout` de sempre
+no início da função).
+
+**Validação**: sintaxe (`new Function`) confirmada; lógica do limite
+de 1h testada com 5 cenários incluindo as duas fronteiras exatas (60min
+exatos → gera; 59min59s → não gera ainda); correção do CSS `[hidden]`
+testada com jsdom usando `getComputedStyle` real (não suposição sobre
+especificidade CSS) — reproduzido o bug do print antes da correção e
+confirmado resolvido depois.
+

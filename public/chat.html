@@ -929,6 +929,14 @@
 
   /* ---------- Composer ---------- */
   .composer{ display: flex; align-items: flex-end; gap: 10px; padding: 12px 14px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  /* Bug real (print do usuário, 2026-08-25): o atributo `hidden` tem
+     especificidade MENOR que a classe `.composer` (que já declara
+     `display:flex`) — sem esta regra, os composers "Responder"/"Nota
+     interna" ficavam sempre visíveis os DOIS ao mesmo tempo, um
+     empilhado embaixo do outro, ignorando o toggle de aba. Mesma
+     correção já feita em .export-menu[hidden] logo acima, só faltou
+     aplicar aqui também. */
+  .composer[hidden]{ display: none; }
   .composer textarea{
     flex: 1; resize: none; border-radius: 12px; font-size: 13.5px; padding: 10px 12px;
     max-height: 110px; min-height: 40px; line-height: 1.4; transition: border-color .15s;
@@ -970,9 +978,14 @@
   /* Bolha de nota interna inline no feed — faixa horizontal centralizada
      (não bolha lateral esquerda/direita como mensagem real), pra nunca
      ser confundida com conversa de verdade. */
-  .note-row{ display:flex; justify-content:center; margin: 6px 0; }
+  /* Ajustado a pedido do usuário (print, 2026-08-25): a nota interna
+     ficava travada em 520px de largura, "flutuando" pequena isolada no
+     meio do feed em telas largas — agora ocupa a largura real da coluna
+     de mensagens (mesma área que uma bolha normal usaria de referência),
+     nunca mais um balão minúsculo perdido no centro. */
+  .note-row{ display:flex; margin: 6px 0; }
   .bubble-note{
-    max-width: 520px; width: 100%; background: rgba(var(--gold-rgb),.07); border: 1px solid rgba(var(--gold-rgb),.25);
+    width: 100%; background: rgba(var(--gold-rgb),.07); border: 1px solid rgba(var(--gold-rgb),.25);
     border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--text);
   }
   .bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--gold-dim); margin-bottom:3px; }
@@ -1880,11 +1893,29 @@
   // A conversa pode continuar por muito tempo depois do resumo já gerado —
   // sem isso, ele ficava parado no que aconteceu até a primeira geração (ver
   // pedido do usuário). Reagenda a cada mensagem nova (qualquer direção) na
-  // conversa aberta; o debounce de 15s evita gerar de novo a cada mensagem
-  // individual numa rajada — só depois que a conversa "respira" um pouco.
+  // conversa aberta.
+  //
+  // Limite de 1 regeneração por HORA (pedido do usuário, 2026-08-25, depois
+  // de ver o Histórico de resumos com 3-4 versões na mesma manhã numa
+  // conversa muito ativa — cada regeneração custa uma chamada real à
+  // OpenAI/tokens). O debounce de 15s continua existindo por baixo (evita
+  // gerar a cada mensagem individual numa rajada), mas agora só dispara de
+  // fato se já fez pelo menos 1h desde `aiSummaryUpdatedAt` — senão só
+  // reagenda pro horário em que a hora completa, sem gerar nada agora.
+  const SUMMARY_REFRESH_MIN_INTERVAL_MS = 60 * 60 * 1000;
   function scheduleSummaryRefresh() {
     clearTimeout(summaryRefreshTimer);
-    summaryRefreshTimer = setTimeout(() => generateConversationSummary(true), 15000);
+    const lastUpdate = aiSummaryUpdatedAt ? new Date(aiSummaryUpdatedAt).getTime() : 0;
+    const elapsed = Date.now() - lastUpdate;
+    if (elapsed >= SUMMARY_REFRESH_MIN_INTERVAL_MS) {
+      summaryRefreshTimer = setTimeout(() => generateConversationSummary(true), 15000);
+    } else {
+      // Ainda não completou 1h desde a última geração — reagenda pro
+      // momento exato em que completa (+15s de debounce), em vez de
+      // simplesmente desistir; se mais mensagens chegarem antes disso,
+      // esta mesma função é chamada de novo e só reagenda de novo.
+      summaryRefreshTimer = setTimeout(() => generateConversationSummary(true), (SUMMARY_REFRESH_MIN_INTERVAL_MS - elapsed) + 15000);
+    }
   }
 
   async function loadContactPanel() {

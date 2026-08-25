@@ -583,10 +583,14 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
     usuário) — mas se regenera **sozinho** conforme a conversa continua:
     gerado na primeira vez que se abre uma conversa com mensagens e ainda
     sem resumo salvo, e depois disso re-executado automaticamente a cada
-    mensagem nova (qualquer direção) recebida via WebSocket, com debounce
-    de 15s pra não regenerar a cada mensagem individual numa rajada
-    (`scheduleSummaryRefresh`, HANDOFF Parte DY corrigiu esta descrição —
-    o comportamento antigo era "gera uma vez só e nunca mais"). Chama
+    mensagem nova (qualquer direção) recebida via WebSocket — no máximo
+    **1 vez por hora** (`SUMMARY_REFRESH_MIN_INTERVAL_MS`, HANDOFF Parte
+    EB, 2026-08-25 — antes era a cada mensagem com só 15s de debounce,
+    reduzido pra limitar o custo real de chamadas à OpenAI numa conversa
+    muito ativa), com um debounce de 15s por cima pra não regenerar a
+    cada mensagem individual numa rajada assim que a hora completa
+    (`scheduleSummaryRefresh`, compara `Date.now()` contra
+    `aiSummaryUpdatedAt`). Chama
     `POST /api/whatsapp/conversations/summary` `{ session, phone,
     contactName? }`, que reprocessa até as últimas 80 mensagens da conversa
     (`store.getHistory`) via OpenAI (`gpt-4o-mini`, `response_format:
