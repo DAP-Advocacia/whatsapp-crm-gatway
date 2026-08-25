@@ -8373,3 +8373,67 @@ testada com dado real via `curl` (servidor de teste subido/derrubado
 em porta isolada); nenhum dado de teste criado precisou de limpeza
 nesta parte (só leitura de dado já existente).
 
+### Parte DZ — Histórico de resumos: hora faltando + contagem de tokens (2026-08-25)
+
+Usuário mandou print do modal de "Histórico de resumos" (Parte DY) e
+apontou 2 problemas: (1) cada item mostrava a mesma data 2 vezes em
+formatos diferentes ("21 de agosto · 21/08"), nunca a hora; (2) pedido
+novo — mostrar quantos tokens a OpenAI gastou em cada geração.
+
+**1) Bug real confirmado**: `formatDayLabel(h.createdAt)` +
+`formatListTime(h.createdAt)` — `formatListTime` só devolve HORA
+quando a data é hoje, e devolve DATA (dia/mês) pra qualquer outro dia
+(comportamento correto dela em outros usos do arquivo, ex. lista de
+conversas). Combinado com `formatDayLabel` (que também é sempre
+data), o resultado eram 2 representações de data, nunca hora.
+Corrigido: `formatDayLabel(...)` + hora real via
+`toLocaleTimeString`, sempre — não reaproveita mais `formatListTime`
+aqui.
+
+**2) Tokens gastos — schema novo + refatoração cuidadosa em
+`src/openai.js`**. `conversation_summaries` ganhou `tokens_used int`
+(nullable) — a OpenAI só devolve `usage.total_tokens` NA hora da
+chamada, nunca depois; os ~1800 resumos já salvos antes desta coluna
+ficam `null` pra sempre, sem forma de recuperar retroativamente
+(decisão confirmada com o usuário antes de mexer no schema).
+
+**Cuidado real durante a implementação, não trivial**:
+`callChatCompletion` (função que fala com a API da OpenAI) é
+compartilhada por 5 lugares — `summarizeConversation` (resumo de
+conversa) e mais 4 (`suggestAbTestAnalysis`,
+`generateDashboardInsights`, `generateTeamInsights`,
+`generateConversationAnalysisInsight`) — e sempre devolveu só a
+STRING de texto. Duas abordagens tentadas e descartadas antes da
+correta:
+- Mudar o retorno de `callChatCompletion` pra `{text, tokensUsed}`
+  quebraria os outros 4 call-sites (esperam string pura) — descartado
+  ao confirmar isso via grep antes de seguir.
+- Guardar `tokensUsed` numa propriedade estática da própria função
+  (`callChatCompletion.lastTokensUsed`) — descartado por introduzir
+  um bug de concorrência real: duas chamadas simultâneas (2 resumos
+  gerados ao mesmo tempo, ou qualquer chamada concorrente do Node)
+  sobrescreveriam esse valor compartilhado antes da leitura certa
+  acontecer, cada uma pegando a contagem errada.
+- **Solução aplicada**: extraída uma função privada `_callOpenAI`
+  (não exportada) que sempre devolve `{text, tokensUsed}` — chamada
+  real à API. `callChatCompletion` virou um wrapper fino em cima dela
+  (`return (await _callOpenAI(...)).text`), preservando 100% do
+  comportamento pros 4 call-sites antigos (testado com chamada REAL à
+  OpenAI via `suggestAbTestAnalysis`, confirmando que continua
+  devolvendo string pura). `summarizeConversation` chama `_callOpenAI`
+  direto e propaga `tokensUsed` no retorno — que já flui sozinho até
+  `POST /conversations/summary` (`res.json({...result, updatedAt})`)
+  sem precisar tocar na rota.
+- `store.setConversationSummary`/`listConversationSummaryHistory`
+  estendidos com `tokensUsed` (opcional, `null` quando ausente —
+  testado explicitamente o caso de compatibilidade sem quebrar nada).
+
+**Validação**: testado com chamada REAL à API da OpenAI (não só
+mock) via `summarizeConversation` contra conversa real (762 tokens
+devolvidos) e via `suggestAbTestAnalysis` (confirma zero regressão
+nos outros 4 usos); persistência testada com dado sintético
+(`tokens_used` gravado e lido corretamente, e o caso de
+compatibilidade sem o campo virando `null`), limpo depois; formato
+final do texto (data+hora+tokens) testado com 3 cenários (com
+tokens, sem tokens/resumo antigo, "hoje").
+

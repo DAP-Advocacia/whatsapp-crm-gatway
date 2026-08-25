@@ -292,16 +292,16 @@ async function getConversationSummary(sessionId, phone) {
 // generateConversationSummary em chat.html), então isso vira um registro de
 // como o caso foi evoluindo ao longo do atendimento, não só o snapshot mais
 // recente.
-async function setConversationSummary(sessionId, phone, { title, subtitle, summary }) {
+async function setConversationSummary(sessionId, phone, { title, subtitle, summary, tokensUsed }) {
   await pool.query(
     `with updated as (
        update conversations set ai_summary = $1, ai_summary_updated_at = now()
        where session_id = $2 and phone = $3
        returning id
      )
-     insert into conversation_summaries (conversation_id, title, subtitle, summary)
-     select id, $4, $5, $6 from updated`,
-    [JSON.stringify({ title, subtitle, summary }), sessionId, phone, title || null, subtitle || null, summary]
+     insert into conversation_summaries (conversation_id, title, subtitle, summary, tokens_used)
+     select id, $4, $5, $6, $7 from updated`,
+    [JSON.stringify({ title, subtitle, summary }), sessionId, phone, title || null, subtitle || null, summary, tokensUsed ?? null]
   );
 }
 
@@ -315,7 +315,7 @@ async function setConversationSummary(sessionId, phone, { title, subtitle, summa
 // deixaram rastro além do snapshot único que já havia em ai_summary).
 async function listConversationSummaryHistory(sessionId, phone) {
   const { rows } = await pool.query(
-    `select cs.title, cs.subtitle, cs.summary, cs.created_at as "createdAt"
+    `select cs.title, cs.subtitle, cs.summary, cs.tokens_used as "tokensUsed", cs.created_at as "createdAt"
      from conversation_summaries cs
      join conversations c on c.id = cs.conversation_id
      where c.session_id = $1 and c.phone = $2

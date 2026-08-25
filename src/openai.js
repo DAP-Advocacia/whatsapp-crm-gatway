@@ -11,7 +11,14 @@
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MODEL = 'gpt-4o-mini';
 
-async function callChatCompletion(systemPrompt, userPrompt, maxTokens, jsonMode) {
+// Chamada real à API — devolve texto + tokens gastos (usage.total_tokens,
+// prompt+completion). Privada (não exportada): `callChatCompletion` abaixo
+// é a interface pública de sempre (só o texto), usada por 4 chamadas
+// existentes (sugestão de A/B test, insights do dashboard) que nunca
+// precisaram de contagem de tokens — mudar o retorno DELAS quebraria as 4.
+// `summarizeConversation` (única que precisa da contagem, pra persistir no
+// histórico de resumos) chama esta função diretamente.
+async function _callOpenAI(systemPrompt, userPrompt, maxTokens, jsonMode) {
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY não configurada no servidor');
   }
@@ -38,7 +45,11 @@ async function callChatCompletion(systemPrompt, userPrompt, maxTokens, jsonMode)
   }
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error('resposta vazia da OpenAI');
-  return text;
+  return { text, tokensUsed: data.usage?.total_tokens ?? null };
+}
+
+async function callChatCompletion(systemPrompt, userPrompt, maxTokens, jsonMode) {
+  return (await _callOpenAI(systemPrompt, userPrompt, maxTokens, jsonMode)).text;
 }
 
 // Resumo de uma conversa de WhatsApp (últimas até 80 mensagens, pra manter
@@ -60,7 +71,7 @@ async function summarizeConversation({ contactName, messages }) {
     })
     .join('\n');
 
-  const raw = await callChatCompletion(
+  const { text: raw, tokensUsed } = await _callOpenAI(
     'Você resume conversas de atendimento via WhatsApp entre uma empresa e um contato/cliente. ' +
       'Responda em JSON com exatamente 3 campos: ' +
       '"title" (bem curto, até 6 palavras, o assunto principal da conversa — ex: "Dúvida sobre atestado médico"), ' +
@@ -85,6 +96,7 @@ async function summarizeConversation({ contactName, messages }) {
     title: parsed.title || null,
     subtitle: parsed.subtitle || null,
     summary: parsed.summary,
+    tokensUsed,
   };
 }
 

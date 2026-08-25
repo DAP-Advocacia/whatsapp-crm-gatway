@@ -58,6 +58,14 @@ create table if not exists conversation_summaries (
 create index if not exists idx_conversation_summaries_conversation
   on conversation_summaries (conversation_id, created_at);
 
+-- Tokens gastos (prompt+completion) na geração deste resumo — só
+-- disponível a partir de quando esta coluna foi criada (2026-08-25); a
+-- OpenAI devolve essa contagem só NA hora da chamada, nunca depois, então
+-- as ~1800 linhas já existentes ANTES desta coluna ficam null pra sempre,
+-- sem forma de recuperar retroativamente (decisão confirmada com o
+-- usuário). Nulo = "não medido" — nunca 0 de verdade.
+alter table conversation_summaries add column if not exists tokens_used int;
+
 create table if not exists messages (
   id bigserial primary key,
   conversation_id bigint not null references conversations(id) on delete cascade,

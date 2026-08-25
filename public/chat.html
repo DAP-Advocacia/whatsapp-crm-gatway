@@ -1776,7 +1776,7 @@
           ${h.title ? `<p class="contact-summary-headline">${escapeHtml(h.title)}</p>` : ''}
           ${h.subtitle ? `<p class="contact-summary-subtitle">${escapeHtml(h.subtitle)}</p>` : ''}
           <p class="contact-summary-text">${escapeHtml(h.summary)}</p>
-          <p class="contact-summary-meta">${formatDayLabel(h.createdAt)} · ${formatListTime(h.createdAt)}</p>
+          <p class="contact-summary-meta">${formatDayLabel(h.createdAt)} às ${new Date(h.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}${h.tokensUsed ? ` · ${h.tokensUsed.toLocaleString('pt-BR')} tokens` : ''}</p>
         </div>
       `).join('');
     } catch (err) {

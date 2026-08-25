@@ -600,15 +600,21 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
     summary}` ou `null`), sem round-trip extra ao abrir a conversa. Sem
     `OPENAI_API_KEY`, a geração automática falha silenciosamente (sem
     toast).
-  - **Histórico de resumos** (HANDOFF Parte DY): cada regeneração
+  - **Histórico de resumos** (HANDOFF Parte DY/DZ): cada regeneração
     automática grava também uma linha nova em `conversation_summaries`
     (mesma query atômica de `store.setConversationSummary`, via CTE) —
     vira um registro de como o caso foi evoluindo ao longo do
     atendimento, não só o snapshot mais recente. Link "Ver histórico"
     (perto de "Atualizado X" no card do resumo, só aparece com pelo
     menos 1 resumo salvo) abre um modal com todas as versões, mais
-    recente primeiro. `GET /api/whatsapp/conversations/summary-history?
-    session=&phone=` → `store.listConversationSummaryHistory`.
+    recente primeiro, cada uma com data **e hora** completas. `GET
+    /api/whatsapp/conversations/summary-history?session=&phone=` →
+    `store.listConversationSummaryHistory`. Cada versão também mostra
+    os tokens gastos na geração (`conversation_summaries.tokens_used`,
+    coluna adicionada na Parte DZ — só disponível pra resumos gerados
+    a partir de então; versões salvas antes ficam sem esse dado, sem
+    forma de recuperar retroativamente, a OpenAI só devolve
+    `usage.total_tokens` na hora da chamada).
 - Todo o cabeçalho de página (logo da sidebar, cabeçalho da lista, cabeçalho da
   conversa e do painel de contato) e os dois rodapés (sidebar e o selo
   "Desenvolvido por") usam duas alturas fixas compartilhadas (`--header-h`,
