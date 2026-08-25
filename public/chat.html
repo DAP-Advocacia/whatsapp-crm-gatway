@@ -459,11 +459,12 @@
 
   .conv-item{
     display:flex; gap:10px; align-items:flex-start;
-    padding: 12px 14px; border-bottom:1px solid var(--border);
-    cursor:pointer; transition: background .12s;
+    padding: 14px 16px 14px 13px; border-bottom:1px solid var(--border);
+    border-left: 3px solid transparent;
+    cursor:pointer; transition: background .12s, border-color .12s;
   }
   .conv-item:hover{ background: var(--surface-2); }
-  .conv-item.active{ background: rgba(var(--gold-rgb),.12); }
+  .conv-item.active{ background: rgba(var(--gold-rgb),.12); border-left-color: var(--gold); }
   .conv-item-body{ min-width:0; flex:1; }
   .conv-item-top{ display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
   .conv-item-name{ font-size:13.5px; font-weight:600; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -600,7 +601,7 @@
   }
   .avatar.xs{ width:22px; height:22px; font-size:9px; }
   .avatar.sm{ width:34px; height:34px; font-size:13px; }
-  .avatar.lg{ width:64px; height:64px; font-size:22px; }
+  .avatar.lg{ width:76px; height:76px; font-size:26px; }
   .avatar img{ width:100%; height:100%; border-radius:50%; object-fit:cover; }
   .avatar-status{
     position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px;
@@ -647,6 +648,18 @@
   .contact-stat:first-child{ border-left:none; }
   .contact-stat-value{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; color:var(--gold); }
   .contact-stat-label{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+  /* "Atendente"/"Labels" no painel — mesmo dado já visível no topo da
+     conversa (.assignment-row/.tags-row), mostrado TAMBÉM aqui (estilo
+     Chatwoot "Assigned Agent"/"Conversation Labels") — só exibição, sem
+     controles de editar (adicionar/remover tag e atribuir continuam só
+     na .tags-row/.assignment-row de cima, pra não duplicar listener). */
+  .contact-assignee{ padding:10px 16px 4px; }
+  .contact-assignee-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
+  .contact-assignee-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text); }
+  .contact-labels{ padding:10px 16px 4px; }
+  .contact-labels-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
+  .contact-labels-list{ display:flex; flex-wrap:wrap; gap:5px; }
+
   .contact-groups{ padding:10px 16px 4px; }
   .contact-groups-label{ font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--text-faint); margin-bottom:6px; }
   .contact-groups-list{ display:flex; flex-direction:column; gap:4px; }
@@ -713,8 +726,8 @@
   .summary-history-item:last-child{ border-bottom:none; padding-bottom:0; }
   .summary-history-empty{ font-size:12px; color:var(--text-faint); font-style:italic; }
   .header-info{ min-width: 0; flex: 1; }
-  .header-info .name{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .header-info .meta{ display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .header-info .name{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .header-info .meta{ display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
 
   .status-dot{ width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; position: relative; }
   .status-dot.online{ background: var(--green); }
@@ -722,7 +735,18 @@
   .status-dot.offline{ background: var(--red); }
   @keyframes pulse{ 0%{ transform: scale(0.8); opacity: 0.6; } 100%{ transform: scale(1.8); opacity: 0; } }
 
-  .header-actions{ display: flex; gap: 8px; flex-shrink: 0; align-items: center; }
+  .header-actions{ display: flex; gap: 8px; flex-shrink: 0; align-items: center; position: relative; }
+  .export-menu{
+    position:absolute; top: 100%; right:0; margin-top:8px; min-width:180px; background:var(--surface-2);
+    border:1px solid var(--border); border-radius:9px; box-shadow:0 10px 28px rgba(0,0,0,.4); z-index:20;
+    overflow:hidden; display:flex; flex-direction:column; padding:4px;
+  }
+  .export-menu[hidden]{ display:none; }
+  .export-menu button{
+    display:block; width:100%; text-align:left; background:none; border:none; color:var(--text);
+    font-size:12.5px; padding:8px 12px; cursor:pointer; font-family:inherit; border-radius:6px;
+  }
+  .export-menu button:hover{ background:var(--surface); color:var(--gold); }
   .icon-btn{
     width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border);
     background: var(--surface-2); color: var(--text-muted);
@@ -815,14 +839,14 @@
        nunca estica demais, independente da largura da janela; % continua
        valendo em telas estreitas onde 480px já seria maior que a coluna. */
     max-width: min(60%, 480px); width: fit-content; padding: 9px 12px 8px; font-size: 13.5px; line-height: 1.45;
-    border-radius: var(--radius); word-wrap: break-word; white-space: pre-wrap;
-    position: relative; box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14);
+    border-radius: 16px; word-wrap: break-word; white-space: pre-wrap;
+    position: relative; box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16);
   }
-  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 3px; color: var(--text); }
+  .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 4px; color: var(--text); }
   .bubble code{ background:rgba(255,255,255,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
   .bubble-row.mine .bubble{
-    background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 3px;
-    box-shadow: 0 1px 2px rgba(0,0,0,.22), 0 4px 10px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.25);
+    background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.25);
   }
   .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
   .bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; }
@@ -925,6 +949,35 @@
   .send-btn svg{ width: 17px; height: 17px; }
   .composer-hint{ font-size: 10.5px; line-height:1.4; color: var(--text-faint); padding: 0 14px 10px; background: var(--surface); flex-shrink:0; }
   .disconnected-banner{ background: rgba(var(--red-rgb),.12); border-top: 1px solid rgba(var(--red-rgb),.3); color: #e89c95; font-size: 12px; padding: 8px 14px; text-align: center; flex-shrink: 0; }
+
+  /* Abas do composer (Responder / Nota interna) — nota interna nunca é
+     enviada ao WhatsApp, visível só a quem já tem acesso à conversa (ver
+     src/routes/internalNotes.js). Tom âmbar reaproveitado do mesmo drawer
+     de nota interna já implementado em index.html (é o próprio --gold-rgb
+     em baixa opacidade, não uma cor nova fora da paleta). */
+  .composer-tabs{ display:flex; gap:2px; padding:8px 14px 0; background: var(--surface); flex-shrink:0; }
+  .composer-tab{
+    background:none; border:none; border-bottom:2px solid transparent; color:var(--text-muted);
+    font-size:12px; font-family:inherit; padding:6px 12px; cursor:pointer; border-radius:6px 6px 0 0;
+    transition: color .15s, border-color .15s;
+  }
+  .composer-tab:hover{ color:var(--text); }
+  .composer-tab.active{ color:var(--gold); border-bottom-color:var(--gold); font-weight:600; background: rgba(var(--gold-rgb),.06); }
+  .composer--note{ background: rgba(var(--gold-rgb),.04); }
+  .composer--note textarea{ border-color: rgba(var(--gold-rgb),.35); background: rgba(var(--gold-rgb),.06); }
+  .send-btn--note{ background: var(--gold-dim); }
+
+  /* Bolha de nota interna inline no feed — faixa horizontal centralizada
+     (não bolha lateral esquerda/direita como mensagem real), pra nunca
+     ser confundida com conversa de verdade. */
+  .note-row{ display:flex; justify-content:center; margin: 6px 0; }
+  .bubble-note{
+    max-width: 520px; width: 100%; background: rgba(var(--gold-rgb),.07); border: 1px solid rgba(var(--gold-rgb),.25);
+    border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--text);
+  }
+  .bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--gold-dim); margin-bottom:3px; }
+  .bubble-note-text{ white-space:pre-wrap; word-break:break-word; }
+  .bubble-note-time{ font-size:10px; color:var(--text-faint); margin-top:4px; }
 </style>
 </head>
 <body>
@@ -1335,6 +1388,11 @@
 <script>
 (function () {
   const API_BASE = window.location.origin + '/api/whatsapp';
+  // Raiz de /api, sem o sufixo /whatsapp — usada pela rota de nota
+  // interna (/api/internal-notes), que vive em router próprio
+  // (src/routes/internalNotes.js), não dentro de routes/whatsapp.js.
+  // Mesmo padrão de nomeação já usado em public/index.html.
+  const API_ROOT = window.location.origin + '/api';
   const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
   let appToken = null;
@@ -1697,6 +1755,8 @@
           ${contactField('pin', 'Endereço', info.address)}
           ${contactField('globe', 'Site', info.web, webHref)}
         </div>
+        ${renderContactPanelAssignee()}
+        ${renderContactPanelLabels()}
         ${renderCommonGroupsSection()}
         ${renderDocumentsSection()}
         ${renderSummarySection()}
@@ -1848,6 +1908,25 @@
     });
   }
 
+  // Notas internas da conversa aberta (nunca visível ao cliente, ver
+  // src/routes/internalNotes.js) — mesmo padrão de guarda contra corrida
+  // assíncrona de loadContactPanel acima: se a pessoa trocar de conversa
+  // antes desta resposta voltar, `state.active !== activeRef` descarta o
+  // resultado em vez de pintar a nota da conversa errada.
+  async function loadInternalNotes() {
+    const activeRef = state.active;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes?session=${encodeURIComponent(activeRef.sessionId)}&phone=${encodeURIComponent(activeRef.phone)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (state.active !== activeRef) return; // trocou de conversa enquanto buscava
+      state.internalNotes = data.notes || [];
+      renderMessages();
+    } catch (err) {
+      console.error('[internalNotes] falha ao carregar notas:', err.message);
+    }
+  }
+
   async function loadCommonGroups(a) {
     if (!a.phone || a.phone.includes('@')) return []; // é um grupo, não um contato — não se aplica
     try {
@@ -1861,6 +1940,40 @@
   }
 
   const GROUP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+
+  // "Atendente" no painel de detalhes — MESMO dado de state.active.assignedTo/
+  // assignedToName já mostrado em .assignment-row (topo da conversa), exibido
+  // de novo aqui (estilo Chatwoot "Assigned Agent") — só leitura, o botão de
+  // atribuir/liberar continua vivendo só na .assignment-row de cima.
+  function renderContactPanelAssignee() {
+    const a = state.active;
+    const label = a.assignedTo
+      ? (a.assignedTo === state.ownerId ? 'Você' : (a.assignedToName || 'Outro atendente'))
+      : 'Sem atendente definido';
+    return `
+      <div class="contact-assignee">
+        <div class="contact-assignee-label">Atendente</div>
+        <div class="contact-assignee-row">
+          ${a.assignedTo ? `<span class="avatar xs">${escapeHtml(initials(label))}</span>` : ''}
+          <span>${escapeHtml(label)}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  // "Labels" no painel de detalhes — MESMOS state.active.tags já mostrados
+  // em .tags-row (topo da conversa), reusando tagChip() já existente — só
+  // exibição (removable:false), sem duplicar o formulário de adicionar tag.
+  function renderContactPanelLabels() {
+    const a = state.active;
+    if (!a.tags || !a.tags.length) return '';
+    return `
+      <div class="contact-labels">
+        <div class="contact-labels-label">Labels</div>
+        <div class="contact-labels-list">${a.tags.map((t) => tagChip(t, false)).join('')}</div>
+      </div>
+    `;
+  }
 
   function renderCommonGroupsSection() {
     const a = state.active;
@@ -1989,6 +2102,13 @@
     archivedView: false, // false = "Ativas", true = "Arquivadas"
     active: null,       // { sessionId, phone, contactName, dealId, tags }
     messages: [],
+    // Notas internas da conversa ABERTA — nunca mesclado dentro de
+    // `messages` (ver renderMessages, merge visual só na renderização).
+    // Nunca é uma mensagem real do WhatsApp, nunca visível ao cliente
+    // (ver src/routes/internalNotes.js). Resetado em openConversation,
+    // igual `messages` — NÃO zerado em closeConversation (mesma
+    // convenção pré-existente de `messages`, que só zera no próximo open).
+    internalNotes: [],
     connectionStatus: 'unknown',
     peerPresence: null,  // null | 'composing' | 'recording' — do CONTATO, ao vivo
     peerPresenceTimer: null,
@@ -2919,6 +3039,7 @@
       assignedToName: conv.assignedToName || null,
     };
     state.messages = [];
+    state.internalNotes = [];
     state.connectionStatus = 'unknown';
     state.peerPresence = null;
     state.replyingTo = null;
@@ -2935,6 +3056,7 @@
     if (!state.active.avatarUrl) fetchAvatarFor(conv.sessionId, conv.phone);
     fetchStatus();
     loadContactPanel();
+    loadInternalNotes();
     markConversationRead(conv);
   }
 
@@ -3014,6 +3136,13 @@
           <button class="icon-btn" id="moveInstanceBtn" title="Mover conversa pra outra instância">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></svg>
           </button>
+          <button class="icon-btn" id="exportConvBtn" title="Baixar conversa">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          </button>
+          <div class="export-menu" id="exportMenu" hidden>
+            <button type="button" data-export="txt">Baixar como TXT</button>
+            <button type="button" data-export="pdf">Baixar como PDF</button>
+          </div>
           <button class="icon-btn ${contactPanelOpen ? 'active' : ''}" id="toggleDetailsBtn" title="Detalhes do contato">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
           </button>
@@ -3040,7 +3169,12 @@
         </button>
       </div>
 
-      <div class="composer">
+      <div class="composer-tabs" id="composerTabs">
+        <button type="button" class="composer-tab active" data-composer-tab="reply">Responder</button>
+        <button type="button" class="composer-tab" data-composer-tab="note">Nota interna</button>
+      </div>
+
+      <div class="composer" id="composerReply">
         <button class="icon-btn" id="attachBtn" title="Enviar imagem, áudio, vídeo ou documento" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95L9.41 17.42a1.5 1.5 0 0 1-2.12-2.12l8.49-8.49"/></svg>
         </button>
@@ -3053,7 +3187,18 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
         </button>
       </div>
-      <div class="composer-hint" id="composerHint">Enter envia · Shift+Enter quebra linha</div>
+
+      <div class="composer composer--note" id="composerNote" hidden>
+        <textarea id="noteInput" placeholder="Escreva uma nota interna…" rows="1"></textarea>
+        <button class="send-btn send-btn--note" id="noteSendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+
+      <div class="composer-hint" id="composerHint">
+        <span id="composerHintReply">Enter envia · Shift+Enter quebra linha</span>
+        <span id="composerHintNote" hidden>Essas notas só serão vistas por quem já tem acesso a esta conversa — nunca pelo cliente.</span>
+      </div>
     `;
 
     renderTagsRow();
@@ -3066,6 +3211,18 @@
     document.getElementById('refreshConvBtn').addEventListener('click', loadHistory);
     document.getElementById('moveInstanceBtn').addEventListener('click', openMoveInstanceModal);
     document.getElementById('backBtn').addEventListener('click', closeConversation);
+    const exportBtn = document.getElementById('exportConvBtn');
+    const exportMenu = document.getElementById('exportMenu');
+    exportBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      exportMenu.hidden = !exportMenu.hidden;
+    });
+    exportMenu.querySelectorAll('[data-export]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        exportMenu.hidden = true;
+        if (btn.dataset.export === 'txt') exportAsTxt(); else exportAsPdf();
+      });
+    });
     document.getElementById('toggleDetailsBtn').addEventListener('click', () => {
       contactPanelOpen = !contactPanelOpen;
       document.getElementById('toggleDetailsBtn').classList.toggle('active', contactPanelOpen);
@@ -3122,7 +3279,10 @@
     if (!el) return;
     const a = state.active;
 
-    if (!state.messages.length) {
+    // Guarda de "vazio" considera TAMBÉM notas internas — uma conversa
+    // com só nota (sem nenhuma mensagem real ainda) não pode mostrar
+    // "Nenhuma mensagem ainda" incorretamente.
+    if (!state.messages.length && !state.internalNotes.length) {
       el.innerHTML = `
         <div class="state-screen" style="padding:20px;">
           <h3>Nenhuma mensagem ainda</h3>
@@ -3130,6 +3290,14 @@
         </div>`;
       return;
     }
+
+    // Merge visual — nota interna NUNCA é gravada dentro de state.messages
+    // (ver comentário em state.internalNotes); esta lista combinada é só
+    // uma variável local de renderização, ordenada por timestamp real.
+    const combined = [
+      ...state.messages.map((m) => ({ ...m, _kind: 'message' })),
+      ...state.internalNotes.map((n) => ({ ...n, _kind: 'note' })),
+    ].sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
 
     let html = '';
     let lastDay = null;
@@ -3139,15 +3307,30 @@
     // atendente continuou, eu quero essa métrica e histórico"). Mensagens
     // sem sentBy (enviadas antes desta feature existir, ou otimistas que
     // ainda não voltaram do servidor) não disparam o aviso — só compara
-    // quando os dois lados têm o dado.
+    // quando os dois lados têm o dado. Nota interna nunca conta como troca
+    // de atendente (não é mensagem de atendimento de verdade).
     let lastSentBy = null;
-    state.messages.forEach((msg) => {
+    combined.forEach((msg) => {
       const dayLabel = formatDayLabel(msg.createdAt);
       if (dayLabel !== lastDay) {
         html += `<div class="day-divider">${dayLabel}</div>`;
         lastDay = dayLabel;
         lastSentBy = null; // dia novo também reseta — não teria como saber quem respondeu por último "ontem" nesse resumo visual
       }
+
+      if (msg._kind === 'note') {
+        html += `
+          <div class="note-row">
+            <div class="bubble-note">
+              <div class="bubble-note-head">Nota interna${msg.authorName ? ' · ' + escapeHtml(msg.authorName) : ''}</div>
+              <div class="bubble-note-text">${escapeHtml(msg.text)}</div>
+              <div class="bubble-note-time">${formatTime(msg.createdAt)}</div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
       const mine = msg.direction === 'out';
       if (mine && msg.sentBy) {
         if (lastSentBy && lastSentBy !== msg.sentBy) {
@@ -3186,6 +3369,64 @@
 
   function typeLabel(type) {
     return type === 'image' ? 'Foto' : type === 'video' ? 'Vídeo' : type === 'audio' ? 'Áudio' : type === 'document' ? 'Documento' : 'Mensagem';
+  }
+
+  // ---------- Exportar conversa (TXT no client, PDF via rota no backend) ----------
+  // Mesma fonte de dado já carregada na tela (state.messages +
+  // state.internalNotes) — garante que o que é exportado é exatamente o
+  // que a pessoa está vendo, sem re-buscar nada. Nota interna SEMPRE
+  // rotulada explicitamente, pra nunca ser confundida com mensagem real
+  // se o arquivo circular fora do sistema.
+  function buildExportLines() {
+    const a = state.active;
+    const combined = [
+      ...state.messages.map((m) => ({ ...m, _kind: 'message' })),
+      ...state.internalNotes.map((n) => ({ ...n, _kind: 'note' })),
+    ].sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
+
+    return combined.map((item) => {
+      const time = new Date(item.createdAt).toLocaleString('pt-BR');
+      if (item._kind === 'note') {
+        return `[${time}] [NOTA INTERNA — não enviada ao cliente] ${item.authorName || 'Sem nome'}: ${item.text}`;
+      }
+      const author = item.direction === 'out' ? (item.sentByName || 'Você') : (a.contactName || a.phone);
+      const body = item.text || `(${typeLabel(item.type)})`;
+      return `[${time}] ${author}: ${body}`;
+    });
+  }
+
+  function exportAsTxt() {
+    const a = state.active;
+    const lines = buildExportLines();
+    const header = `Conversa com ${a.contactName || a.phone} (${a.phone})\nExportado em ${new Date().toLocaleString('pt-BR')}\n${'='.repeat(50)}\n`;
+    const blob = new Blob([header + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `conversa-${a.phone}-${Date.now()}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // PDF é gerado no BACKEND (pdfkit) — arquivo pronto, baixado direto, sem
+  // fluxo de impressão. Reusa os mesmos session/phone já carregados; o
+  // servidor busca store.getHistory + store.listInternalNotes de novo
+  // (fonte de verdade), não depende do que está em memória do browser.
+  async function exportAsPdf() {
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/export-pdf?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}`);
+      if (!res.ok) throw new Error('Falha ao gerar PDF');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `conversa-${a.phone}-${Date.now()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
   }
 
   // Ícones por tipo de mídia, usados na citação (ver renderQuotedBlock)
@@ -3527,7 +3768,12 @@
     const attachBtn = document.getElementById('attachBtn');
     const mediaInput = document.getElementById('mediaInput');
     const micBtn = document.getElementById('micBtn');
-    const hint = document.getElementById('composerHint');
+    // Só o texto da aba Responder (#composerHintReply) — gravação de
+    // áudio só existe ali (a aba Nota interna tem seu próprio hint fixo,
+    // #composerHintNote, nunca tocado por esta função). Usar o elemento
+    // pai (#composerHint) inteiro aqui destruiria os 2 <span> filhos ao
+    // reatribuir textContent.
+    const hint = document.getElementById('composerHintReply');
     const defaultHint = hint.textContent;
 
     attachBtn.addEventListener('click', () => mediaInput.click());
@@ -3765,6 +4011,61 @@
         console.error('Erro ao enviar mídia:', err);
       }
     }
+
+    // ---------- Abas do composer (Responder / Nota interna) ----------
+    const composerTabs = document.getElementById('composerTabs');
+    const composerReply = document.getElementById('composerReply');
+    const composerNote = document.getElementById('composerNote');
+    const composerHintReply = document.getElementById('composerHintReply');
+    const composerHintNote = document.getElementById('composerHintNote');
+    const noteInput = document.getElementById('noteInput');
+    const noteSendBtn = document.getElementById('noteSendBtn');
+
+    composerTabs.querySelectorAll('[data-composer-tab]').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        const tab = tabBtn.dataset.composerTab;
+        composerTabs.querySelectorAll('[data-composer-tab]').forEach((b) => b.classList.toggle('active', b === tabBtn));
+        composerReply.hidden = tab !== 'reply';
+        composerNote.hidden = tab !== 'note';
+        composerHintReply.hidden = tab !== 'reply';
+        composerHintNote.hidden = tab !== 'note';
+        if (tab === 'note') noteInput.focus(); else input.focus();
+      });
+    });
+
+    function refreshNoteBtnState() { noteSendBtn.disabled = !noteInput.value.trim(); }
+    noteInput.addEventListener('input', refreshNoteBtnState);
+    noteInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendInternalNote(); }
+    });
+    noteSendBtn.addEventListener('click', sendInternalNote);
+
+    // Nota interna nunca é uma mensagem do WhatsApp — sempre POST
+    // /api/internal-notes (nunca /send), sem otimismo (mesmo padrão do
+    // drawer já implementado em index.html: nota não tem "status de
+    // entrega", baixo risco esperar a resposta real do POST antes de
+    // mostrar). author_owner_id é sempre resolvido pelo BACKEND a partir
+    // do token (nunca do client) — authName aqui é só rótulo de exibição.
+    async function sendInternalNote() {
+      const text = noteInput.value.trim();
+      if (!text) return;
+      noteInput.value = '';
+      refreshNoteBtnState();
+      try {
+        const res = await apiFetch(`${API_ROOT}/internal-notes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: a.sessionId, phone: a.phone, text, authorName: myBitrixName || null }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Falha ao adicionar nota');
+        const alreadyShown = state.internalNotes.some((n) => n.id === data.note.id);
+        if (!alreadyShown) state.internalNotes.push(data.note);
+        renderMessages();
+      } catch (err) {
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+    }
   }
 
   // =========================================================
@@ -3900,6 +4201,16 @@
           }, 12000);
         }
       }
+
+      // Nota interna adicionada por OUTRA aba/atendente na mesma conversa
+      // (ver src/routes/internalNotes.js, broadcast já injeta `phone` no
+      // payload) — guarda dupla sessionId+phone igual 'presence' acima,
+      // já que este socket cobre a instância inteira, não só a conversa
+      // aberta.
+      if (payload.type === 'internal-note' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+        const alreadyShown = state.internalNotes.some((n) => n.id === payload.note.id);
+        if (!alreadyShown) { state.internalNotes.push(payload.note); renderMessages(); }
+      }
     };
 
     socket.onclose = () => { setTimeout(() => openSingleInboxSocket(id), 4000); };
@@ -3934,6 +4245,21 @@
       convList.innerHTML = `<p class="empty">${escapeHtml(err.message || 'Falha ao carregar.')}</p>`;
     }
   }
+
+  // Fecha o menu de exportar ao clicar fora — registrado UMA VEZ aqui
+  // (nível de módulo), não dentro de renderConversationView() (que roda a
+  // cada troca de conversa — um listener novo a cada render vazaria
+  // memória e acumularia handlers duplicados). Busca #exportMenu no
+  // momento do clique (o elemento é recriado a cada render), não guarda
+  // referência antiga.
+  document.addEventListener('click', (e) => {
+    const exportMenu = document.getElementById('exportMenu');
+    if (!exportMenu || exportMenu.hidden) return;
+    const exportBtn = document.getElementById('exportConvBtn');
+    if (!e.target.closest('.export-menu') && e.target !== exportBtn && !exportBtn?.contains(e.target)) {
+      exportMenu.hidden = true;
+    }
+  });
 
   boot();
 })();

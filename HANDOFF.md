@@ -8437,3 +8437,104 @@ compatibilidade sem o campo virando `null`), limpo depois; formato
 final do texto (data+hora+tokens) testado com 3 cenários (com
 tokens, sem tokens/resumo antigo, "hoje").
 
+### Parte EA — Redesign visual do Chat + Nota interna via abas + Exportar conversa (2026-08-25)
+
+Pedido novo, em 3 partes na mesma leva, todas em `public/chat.html`
+(a inbox principal, diferente da aba embutida no card do negócio):
+
+1. Redesign visual inspirado no Chatwoot (print de referência do
+   usuário), com restrição explícita confirmada: pode reorganizar
+   elementos DENTRO da tela, mas nenhuma rota/API/comportamento muda.
+2. Nota interna (já existe em `public/index.html` como drawer lateral,
+   Parte DX) — aqui, a partir de outro print do Chatwoot, confirmado
+   que o formato certo é **abas no composer** ("Responder"/"Nota
+   interna"), não um painel lateral.
+3. Baixar/exportar a conversa — confirmado com o usuário: PDF **real**
+   (arquivo pronto baixado direto, não fluxo de impressão) + TXT,
+   nota interna incluída e rotulada em ambos.
+
+Planejado via EnterPlanMode (mapeamento completo de `chat.html` por
+agente Explore antes de desenhar, seguido de agente Plan) — plano
+salvo em `snug-cuddling-pillow.md`. Implementado na ordem de menor
+risco: nota interna (dados → composer/merge → WebSocket) → export TXT
+→ export PDF → redesign visual por último.
+
+**1) Nota interna — 3 bugs reais encontrados e corrigidos durante a
+implementação, nenhum estava no plano original**:
+- `hint.textContent = defaultHint` (usado pra mostrar "Gravando…
+  0:00" durante gravação de áudio) capturava/reescrevia o
+  `#composerHint` **inteiro** — como esse `<div>` passou a ter 2
+  `<span>` filhos (`#composerHintReply`/`#composerHintNote`), esse
+  código destruiria os spans na primeira gravação de áudio depois de
+  qualquer troca de aba. Corrigido: a variável `hint` agora aponta só
+  pro `<span id="composerHintReply">` (gravação de áudio só existe na
+  aba Responder mesmo).
+- Guarda de "vazio" em `renderMessages()` checava só
+  `state.messages.length` — uma conversa com só nota interna (sem
+  nenhuma mensagem real ainda) mostraria "Nenhuma mensagem ainda"
+  incorretamente. Corrigido pra considerar as duas listas.
+- O listener de "clicar fora fecha o menu de export" tinha sido
+  escrito dentro de `renderConversationView()` — como essa função
+  roda a cada troca de conversa, isso registraria um `document.
+  addEventListener('click', ...)` NOVO a cada troca, nunca removendo
+  o anterior (vazamento de memória + handlers duplicados se
+  acumulando). Corrigido: o listener agora vive **uma única vez**,
+  fora da função de render, no nível de módulo, buscando o elemento
+  atual a cada clique em vez de guardar referência antiga.
+- Modelo de dados: nota interna NUNCA é gravada dentro de
+  `state.messages` (novo `state.internalNotes`, array paralelo) —
+  `renderMessages()` faz merge visual (variável local, ordenada por
+  `createdAt`) só na hora de desenhar, evitando ensinar toda a lógica
+  de reação/citação/otimista/troca-de-atendente a ignorar um tipo de
+  item que não é mensagem de verdade. Nota nunca conta como troca de
+  atendente.
+- WebSocket: novo case `'internal-note'` na função `openSingleInboxSocket`
+  (socket por INSTÂNCIA, não por conversa — diferente de `index.html`),
+  com a mesma guarda dupla `sessionId`+`phone` já usada por
+  `'reaction'`/`'presence'`. Confirmado que `broadcast()`
+  (`src/server.js`) já injeta `phone` automaticamente no payload —
+  zero mudança em `src/routes/internalNotes.js` (backend já pronto,
+  reusado tal como estava).
+
+**2) Exportar conversa** — TXT montado no client
+(`buildExportLines()`, `Blob`+`<a download>`), PDF real gerado no
+BACKEND via `pdfkit` (dependência nova — nenhuma lib de PDF existia
+no projeto; `puppeteer`/impressão nativa descartados por peso/UX a
+pedido do usuário). Nova rota `GET
+/api/whatsapp/conversations/export-pdf?session=&phone=` — busca
+`store.getHistory`+`store.listInternalNotes` de novo no servidor
+(fonte de verdade, não depende do que está em memória do browser),
+gera o PDF com mensagens em preto e nota interna sempre em dourado/
+itálico com o rótulo `[NOTA INTERNA — não enviada ao cliente]`
+explícito no próprio texto (decidido não desenhar uma caixa de fundo
+atrás da nota — `pdfkit` não sabe a altura do texto antes de
+desenhá-lo, complexidade desnecessária quando a cor+itálico+rótulo já
+distinguem bem o suficiente).
+
+**3) Redesign visual** — só CSS/HTML dentro da estrutura de 3 colunas
+já existente, zero mudança de rota/comportamento: lista de conversas
+(padding maior, borda dourada no item ativo), header (nome maior,
+`.meta` mais discreto), bolhas (`border-radius`/sombra mais
+"flutuante", sem tocar `--radius` global pra não afetar outros
+componentes), painel de detalhes (avatar 64→76px, e — confirmado com
+o usuário — Atendente/Labels mostrados TAMBÉM aqui, como o Chatwoot
+faz com "Assigned Agent"/"Conversation Labels", só leitura, sem
+duplicar os controles de editar que continuam só no topo da
+conversa).
+
+**Validação**: sintaxe (`new Function`) a cada passo incremental (não
+só no final); lógica de merge testada isoladamente (ordem cronológica,
+guarda de vazio, nota não interfere em troca de atendente); handler
+de WebSocket testado com 4 cenários (conversa certa, conversa errada,
+dedupe, sem conversa aberta); `buildExportLines()` testado com mistura
+de mensagem+nota+mídia sem legenda; rota de export PDF testada
+end-to-end com servidor real — PDF baixado é um arquivo binário
+válido (assinatura `%PDF-1.3`, termina em `%%EOF`) e **inspecionado
+visualmente página por página** (3 páginas, conteúdo real de uma
+conversa de produção, nota de teste temporária aparecendo
+corretamente destacada — nota removida do banco depois); autorização
+testada (sessão alheia recebe 403 na rota de export, igual ao resto
+do app); `renderContactPanelAssignee`/`renderContactPanelLabels`
+testados com 5 cenários (sem atendente, atendente=eu, atendente=outro,
+sem tags, com tags).
+

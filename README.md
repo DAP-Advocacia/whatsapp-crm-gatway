@@ -699,6 +699,34 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   atendeu cada período da conversa, não só a atribuição atual), pra não
   contar o volume/tempo de resposta de uma conversa inteira pra quem só
   pegou ela por último numa transferência.
+- **Nota interna** (HANDOFF Parte EA) — mensagem visível SÓ pra quem já
+  tem acesso à conversa, nunca ao cliente, mesma regra de posse do
+  resto do app (`assertOwnsSession`, sem papel adicional). Diferente do
+  drawer lateral de `index.html` (aba do card do negócio): aqui vive
+  como uma ABA do próprio composer ("Responder" | "Nota interna",
+  inspirado no Chatwoot), cada uma com seu textarea/botão próprio.
+  Aparece inline no feed de mensagens como uma faixa âmbar distinta
+  (`.bubble-note`), nunca misturada com bolha de mensagem real — o
+  array `state.internalNotes` é sempre paralelo a `state.messages`
+  (merge só na hora de renderizar, nunca gravado junto) e nunca conta
+  como troca de atendente. Backend: `GET`/`POST /api/internal-notes`
+  (`src/routes/internalNotes.js`, já genérico — usado também por
+  `index.html`), broadcast via WebSocket (`type: 'internal-note'`) pra
+  sincronizar entre abas/atendentes em tempo real.
+- **Exportar conversa** (HANDOFF Parte EA) — botão no cabeçalho da
+  conversa, menu com 2 formatos:
+  - **TXT**: montado no client (`buildExportLines()`), a partir do que
+    já está carregado na tela (`state.messages` + `state.internalNotes`)
+    — garante que o arquivo reflete exatamente o que a pessoa está
+    vendo, sem round-trip extra.
+  - **PDF**: gerado no BACKEND via `pdfkit` (arquivo real, baixado
+    direto — não é fluxo de impressão). `GET
+    /api/whatsapp/conversations/export-pdf?session=&phone=` busca o
+    histórico + notas de novo no servidor (fonte de verdade).
+  - Nos dois formatos, nota interna é SEMPRE incluída, mas claramente
+    rotulada `[NOTA INTERNA — não enviada ao cliente]` (dourado/itálico
+    no PDF) — nunca podia ser confundida com mensagem real se o
+    arquivo circular fora do sistema.
 
 ---
 
@@ -1565,6 +1593,7 @@ revelar que o recurso existe).
 | `conversations/notifications` | POST | Body `{ session, phone, enabled }`. Silencia/dessilencia notificações de uma conversa — notifica por padrão (§9). |
 | `conversations/summary` | POST | Body `{ session, phone, contactName? }`. Gera (OpenAI) e persiste o resumo estruturado da conversa (até as últimas 80 mensagens), devolve `{title, subtitle, summary, updatedAt}` — ver §9. |
 | `conversations/summary-history?session=&phone=` | GET | Devolve `{history: [{title,subtitle,summary,createdAt}, ...]}`, mais recente primeiro — toda versão de resumo já gerada pra essa conversa, não só a atual (§9, HANDOFF Parte DY). |
+| `conversations/export-pdf?session=&phone=` | GET | Devolve o arquivo PDF pronto (`Content-Disposition: attachment`) da conversa inteira (mensagens + notas internas), gerado com `pdfkit` — nota interna sempre rotulada `[NOTA INTERNA — não enviada ao cliente]`, em dourado/itálico (§9, HANDOFF Parte EA). |
 | `groups?session=` | GET | Lista os grupos do WhatsApp já criados pela(s) instância(s) (aceita várias separadas por vírgula). |
 | `groups` | POST | Body `{ session, name, phones:[...] }`. Cria um grupo de verdade no WhatsApp (`sock.groupCreate`) — usado em `contacts.html` e no botão "Novo grupo" do Chat (§9). |
 | `contacts/groups?session=&phone=` | GET | Lista os grupos da instância dos quais esse telefone é participante (`{ groups: [{id, name}] }`) — usado em "grupos em comum" no painel de contato do Chat (§9). Uma chamada ao WhatsApp por grupo da instância; best-effort com participantes `@lid` sem telefone resolvido. |

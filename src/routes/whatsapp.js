@@ -1,4 +1,5 @@
 const express = require('express');
+const PDFDocument = require('pdfkit');
 const store = require('../store');
 const { logMessageToTimeline, logConversationSummaryToTimeline } = require('../bitrix');
 const { saveMedia, getSignedMediaUrl } = require('../media');
@@ -1259,6 +1260,71 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[conversations:summary-history] erro:', err.message);
       res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /conversations/export-pdf?session=&phone=
+  // Exporta a conversa (mensagens + notas internas) como PDF real,
+  // gerado no servidor (pdfkit) e devolvido pronto pra download — busca
+  // os dados de novo aqui (fonte de verdade), não depende do que está em
+  // memória do browser. Nota interna SEMPRE rotulada explicitamente
+  // (bloco destacado + prefixo no texto), pra nunca ser confundida com
+  // mensagem real se o arquivo circular fora do sistema.
+  // ---------------------------------------------------------------
+  router.get('/conversations/export-pdf', requireSession((req) => req.query.session), async (req, res) => {
+    const { session, phone } = req.query;
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    try {
+      const [messages, notes] = await Promise.all([
+        store.getHistory(session, phone),
+        store.listInternalNotes(session, phone),
+      ]);
+      const combined = [
+        ...messages.map((m) => ({ ...m, _kind: 'message' })),
+        ...notes.map((n) => ({ ...n, _kind: 'note' })),
+      ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="conversa-${phone}-${Date.now()}.pdf"`);
+
+      const doc = new PDFDocument({ margin: 40, size: 'A4' });
+      doc.pipe(res);
+
+      doc.font('Helvetica-Bold').fontSize(16).text(`Conversa com ${phone}`);
+      doc.font('Helvetica').fontSize(10).fillColor('#666666')
+        .text(`Exportado em ${new Date().toLocaleString('pt-BR')}`);
+      doc.moveDown(1);
+      doc.strokeColor('#cccccc').moveTo(doc.x, doc.y).lineTo(doc.page.width - doc.page.margins.right, doc.y).stroke();
+      doc.moveDown(1);
+
+      if (!combined.length) {
+        doc.fontSize(11).fillColor('#333333').text('Nenhuma mensagem nesta conversa ainda.');
+      }
+
+      combined.forEach((item) => {
+        const time = new Date(item.createdAt).toLocaleString('pt-BR');
+        if (item._kind === 'note') {
+          // Nota interna sempre em dourado + rótulo explícito no próprio
+          // texto — distinção visual clara sem precisar calcular a altura
+          // de um retângulo de fundo antecipadamente (pdfkit não sabe
+          // quantas linhas o texto vai ocupar antes de desenhá-lo).
+          doc.font('Helvetica-Bold').fontSize(9).fillColor('#8a6b32')
+            .text(`[${time}] [NOTA INTERNA — não enviada ao cliente] ${item.authorName || 'Sem nome'}`);
+          doc.font('Helvetica-Oblique').fontSize(10).fillColor('#8a6b32').text(item.text);
+        } else {
+          const author = item.direction === 'out' ? (item.sentByName || 'Você') : phone;
+          const body = item.text || `(${item.type === 'image' ? 'Foto' : item.type === 'video' ? 'Vídeo' : item.type === 'audio' ? 'Áudio' : item.type === 'document' ? 'Documento' : 'Mensagem'})`;
+          doc.font('Helvetica-Bold').fontSize(9).fillColor('#1a1408').text(`[${time}] ${author}`, { continued: false });
+          doc.font('Helvetica').fontSize(10).fillColor('#333333').text(body);
+        }
+        doc.moveDown(0.6);
+      });
+
+      doc.end();
+    } catch (err) {
+      console.error('[conversations:export-pdf] erro:', err.message);
+      if (!res.headersSent) res.status(502).json({ error: err.message });
     }
   });
 
