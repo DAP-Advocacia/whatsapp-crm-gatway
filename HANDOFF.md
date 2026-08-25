@@ -8692,3 +8692,64 @@ misturando instâncias diferentes).
 /api/conversation-analysis/instances` testada via curl, `ownerName`
 sempre com valor legível (nunca `null` literal).
 
+### Parte EE — Publicar no Feed do Bitrix24 (2026-08-25)
+
+Pedido novo, junto de outro (Alerta de instância caída — ver Parte EF
+e seguintes): usuário quer anunciar features novas do sistema no Feed
+nativo do Bitrix24 ("Para todos os colaboradores", confirmado via
+print de `bitrix.dapadvocacia.com.br/stream/` — Live Feed, diferente
+do `crm.timeline` já usado hoje pra outra coisa: comentário dentro de
+UM negócio). Decisão confirmada com o usuário: publicação é sempre
+**manual**, nunca automática a partir de deploy/commit — o super admin
+revisa o texto e decide quando publicar.
+
+**Construção 100% do zero** — confirmado que nada disso existia:
+`log.blogpost.add` (método REST de Feed), `im.notify`, `stream/`,
+`sonet_log`, zero ocorrências no projeto antes desta Parte.
+
+**Webhook dedicado novo** (`BITRIX_FEED_WEBHOOK_URL`, `.env.example`)
+— mesmo padrão já usado por `BITRIX_HR_WEBHOOK_URL` (hierarquia de
+departamento): webhook de entrada SEGUNDO e dedicado, não reaproveita
+`BITRIX_WEBHOOK_URL` (escopo CRM apenas) porque `log.blogpost.add`
+exige o escopo "Rede Social", que aquele webhook não tem. Sem a
+variável configurada, o botão "Publicar" falha com mensagem clara
+("BITRIX_FEED_WEBHOOK_URL não configurado…") — nada mais no sistema é
+afetado.
+
+**Backend**: módulo novo `src/bitrixFeed.js` — `publishFeedPost({
+title, message })` chama `log.blogpost.add` com `DEST: { AUDIENCE_TYPE:
+'ALL' }` (payload ainda é HIPÓTESE conforme documentação pública do
+Bitrix REST, não confirmada contra este portal específico — comentário
+no próprio arquivo orienta ajustar só ali se o primeiro teste real
+devolver erro de parâmetro). Histórico LOCAL em `feed_posts` (nova
+tabela, `db/schema.sql`) — nunca é fonte de verdade (o Bitrix é o dono
+real do post), só registro de "o que já foi anunciado" pra não
+duplicar; grava mesmo em falha (`status='failed'` + `error`), pra
+nunca perder o rastro de uma tentativa que não foi ao ar. Rotas novas
+em `src/routes/whatsapp.js`, ambas protegidas por `requireSuperAdmin`
+(mesmo mecanismo que já protege `/admin.html`): `POST
+/api/whatsapp/admin/feed-post` (publica + registra) e `GET
+/api/whatsapp/admin/feed-posts` (histórico local, últimos 100).
+
+**Frontend**: painel novo em `admin.html` ("Publicar no Feed do
+Bitrix") — campo de título opcional, textarea de mensagem, botão
+"Publicar" com `window.confirmDialog` antes (ação irreversível pelo
+app — depois de publicado, editar/remover só é possível direto no
+Bitrix), e a lista do histórico local abaixo (título em negrito +
+mensagem, data, e status visual: verde "publicado" ou vermelho
+"falhou" com o erro exato). Reaproveita 100% dos padrões já
+existentes na tela — `apiFetch`, `escapeHtml`, `window.showToast`,
+CSS já compartilhado de `textarea`/`input[type="text"]`/`.btn` — sem
+introduzir nenhum componente novo.
+
+**Validação**: testado end-to-end contra servidor real e banco real —
+4 cenários confirmados (502 sem webhook configurado, 403 pra
+não-admin, 400 sem mensagem, histórico mostrando `status:'failed'` com
+o erro exato); `feedPostHistoryItemHtml` testado isoladamente com
+dados de `published`/`failed`/título malicioso (confirmado escapado,
+sem XSS). **Pendente pro usuário**: criar o webhook dedicado no
+Bitrix (Aplicativos → Webhooks de entrada, escopo "Rede Social") e
+preencher `BITRIX_FEED_WEBHOOK_URL` em produção — só depois disso o
+primeiro post real pode confirmar (ou corrigir) a hipótese de payload
+do `log.blogpost.add`.
+

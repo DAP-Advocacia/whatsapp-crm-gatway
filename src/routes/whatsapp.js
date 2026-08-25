@@ -18,6 +18,7 @@ const presence = require('../presence');
 const pageSessions = require('../pageSessions');
 const blockedOwners = require('../blockedOwners');
 const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
+const { publishFeedPost, recordFeedPost, listFeedPosts } = require('../bitrixFeed');
 const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
 const actionLog = require('../actionLog');
@@ -1890,6 +1891,42 @@ function createWhatsappRouter({ sessions, broadcast }) {
       }
     }
     res.json({ sessionId, results });
+  });
+
+  // ---------------------------------------------------------------
+  // POST /admin/feed-post  { title?, message }
+  // Publica no Feed nativo do Bitrix24 (Live Feed, "Para todos os
+  // colaboradores") — SEMPRE manual, disparado só quando o super admin
+  // clica "Publicar" no Painel Admin depois de revisar o texto (decisão
+  // confirmada com o usuário: nunca automático a partir de deploy/commit).
+  // Registrado em feed_posts mesmo em falha, pra nunca perder o rastro de
+  // uma tentativa que não foi ao ar.
+  // ---------------------------------------------------------------
+  router.post('/admin/feed-post', requireSuperAdmin, async (req, res) => {
+    const { title, message } = req.body || {};
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: 'a mensagem é obrigatória' });
+    }
+    try {
+      const bitrixPostId = await publishFeedPost({ title, message });
+      await recordFeedPost({ ownerId: req.ownerId, title, message, bitrixPostId, status: 'published' });
+      res.json({ ok: true, bitrixPostId });
+    } catch (err) {
+      console.error('[feed] falha ao publicar:', err.message);
+      await recordFeedPost({ ownerId: req.ownerId, title, message, status: 'failed', error: err.message }).catch(() => {});
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // GET /admin/feed-posts — histórico LOCAL de posts já publicados (ou
+  // tentados), pra saber o que já foi anunciado e não duplicar.
+  router.get('/admin/feed-posts', requireSuperAdmin, async (req, res) => {
+    try {
+      res.json({ posts: await listFeedPosts() });
+    } catch (err) {
+      console.error('[feed] erro ao listar histórico:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   });
 
   return router;

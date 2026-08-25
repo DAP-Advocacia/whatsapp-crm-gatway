@@ -778,6 +778,15 @@
   </div>
 
   <div class="panel">
+    <h2>Publicar no Feed do Bitrix</h2>
+    <p class="panel-hint">Anuncia uma novidade do sistema no Feed nativo do Bitrix ("Para todos os colaboradores"). Publicação é sempre manual — revise o texto com cuidado, edição/remoção depois só é possível direto no Bitrix.</p>
+    <input type="text" id="feedPostTitle" placeholder="Título (opcional)" style="margin-bottom:10px;">
+    <textarea id="feedPostMessage" rows="5" placeholder="Texto do anúncio…" style="margin-bottom:10px;"></textarea>
+    <button class="btn" id="feedPostPublishBtn">Publicar no Feed</button>
+    <div id="feedPostHistory" style="margin-top:16px;"></div>
+  </div>
+
+  <div class="panel">
     <h2>Sugestões <span class="panel-count" id="suggestionsCount">—</span></h2>
     <p class="panel-hint">Kanban de triagem — mover, responder (a resposta vai pra FAQ pública) e marcar como lançada.</p>
     <div class="kanban-board" id="suggestionsBoard">
@@ -1700,6 +1709,68 @@
     }
   });
 
+  // ---------------- Publicar no Feed do Bitrix ----------------
+
+  function feedPostHistoryItemHtml(p) {
+    const isFailed = p.status === 'failed';
+    const statusHtml = isFailed
+      ? `<span style="color:#c0392b;font-weight:600;">falhou</span>${p.error ? ` — ${escapeHtml(p.error)}` : ''}`
+      : `<span style="color:#27ae60;font-weight:600;">publicado</span>`;
+    const titleHtml = p.title ? `<b>${escapeHtml(p.title)}</b> — ` : '';
+    return `
+      <div class="kanban-card" style="margin-bottom:8px;">
+        <div class="card-text">${titleHtml}${escapeHtml(p.message)}</div>
+        <div class="card-meta">${new Date(p.createdAt).toLocaleString('pt-BR')} · ${statusHtml}</div>
+      </div>
+    `;
+  }
+
+  async function loadFeedPosts() {
+    const container = document.getElementById('feedPostHistory');
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/feed-posts`);
+      if (!res.ok) throw new Error('falha ao carregar histórico');
+      const data = await res.json();
+      const posts = data.posts || [];
+      container.innerHTML = posts.length
+        ? posts.map(feedPostHistoryItemHtml).join('')
+        : `<div class="empty-state">Nenhum post publicado ainda.</div>`;
+    } catch (err) {
+      console.error('[admin] erro ao carregar histórico do Feed:', err.message);
+    }
+  }
+
+  document.getElementById('feedPostPublishBtn').addEventListener('click', async () => {
+    const titleEl = document.getElementById('feedPostTitle');
+    const messageEl = document.getElementById('feedPostMessage');
+    const message = messageEl.value.trim();
+    if (!message) {
+      if (window.showToast) window.showToast('Escreva o texto do anúncio antes de publicar.', 'error');
+      return;
+    }
+    const confirmed = await window.confirmDialog('Publicar este anúncio no Feed do Bitrix, visível para todos os colaboradores? Depois de publicado, editar ou remover só é possível direto no Bitrix.');
+    if (!confirmed) return;
+    const btn = document.getElementById('feedPostPublishBtn');
+    btn.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/feed-post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: titleEl.value.trim(), message }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao publicar');
+      if (window.showToast) window.showToast('Publicado no Feed do Bitrix.', 'success');
+      titleEl.value = '';
+      messageEl.value = '';
+      loadFeedPosts();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // ---------------- Kanban de Sugestões ----------------
 
   let suggestionsRows = [];
@@ -1878,7 +1949,7 @@
       startPresenceHeartbeat();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
 
-      await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions()]);
+      await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions(), loadFeedPosts()]);
       setInterval(loadUsageMetrics, 30000);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');

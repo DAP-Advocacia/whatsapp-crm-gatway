@@ -873,3 +873,21 @@ create table if not exists internal_note_revisions (
 );
 create index if not exists idx_internal_note_revisions_note
   on internal_note_revisions (note_id, edited_at);
+
+-- Histórico LOCAL de posts publicados no Feed (Live Feed) do Bitrix24
+-- (src/bitrixFeed.js) — publicação é sempre MANUAL (usuário decide
+-- quando). Nunca é a fonte de verdade (o Bitrix é o dono real do post) —
+-- só um registro de "o que já foi anunciado", pra não duplicar. Registrado
+-- mesmo em falha (status='failed'), pra nunca perder o rastro de uma
+-- tentativa que não foi ao ar.
+create table if not exists feed_posts (
+  id bigserial primary key,
+  owner_id text not null,
+  title text,
+  message text not null,
+  bitrix_post_id text,
+  status text not null default 'published' check (status in ('published', 'failed')),
+  error text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_feed_posts_created on feed_posts (created_at desc);

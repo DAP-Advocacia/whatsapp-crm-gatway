@@ -150,6 +150,7 @@ Edite o `.env`:
 | `BITRIX_WEBHOOK_URL` | *(opcional)* Webhook de entrada do Bitrix — timeline do negócio (`crm.timeline.comment.add`) e contato/negócio por lead (`crm.contact.add`/`crm.deal.add`), ver §11.5 | formato `https://SEU-DOMINIO.bitrix24.com.br/rest/USER_ID/WEBHOOK_CODE/`. Precisa de escopo CRM. Como criar: Recursos para desenvolvedores → Outros → Webhook de entrada → marcar CRM → copiar a URL |
 | `BITRIX_HR_WEBHOOK_URL` | *(opcional)* Webhook de entrada DEDICADO (separado do de cima) — resolve hierarquia de departamentos pra delegação automática de acesso (gestor vê instâncias de todo subordinado, ver §14) | precisa de DOIS escopos: "Usuários (user)" **e** "Estrutura da empresa (department)" — só "Usuários" não é suficiente, `department.get` falha sem o segundo. Sem esta variável, a feature fica inativa; continua funcionando só a delegação manual. **Falha silenciosa**: se a variável for removida/perdida depois de já estar em produção, não sobra NENHUM log de erro (a checagem corta antes do `fetch`) — só o efeito (cache de hierarquia parado, tela Admin com aviso visível). Já aconteceu de sumir por 8+ dias sem ninguém notar (HANDOFF Parte CS) — depois de editar as Environment Variables no EasyPanel, sempre confirmar que ela sobreviveu ao próximo redeploy |
 | `HIERARCHY_CACHE_TTL_HOURS` | *(opcional)* Validade do cache da hierarquia (tabela `hierarchy_subordinates`) antes de recalcular contra o Bitrix | padrão `6` horas |
+| `BITRIX_FEED_WEBHOOK_URL` | *(opcional)* Webhook de entrada DEDICADO (separado dos dois de cima) — publica no Feed nativo do Bitrix ("Para todos os colaboradores"), ver §14.5 | precisa do escopo **"Rede Social"** (cobre `log.blogpost.add`). Sem esta variável, o botão "Publicar" falha com mensagem clara — nada mais no sistema é afetado. Publicação é sempre MANUAL, nunca automática a partir de deploy/commit |
 | `BITRIX_LEADS_CATEGORY_ID` | *(opcional)* Pipeline ÚNICO e compartilhado onde TODAS as LPs lançam negócio | é o número depois de `/category/` na URL do kanban: `.../crm/deal/kanban/category/<NUMERO>/`. Visibilidade por SDR é permissão nativa do Bitrix (config manual), não código |
 | `OPENAI_API_KEY` | *(opcional)* Chave da OpenAI (`platform.openai.com`) usada pelo botão "Gerar com IA" ao encerrar um teste A/B (ver §11.5) | sem ela, o botão mostra erro mas o encerramento continua funcionando com análise manual |
 | `ALLOWED_ORIGINS` | Domínio(s) do seu Bitrix24 autorizados no CORS | separe múltiplos por vírgula |
@@ -1334,6 +1335,31 @@ acesso, tempo total (30d), página favorita e bloqueio.
   variável configurada, a lista fica vazia com um aviso explícito na
   tela (não um erro nem um vazio silencioso).
 
+### Publicar no Feed do Bitrix — restrito a super admin
+
+Painel novo na mesma tela (`admin.html`): anuncia novidades do sistema
+no **Feed nativo do Bitrix24** ("Para todos os colaboradores" — Live
+Feed, `stream/`), diferente do `crm.timeline` (§17, `src/bitrix.js`)
+usado hoje pra comentário dentro de UM negócio. Publicação é sempre
+**manual** — o super admin escreve título (opcional) e mensagem, clica
+"Publicar" (confirmação antes, via `window.confirmDialog` — nunca
+`confirm()` nativo), e o texto vai pro Feed via `log.blogpost.add`.
+Depois de publicado, editar/remover só é possível direto no Bitrix —
+este app não tenta.
+
+Usa um **webhook de entrada dedicado** (`BITRIX_FEED_WEBHOOK_URL`, ver
+§3) — não reaproveita `BITRIX_WEBHOOK_URL` porque `log.blogpost.add`
+exige o escopo "Rede Social", que o webhook de CRM não tem. Módulo
+`src/bitrixFeed.js`. Histórico LOCAL do que já foi publicado (tabela
+`feed_posts`) aparece embaixo do formulário — nunca é a fonte de
+verdade (o Bitrix é o dono real do post), só um registro pra não
+duplicar anúncio; grava mesmo em falha (`status:'failed'` + o erro),
+mostrado em vermelho na lista.
+
+Rotas: `POST /api/whatsapp/admin/feed-post` `{ title?, message }` e
+`GET /api/whatsapp/admin/feed-posts` (últimos 100) — ambas restritas a
+`requireSuperAdmin` (ver §17, `src/adminAuth.js`).
+
 ### Sugestões — Kanban (3 colunas) restrito a super admin
 
 Segunda seção da mesma tela: Kanban de 3 colunas (Pendente / Em análise
@@ -1659,6 +1685,8 @@ revelar que o recurso existe).
 | `admin/employees` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. `{ employees:[{id, name, workPosition, email, photo, departmentIds, dateRegister}], hrConfigured }` — cadastro do Bitrix via `BITRIX_HR_WEBHOOK_URL` (mesma variável do §14); `hrConfigured:false` (200, não erro) se a variável não estiver configurada. |
 | `admin/diagnostics/sessions` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura. `{ sessions:[{sessionId, status, hasSock}] }` — sessões WhatsApp já em memória no processo (`SessionManager.listActive()`), SEM criar nenhuma sessão nova (diferente de acessar via `session=` em qualquer outra rota, que cria+inicia se ainda não existir). Usada pra saber quais instâncias têm um socket Baileys de verdade conectado agora — pré-requisito de `resolve-lid` abaixo. Ferramenta de diagnóstico permanente (HANDOFF Parte CP), não removida depois de usada. |
 | `admin/diagnostics/resolve-lid` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura (não altera nenhuma linha do banco, não envia nada pro WhatsApp). Body `{ sessionId, lidNumbers:[...] }` (máx. 500). Tenta resolver cada número do sistema LID do WhatsApp pro telefone real, via o socket JÁ CONECTADO daquela sessão (`signalRepository.lidMapping`) — `null` no resultado se não conseguir. 400 se a sessão não estiver `online` agora. Usada pra medir/corrigir conversas antigas salvas com o LID cru no lugar do telefone — ver `scripts/fix-lid-phones.js`/`fix-lid-contacts.js` e HANDOFF Parte CP. |
+| `admin/feed-post` | POST | Restrito a `requireSuperAdmin`. Body `{ title?, message }`. Publica no Feed nativo do Bitrix (§14.5, `src/bitrixFeed.js`) e registra em `feed_posts` (sucesso ou falha). 400 sem `message`; 502 se a publicação em si falhar (webhook não configurado, erro da API do Bitrix). |
+| `admin/feed-posts` | GET | Restrito a `requireSuperAdmin`. `{ posts:[{id, ownerId, title, message, bitrixPostId, status, error, createdAt}] }` — histórico LOCAL, últimos 100, mais recente primeiro. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
