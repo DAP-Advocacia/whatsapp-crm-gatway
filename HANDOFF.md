@@ -9036,3 +9036,67 @@ confirmado na seção de cards (16 cards, 51 abertos = 51 fechados);
 servido via HTTP local com todas as 7 strings-chave confirmadas
 presentes no HTML real entregue.
 
+### Parte EI — BUG GRANDE, pré-existente: paleta pessoal nunca aplicava em 13 das 14 telas com sidebar (2026-08-25)
+
+Usuário reportou de novo: trocou a paleta pra "WhatsApp" (verde) em
+Configurações/Aparência, a própria tela reflete certo, mas o Dashboard
+continuava dourado. Print confirmou: modelo "WhatsApp" selecionado e
+salvo, `GET /api/settings` (testado direto, produção) devolvendo
+`#25D366` corretamente — o backend estava 100% certo o tempo todo.
+
+**Causa raiz real, MUITO mais ampla do que os bugs já corrigidos nesta
+sessão (onboarding/apresentação)**: em `dashboard.html` (e replicado,
+por cópia, em praticamente TODAS as outras telas do sistema),
+`resolveBrandReady`/`brandReady` são declarados com `let`/`const`
+dentro de UM bloco `<script>`, mas a chamada real de
+`resolveBrandReady()` — a que de fato resolve a Promise — vive dentro
+do fetch de `/api/brand`, num bloco `<script>` **SEPARADO**, mais
+abaixo no arquivo. Cada `<script>` inline é o escopo de uma função
+IIFE própria — `let`/`const` de um bloco NÃO é visível no outro. A
+chamada `resolveBrandReady()` no script separado lançava
+`ReferenceError: resolveBrandReady is not defined` — mas dentro de uma
+Promise `.finally()`, SEM try/catch, esse erro virava uma unhandled
+rejection silenciosamente engolida, sem quebrar mais nada da página
+(por isso `load()`/`loadInsights()` sempre funcionaram normalmente,
+mascarando o problema). Resultado real: a Promise `brandReady` NUNCA
+era resolvida de verdade — `applyPersonalPalette()` (que faz `await
+brandReady` antes de aplicar a cor) ficava pendurada pra sempre, sem
+nenhum erro visível em lugar nenhum. Reproduzido isoladamente fora do
+browser (2 IIFEs simulando os 2 `<script>`) — confirmado
+`ReferenceError` + Promise nunca resolvida; testado de novo com a
+correção — resolve e aplica corretamente.
+
+**Escopo real do bug, confirmado por grep em todas as 14 telas com
+sidebar**: só `settings.html` (a própria tela de editar a paleta,
+com fluxo diferente) NÃO tinha esse problema — as outras 13
+(`dashboard`, `chat`, `campaign`, `campaign-metrics`,
+`campaign-schedule`, `contacts`, `sites`, `lead-metrics`, `instances`,
+`notifications`, `suggestions`, `faq`, `conversation-analysis`,
+`admin` — 14 no total incluindo dashboard) tinham EXATAMENTE o mesmo
+padrão quebrado, `grep -c "let resolveBrandReady"` = 1 em cada uma.
+Isso é um bug PRÉ-EXISTENTE, de antes desta sessão — não foi
+introduzido por nada feito aqui; só nunca tinha sido detectado porque
+o sintoma (paleta pessoal "não funciona") é silencioso e fácil de
+atribuir a cache do navegador, não a um erro de JS real.
+
+**Correção**: em vez de fundir os 2 blocos `<script>` de cada arquivo
+(mais arriscado, risco de colisão de nomes de variável entre os 2
+blocos), a variável `resolveBrandReady` passou a viver em `window`
+(acessível de qualquer `<script>` do documento) — `let brandReady;
+window.resolveBrandReady = null; brandReady = new Promise((resolve)
+=> { window.resolveBrandReady = resolve; });` na declaração, e `if
+(window.resolveBrandReady) window.resolveBrandReady();` na chamada
+final (guard defensivo extra, pra nunca mais quebrar silenciosamente
+se a ordem dos scripts mudar no futuro). Aplicada via `sed` nas 13
+telas afetadas (confirmado antes que o padrão era 100% idêntico —
+mesmas 3 linhas exatas — em todas, exceto 3 que usavam arrow function
+na chamada final em vez de `function()`, cobertas com um segundo
+padrão de substituição).
+
+**Validação**: sintaxe validada em todos os 13 arquivos + dashboard.html
+(`node -c`, 14/14 OK); bug reproduzido isoladamente e a correção
+testada fora do browser (confirmado resolve/aplica corretamente);
+servido via HTTP local, 6 telas amostradas (dashboard, chat, campaign,
+instances, admin, conversation-analysis) confirmadas com a correção
+presente no HTML real entregue.
+

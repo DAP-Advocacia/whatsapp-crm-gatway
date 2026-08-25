@@ -971,8 +971,23 @@
   // a global — sem essa ordem garantida, uma corrida entre os dois fetches
   // poderia fazer a pessoal ser sobrescrita de volta pra global por
   // acidente (HANDOFF Parte DL).
-  let resolveBrandReady;
-  const brandReady = new Promise((resolve) => { resolveBrandReady = resolve; });
+  // window.resolveBrandReady (não uma variável local com `let`) — o fetch de
+  // /api/brand que chama isto vive num <script> SEPARADO, mais abaixo no
+  // arquivo (cada bloco <script> inline é o escopo de uma função própria,
+  // não compartilha `let`/`const` entre si). BUG REAL encontrado 2026-08-25
+  // (usuário reportou a paleta pessoal nunca refletir no Dashboard mesmo com
+  // o valor certo salvo no banco): o script final chamava `resolveBrandReady()`
+  // como se fosse a mesma variável daqui, mas era uma referência a UMA
+  // FUNÇÃO INEXISTENTE nesse escopo — o erro (ReferenceError, dentro de uma
+  // Promise .finally(), sem try/catch) era engolido silenciosamente, sem
+  // travar mais nada da página. Resultado: a Promise `brandReady` nunca era
+  // resolvida de verdade, e `applyPersonalPalette()` (que faz `await
+  // brandReady` antes de aplicar a cor) ficava pendurada pra sempre, sem
+  // nenhum erro visível. Pendurar em `window` corrige isso (acessível de
+  // qualquer <script> do documento) sem precisar fundir os 2 blocos.
+  let brandReady;
+  window.resolveBrandReady = null;
+  brandReady = new Promise((resolve) => { window.resolveBrandReady = resolve; });
 
   // Paleta POR USUÁRIO (tela Configurações/Aparência, HANDOFF Parte DL) —
   // sobrepõe a paleta global/marca, só se este owner já tiver salvo
@@ -1767,7 +1782,7 @@
     if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
     if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(function () {}).finally(function () { resolveBrandReady(); });
+  }).catch(function () {}).finally(function () { if (window.resolveBrandReady) window.resolveBrandReady(); });
 })();
 </script>
 </body>

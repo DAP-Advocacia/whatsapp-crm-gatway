@@ -958,8 +958,18 @@
   // global — sem essa ordem garantida, uma corrida entre os dois fetches
   // poderia fazer a pessoal ser sobrescrita de volta pra global por
   // acidente (HANDOFF Parte DL).
-  let resolveBrandReady;
-  const brandReady = new Promise((resolve) => { resolveBrandReady = resolve; });
+  // window.resolveBrandReady (não `let`) - ver comentário completo em dashboard.html.
+  // BUG REAL corrigido 2026-08-25: o fetch de /api/brand que resolve isto
+  // vive num <script> SEPARADO mais abaixo - `let` não é visível entre
+  // blocos <script> distintos, cada um é o escopo de uma função própria.
+  // A chamada antiga (resolveBrandReady() sem window., dentro de um
+  // .finally() sem try/catch) lançava ReferenceError silenciosamente
+  // engolido - brandReady nunca resolvia, e applyPersonalPalette (que
+  // faz await brandReady antes de aplicar a paleta pessoal) ficava
+  // pendurada pra sempre, sem nenhum erro visível.
+  let brandReady;
+  window.resolveBrandReady = null;
+  brandReady = new Promise((resolve) => { window.resolveBrandReady = resolve; });
 
   // Paleta POR USUÁRIO (tela Configurações/Aparência, HANDOFF Parte DL) —
   // sobrepõe a paleta global/marca, só se este owner já tiver salvo
@@ -1375,7 +1385,7 @@
     if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
     if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(function () {}).finally(function () { resolveBrandReady(); });
+  }).catch(function () {}).finally(function () { if (window.resolveBrandReady) window.resolveBrandReady(); });
 })();
 </script>
 </body>
