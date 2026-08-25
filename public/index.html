@@ -646,9 +646,28 @@
     background: rgba(216,171,79,.07); border: 1px solid rgba(216,171,79,.22);
     border-radius: 10px; padding: 10px 12px;
   }
-  .note-item-author{ font-size: 11px; color: var(--gold-dim); font-weight: 600; margin-bottom: 3px; }
+  .note-item-author{ font-size: 11px; color: var(--gold-dim); font-weight: 600; margin-bottom: 3px; display:flex; align-items:center; gap:6px; }
+  .note-item-author span{ flex:1; }
   .note-item-text{ font-size: 13px; color: var(--text); white-space: pre-wrap; word-break: break-word; }
   .note-item-time{ font-size: 10.5px; color: var(--text-faint); margin-top: 5px; }
+
+  /* Editar/concluir nota interna — concluída continua no MESMO lugar
+     cronológico da lista, só riscada/opaca (decisão do usuário). */
+  .note-item--done{ opacity:.55; }
+  .note-item--done .note-item-text{ text-decoration: line-through; text-decoration-color: var(--gold-dim); }
+  .note-action-btn{ background:none; border:none; color:var(--gold-dim); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
+  .note-action-btn:hover{ opacity:1; }
+  .note-edited-tag{ background:none; border:none; color:var(--text-faint); font-size:10px; text-decoration:underline; cursor:pointer; padding:0; font-family:inherit; }
+  .note-item--editing{ background: rgba(216,171,79,.1); border-radius:10px; padding:10px 12px; border:1px solid rgba(216,171,79,.3); }
+  .note-item-edit-input{
+    width:100%; resize:vertical; min-height:60px; border-radius:8px; font-size:13px; padding:8px 10px;
+    border:1px solid rgba(216,171,79,.35); background:rgba(216,171,79,.06); color:var(--text); font-family:inherit;
+  }
+  .note-item-edit-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+  .rev-item{ padding:8px 0; border-bottom:1px solid var(--border); }
+  .rev-item:last-child{ border-bottom:none; }
+  .rev-text{ font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+  .rev-time{ font-size:10px; color:var(--text-faint); margin-top:3px; }
   .notes-composer{
     display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--border); flex-shrink: 0;
   }
@@ -683,6 +702,17 @@
      WhatsApp (ver src/routes/internalNotes.js). Conteúdo montado por
      renderNotesDrawer(). -->
 <div class="notes-drawer" id="notesDrawer" hidden></div>
+
+<!-- Histórico de EDIÇÕES de uma nota interna — texto anterior a cada
+     versão substituída, nunca "sobrescreve e pronto" (pedido do
+     usuário). Conteúdo secundário sob demanda, montado por
+     showNoteRevisions(). -->
+<div class="overlay" id="noteRevisionsModal" hidden>
+  <div class="modal">
+    <div class="modal-head"><h3>Histórico de edições</h3><button class="modal-close" id="noteRevisionsCloseBtn" type="button">&times;</button></div>
+    <div class="modal-body" id="noteRevisionsList"></div>
+  </div>
+</div>
 
 <script src="https://api.bitrix24.com/api/v1/"></script>
 <script>
@@ -1954,6 +1984,10 @@
     document.getElementById('notesDrawer').hidden = true;
   }
 
+  // Id da nota em modo de edição no momento (só uma por vez) — mesmo
+  // espírito de qualquer outro estado de UI só-de-render deste arquivo.
+  let editingNoteId = null;
+
   function renderNotesDrawer() {
     const drawer = document.getElementById('notesDrawer');
     drawer.innerHTML = compactHtml(`
@@ -1963,13 +1997,40 @@
       </div>
       <div class="notes-drawer-warning">Nunca visível ao cliente — mesmo no modo Grupo.</div>
       <div class="notes-list" id="notesList">
-        ${state.internalNotes.length ? state.internalNotes.map((n) => `
-          <div class="note-item">
-            <div class="note-item-author">${escapeHtml(n.authorName || 'Sem nome')}</div>
-            <div class="note-item-text">${escapeHtml(n.text)}</div>
-            <div class="note-item-time">${formatTime(n.createdAt)} · ${formatDayLabel(n.createdAt)}</div>
-          </div>
-        `).join('') : '<p style="font-size:12.5px;color:var(--text-muted);">Nenhuma nota ainda.</p>'}
+        ${state.internalNotes.length ? state.internalNotes.map((n) => {
+          if (editingNoteId === n.id) {
+            return `
+              <div class="note-item note-item--editing">
+                <textarea class="note-item-edit-input" data-edit-textarea-id="${n.id}">${escapeHtml(n.text)}</textarea>
+                <div class="note-item-edit-actions">
+                  <button type="button" class="btn secondary" data-cancel-edit-note-id="${n.id}">Cancelar</button>
+                  <button type="button" class="btn" data-save-note-id="${n.id}">Salvar</button>
+                </div>
+              </div>
+            `;
+          }
+          // Só o AUTOR original vê editar/concluir — mesma regra já
+          // exigida pelo backend (PUT/POST .../complete rejeitam quem
+          // não é o autor, ver src/routes/internalNotes.js).
+          const isMine = n.authorOwnerId === state.ownerId;
+          const isDone = !!n.completedAt;
+          const wasEdited = !!n.editedAt;
+          return `
+            <div class="note-item${isDone ? ' note-item--done' : ''}">
+              <div class="note-item-author">
+                <span>${escapeHtml(n.authorName || 'Sem nome')}</span>
+                ${isMine ? `
+                  <button type="button" class="note-action-btn" data-edit-note-id="${n.id}" title="Editar">✎</button>
+                  <button type="button" class="note-action-btn" data-toggle-done-note-id="${n.id}" data-done="${isDone ? '1' : '0'}" title="${isDone ? 'Reabrir' : 'Concluir'}">${isDone ? '↺' : '✓'}</button>
+                ` : ''}
+              </div>
+              <div class="note-item-text">${escapeHtml(n.text)}</div>
+              <div class="note-item-time">
+                ${formatTime(n.createdAt)} · ${formatDayLabel(n.createdAt)}${wasEdited ? ` · <button type="button" class="note-edited-tag" data-show-revisions-id="${n.id}">editada</button>` : ''}${isDone ? ' · concluída' : ''}
+              </div>
+            </div>
+          `;
+        }).join('') : '<p style="font-size:12.5px;color:var(--text-muted);">Nenhuma nota ainda.</p>'}
       </div>
       <div class="notes-composer">
         <textarea id="noteInput" placeholder="Escreva uma nota interna…" rows="1"></textarea>
@@ -1985,6 +2046,73 @@
     document.getElementById('noteInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitInternalNote(); }
     });
+    list.querySelectorAll('[data-edit-note-id]').forEach((btn) => btn.addEventListener('click', () => { editingNoteId = btn.getAttribute('data-edit-note-id'); renderNotesDrawer(); }));
+    list.querySelectorAll('[data-cancel-edit-note-id]').forEach((btn) => btn.addEventListener('click', () => { editingNoteId = null; renderNotesDrawer(); }));
+    list.querySelectorAll('[data-save-note-id]').forEach((btn) => btn.addEventListener('click', () => saveEditedNote(btn.getAttribute('data-save-note-id'))));
+    list.querySelectorAll('[data-toggle-done-note-id]').forEach((btn) => btn.addEventListener('click', () => toggleNoteCompleted(btn.getAttribute('data-toggle-done-note-id'), btn.getAttribute('data-done') !== '1')));
+    list.querySelectorAll('[data-show-revisions-id]').forEach((btn) => btn.addEventListener('click', () => showNoteRevisions(btn.getAttribute('data-show-revisions-id'))));
+  }
+
+  async function saveEditedNote(noteId) {
+    const el = document.querySelector(`[data-edit-textarea-id="${CSS.escape(noteId)}"]`);
+    if (!el) return;
+    const text = el.value.trim();
+    if (!text) return;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: state.session, phone: state.phone, text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao editar nota');
+      const idx = state.internalNotes.findIndex((n) => n.id === data.note.id);
+      if (idx !== -1) state.internalNotes[idx] = data.note;
+      editingNoteId = null;
+      renderNotesDrawer();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function toggleNoteCompleted(noteId, completed) {
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: state.session, phone: state.phone, completed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao atualizar nota');
+      const idx = state.internalNotes.findIndex((n) => n.id === data.note.id);
+      if (idx !== -1) state.internalNotes[idx] = data.note;
+      renderNotesDrawer();
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+
+  async function showNoteRevisions(noteId) {
+    const modal = document.getElementById('noteRevisionsModal');
+    const list = document.getElementById('noteRevisionsList');
+    list.innerHTML = '<p>Carregando…</p>';
+    modal.hidden = false;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}/revisions?session=${encodeURIComponent(state.session)}&phone=${encodeURIComponent(state.phone)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao carregar histórico');
+      const revisions = data.revisions || [];
+      list.innerHTML = revisions.length
+        ? revisions.map((r) => `
+            <div class="rev-item">
+              <div class="rev-text">${escapeHtml(r.text)}</div>
+              <div class="rev-time">${formatDayLabel(r.editedAt)} · ${formatTime(r.editedAt)}</div>
+            </div>
+          `).join('')
+        : '<p>Nenhuma edição anterior.</p>';
+    } catch (err) {
+      list.innerHTML = `<p>${escapeHtml(err.message)}</p>`;
+    }
   }
 
   async function submitInternalNote() {
@@ -2063,6 +2191,31 @@
               const l = document.getElementById('statusLabel');
               if (l) l.textContent = statusLabel();
             }, 12000);
+          }
+        }
+        // Nota interna criada em OUTRA aba (drawer aberto ou não) — lacuna
+        // pré-existente corrigida (2026-08-25): este socket nunca tratava
+        // 'internal-note', notas só apareciam ao reabrir/recarregar. Sem
+        // guarda de sessionId/phone (diferente de chat.html) — este socket
+        // já é aberto com ?session=&phone= fixos na própria URL, então
+        // todo payload recebido já é desta conversa por construção.
+        if (payload.type === 'internal-note') {
+          const alreadyShown = state.internalNotes.some((n) => n.id === payload.note.id);
+          if (!alreadyShown) {
+            state.internalNotes.push(payload.note);
+            const notesBtn = document.getElementById('notesBtn');
+            if (notesBtn) notesBtn.classList.add('has-notes');
+            if (state.internalNotesOpen) renderNotesDrawer();
+          }
+        }
+        // Nota editada ou marcada/desmarcada como concluída em outra aba —
+        // mesmo type pros dois casos (PUT /:id e POST /:id/complete mandam
+        // o mesmo 'internal-note-updated').
+        if (payload.type === 'internal-note-updated') {
+          const idx = state.internalNotes.findIndex((n) => n.id === payload.note.id);
+          if (idx !== -1) {
+            state.internalNotes[idx] = payload.note;
+            if (state.internalNotesOpen) renderNotesDrawer();
           }
         }
       };
@@ -2213,6 +2366,12 @@
       }
     }
   }
+
+  // Modal de histórico de edições — elemento fixo do DOM (não recriado a
+  // cada render, diferente do drawer de notas), registrado uma única vez.
+  document.getElementById('noteRevisionsCloseBtn').addEventListener('click', () => {
+    document.getElementById('noteRevisionsModal').hidden = true;
+  });
 
   boot();
 })();

@@ -717,6 +717,17 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   (`src/routes/internalNotes.js`, já genérico — usado também por
   `index.html`), broadcast via WebSocket (`type: 'internal-note'`) pra
   sincronizar entre abas/atendentes em tempo real.
+  - **Editar e concluir** (HANDOFF Parte EC): só o AUTOR original edita/
+    conclui a própria nota (`requireResourceOwner`, mesmo mecanismo já
+    usado por `POST /notifications/:id/read` — 404 pra quem não é o
+    autor; qualquer outro com acesso à conversa continua LENDO
+    normalmente). Editar preserva o texto anterior em
+    `internal_note_revisions` (`GET /api/internal-notes/:id/revisions`,
+    modal de histórico) — nunca sobrescreve sem rastro. Nota concluída
+    (`PUT`/`POST /api/internal-notes/:id`, `:id/complete`) continua no
+    MESMO lugar cronológico do feed, só riscada/opaca — nunca some nem
+    muda de posição. `type: 'internal-note-updated'` no WebSocket cobre
+    os dois casos (edição e conclusão).
 - **Exportar conversa** (HANDOFF Parte EA) — botão no cabeçalho da
   conversa, menu com 2 formatos:
   - **TXT**: montado no client (`buildExportLines()`), a partir do que
@@ -1452,14 +1463,27 @@ concedido nominalmente (ver HANDOFF Parte DK).
   HANDOFF Parte DY — zera os 5 campos + a query string da URL, pra um
   F5 depois de limpar não reaplicar um `?sentBy=` antigo vindo do link
   "Ver conversas" do Admin), métricas agregadas do filtro atual, lista
-  de conversas
-  paginada no servidor (o universo é o sistema todo, não as
-  instâncias de 1 dono), e o histórico completo de uma conversa em
+  de conversas paginada no servidor (o universo é o sistema todo, não
+  as instâncias de 1 dono), e o histórico completo de uma conversa em
   bolhas **somente leitura** ao clicar numa linha. O cabeçalho desse
   modal de histórico mostra também o tempo de diálogo (primeira →
   última mensagem) e a contagem de mensagens enviadas/recebidas
   (HANDOFF Parte DW) — tudo calculado no frontend a partir do mesmo
   payload de histórico, sem rota nova.
+- **Dropdown "Instância" inclui também instâncias "órfãs"** (HANDOFF
+  Parte ED, `instancesStore.listAll()`) — `session_id`s já removidos
+  da tabela `instances` mas com mensagem real preservada
+  (`instances.remove()` nunca apaga `conversations`/`messages` de
+  propósito, pra não perder histórico de atendimento só por
+  desconectar/remover uma instância); marcadas `isOrphan: true`,
+  `ownerId: null` (nunca um dono adivinhado por heurística sobre o
+  formato do `session_id` — não há hoje nenhuma fonte que preserve o
+  dono/label reais depois da remoção), com texto próprio no dropdown
+  (pra não repetir label duas vezes) e de fora do filtro de Atendente
+  (sem dono real, as 27 cairiam todas na mesma opção, misturando
+  instâncias diferentes). O card "Instâncias" da tela já contava essas
+  certo antes desta correção (agrega por `messages.session_id`, não
+  pela tabela `instances`) — só o dropdown de filtro tinha a lacuna.
 - **Mídia no histórico usa hidratação autenticada** (`data-media-url`
   + `apiFetch` + blob, mesmo mecanismo de `chat.html` — ver §9), não
   `src=` direto: como as rotas de mídia exigem `Authorization: Bearer`,
@@ -1717,6 +1741,9 @@ lida por `GET /history`/`POST /send` (rota própria, dedicada).
 |---|---|---|
 | `?session=&phone=` | GET | Lista notas da conversa, em ordem cronológica. Não cria a conversa se ela ainda não existir (lista vazia). |
 | `/` (raiz) | POST | Body `{ session, phone, text, authorName? }`. `author_owner_id` sempre `req.ownerId` (nunca do client). Broadcast via WebSocket (`type:'internal-note'`) pra outra aba ver em tempo real. |
+| `/:id` | PUT | Body `{ session, phone, text }`. Edita o texto, preservando a versão anterior em `internal_note_revisions` — HANDOFF Parte EC. Exige ser o AUTOR original (`requireResourceOwner`, 404 senão). Broadcast `type:'internal-note-updated'`. |
+| `/:id/complete` | POST | Body `{ session, phone, completed }`. Marca/desmarca como concluída (toggle) — mesma restrição de autor de `PUT /:id`. Nota concluída continua na mesma posição cronológica do feed, só riscada/opaca no client. |
+| `/:id/revisions?session=&phone=` | GET | Histórico de versões substituídas de uma nota, mais antiga primeiro — leitura, SEM restrição de autor (quem já lê a nota via `GET /` lê o histórico dela). |
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 

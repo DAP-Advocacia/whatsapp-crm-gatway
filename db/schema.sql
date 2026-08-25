@@ -848,3 +848,28 @@ create table if not exists internal_notes (
 
 create index if not exists idx_internal_notes_conversation
   on internal_notes (conversation_id, created_at);
+
+-- Edição com rastro (HANDOFF Parte EC) — texto pode mudar, mas o
+-- anterior precisa ficar recuperável, nunca "sobrescreve e pronto".
+-- edited_at é só uma flag rápida de "foi editada alguma vez"; o CORPO
+-- do histórico mora na tabela satélite abaixo, buscado sob demanda.
+alter table internal_notes add column if not exists edited_at timestamptz;
+
+-- Conclusão — nota concluída continua na MESMA linha/posição
+-- cronológica (decisão do usuário), nunca migra de tabela/seção.
+alter table internal_notes add column if not exists completed_at timestamptz;
+alter table internal_notes add column if not exists completed_by text;
+
+-- Histórico de revisões — tabela satélite (não uma única coluna
+-- "texto anterior", que perderia tudo antes da penúltima edição se a
+-- nota for editada mais de uma vez). Cada linha é a versão que estava
+-- valendo ANTES de uma edição específica.
+create table if not exists internal_note_revisions (
+  id bigserial primary key,
+  note_id bigint not null references internal_notes(id) on delete cascade,
+  text text not null,
+  edited_at timestamptz not null default now(),
+  edited_by text not null
+);
+create index if not exists idx_internal_note_revisions_note
+  on internal_note_revisions (note_id, edited_at);

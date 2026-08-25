@@ -918,10 +918,17 @@
       (data.instances || []).forEach((i) => {
         const opt = document.createElement('option');
         opt.value = i.id;
-        opt.textContent = `${i.ownerName} — ${i.label}`;
+        // Instância órfã (histórico real preservado, mas removida do
+        // cadastro — ownerId null, ver src/instances.js::listAll) não tem
+        // dono nem label reais pra combinar — texto próprio, sem repetir
+        // "(instância removida) — (instância removida)".
+        opt.textContent = i.ownerId ? `${i.ownerName} — ${i.label}` : `${i.label} · ${i.id}`;
         instanceSelect.appendChild(opt);
 
-        if (!seenOwners.has(i.ownerId)) {
+        // Sem ownerId real, não faz sentido como opção de "Atendente" —
+        // e todas as órfãs cairiam na mesma entrada (null === null),
+        // misturando instâncias diferentes debaixo de 1 filtro só.
+        if (i.ownerId && !seenOwners.has(i.ownerId)) {
           seenOwners.add(i.ownerId);
           const ownerOpt = document.createElement('option');
           ownerOpt.value = i.ownerId;

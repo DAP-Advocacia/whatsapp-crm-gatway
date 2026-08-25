@@ -8590,3 +8590,105 @@ testada com jsdom usando `getComputedStyle` real (não suposição sobre
 especificidade CSS) — reproduzido o bug do print antes da correção e
 confirmado resolvido depois.
 
+### Parte EC — Editar e concluir nota interna, nas 2 telas (2026-08-25)
+
+Pedido novo: nota interna (Parte EA/EB) ganhou capacidade de editar o
+texto (com rastro de versões) e marcar/desmarcar como concluída,
+valendo tanto em `chat.html` quanto em `index.html`. Decisões
+confirmadas com o usuário: rastro de edições preservado (não
+"sobrescreve e pronto"); só o AUTOR original edita/conclui; nota
+concluída continua no MESMO lugar cronológico do feed, só riscada/
+opaca; vale nas 2 telas.
+
+**Schema**: `internal_notes` ganhou `edited_at`/`completed_at`/
+`completed_by`. Histórico de edições em tabela satélite
+`internal_note_revisions` (não uma única coluna "texto anterior", que
+perderia tudo antes da penúltima edição se a nota fosse editada mais
+de uma vez) — cada linha é a versão que estava valendo ANTES de uma
+edição específica.
+
+**Autorização — reaproveitado um mecanismo já em produção**:
+`requireResourceOwner` (`src/authz.js`), até agora usado só por `POST
+/notifications/:id/read`, replicado linha a linha pro resolver
+`noteAuthorOwner` (busca `author_owner_id` de uma nota por id) — 404
+(não 403) pra quem não é o autor, mesmo padrão "não revela que o
+recurso existe" do resto do app. Testado end-to-end com 2 owners
+reais: owner B recebe 404 tanto em `PUT /:id` quanto em `POST
+/:id/complete` numa nota de owner A, e **confirmado no banco** (não só
+na resposta HTTP) que a nota permanece inalterada; owner A consegue as
+duas operações normalmente; `GET /:id/revisions` (leitura) funciona
+pra ambos, sem restrição de autor — a regra "qualquer um com acesso à
+conversa continua lendo" foi preservada de propósito.
+
+**Transação** (`store.editInternalNote`): ler texto atual + gravar
+revisão + atualizar texto, atomicamente — replicado o único precedente
+de transação já existente no projeto (`assignConversation`,
+`pool.connect()`/`begin`/`commit`/`rollback` minúsculos), não inventado
+um estilo novo. `select ... for update` trava a linha durante a
+edição, evitando 2 edições concorrentes embaralharem a ordem das
+revisões.
+
+**Frontend**: bolha (`chat.html`, `.bubble-note`) e item do drawer
+(`index.html`, `.note-item`) ganharam botões de editar (✎) e concluir/
+reabrir (✓/↺) — só visíveis pro autor (`authorOwnerId === state.ownerId`,
+espelhando a regra do backend, que rejeita de qualquer forma se
+alguém tentar burlar via chamada direta). Edição é inline (troca o
+texto por um textarea na própria bolha/item, sem modal) — histórico de
+revisões abre em modal dedicado (`#noteRevisionsModal`), já que é
+conteúdo secundário sob demanda, nunca editável. WebSocket: novo
+`type: 'internal-note-updated'` (mesmo evento serve edição E conclusão
+— do ponto de vista do client, os dois são "esta nota mudou").
+
+**Lacuna pré-existente corrigida de passagem**: `index.html` nunca
+tratava `type: 'internal-note'` no WebSocket (notas só apareciam ao
+reabrir/recarregar, mesmo sendo criadas em outra aba) — corrigido
+junto com o `'internal-note-updated'` novo, já que a mesma causa
+(nenhum case de nota nesse socket) afetava os dois.
+
+**Validação**: 9 testes de `store.js` contra o banco real (histórico
+com múltiplas versões na ordem certa, toggle de conclusão/reabertura,
+compatibilidade com nota sem os campos novos); teste de autorização
+end-to-end com 2 owners reais (HTTP + estado real do banco); lógica de
+view-model (isMine/isDone/wasEdited) e handler de WebSocket testados
+isoladamente; sintaxe validada nos 2 arquivos de frontend.
+
+### Parte ED — Gap de 218 vs. 119 em Instâncias — investigado, não é bug de contagem (2026-08-25)
+
+Usuário reportou print comparando `select count(*) from instances`
+(218) com o card "Instâncias" da Auditoria de Conversas (119) — achado
+enquanto testava a feature, não um pedido direto, mas investigado
+antes de seguir por ser o tipo de "gap" que merece confirmação
+explícita.
+
+**Investigação, números conferidos com exatidão**: 218 = 126
+(instâncias cadastradas que NUNCA trocaram uma mensagem real — QR
+gerado e nunca conectado, ou conectado e nunca usado) + 92 (instâncias
+cadastradas com conversa real). 119 = 92 (as mesmas de cima) + 27
+(instâncias **removidas** de `instances` depois de já terem mensagens
+reais — `instances.remove()` só deleta a linha da própria tabela, de
+propósito nunca em cascata pra `conversations`/`messages`, pra não
+perder histórico de atendimento só por desconectar/remover uma
+instância). A métrica agregada da Auditoria
+(`computeAggregateMetrics`, conta por `messages.session_id`) já
+contava essas 27 corretamente — **não havia bug na métrica em si**.
+
+**O que realmente precisava de correção**: o dropdown de filtro
+"Instância" da Auditoria (`instancesStore.listAll()`) só lia a tabela
+`instances`, então essas 27 nunca apareciam como opção pra filtrar
+especificamente por uma delas — mesmo contando certo no total.
+Corrigido: `listAll()` agora faz `union all` com os `session_id`s
+órfãos (mensagem real, sem linha em `instances`), marcados
+`isOrphan: true`, `ownerId: null` (nunca um dono adivinhado por
+heurística de string sobre o formato do `session_id` — poderia
+mostrar um dono errado com confiança falsa; não há hoje NENHUMA fonte
+que preserve o dono/label reais de uma instância já removida).
+Frontend (`conversation-analysis.html`) ajustado pra não repetir
+label/label no texto da órfã e pra não incluí-la no filtro de
+Atendente (sem `ownerId` real, todas as 27 cairiam na mesma opção,
+misturando instâncias diferentes).
+
+**Validação**: `listAll()` testado contra o banco real — 245 = 218 +
+27, sem colisão de id entre reais e órfãs; rota `GET
+/api/conversation-analysis/instances` testada via curl, `ownerName`
+sempre com valor legível (nunca `null` literal).
+

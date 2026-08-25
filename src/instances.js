@@ -131,10 +131,38 @@ async function listAccessible(ownerId) {
 // listByOwner/listAccessible (ambas SEMPRE ancoradas num ownerId) — aqui
 // a ausência de filtro é o requisito da feature, não um esquecimento.
 // NÃO CHAMAR fora de uma rota protegida por requireConversationAnalysisAccess.
+//
+// Inclui também instâncias "órfãs" (`session_id` que já trocou mensagem
+// real, mas cuja linha em `instances` foi removida depois — ver
+// instances.remove(), que nunca apaga conversations/messages de
+// propósito, pra não perder histórico de atendimento só por desconectar/
+// remover a instância). Achado real, 2026-08-25: a métrica agregada da
+// Auditoria (conversationAnalysisStore.computeAggregateMetrics) já
+// contava essas órfãs certo (conta por messages.session_id, não por
+// instances), mas o dropdown de filtro "Instância" (que só lia esta
+// tabela) não deixava escolher especificamente uma delas — usuário
+// percebeu o gap (218 em instances vs. 119 aqui) comparando os dois
+// números; investigado e confirmado que NÃO é bug de contagem (218
+// inclui instância nunca usada; 119 é "tem conversa real", que
+// corretamente soma instância ainda cadastrada + órfã) — só o dropdown
+// tinha essa lacuna real, corrigida aqui.
+//
+// Não há como recuperar o dono/label originais de uma órfã (a única
+// fonte disso era a própria linha de `instances`, já apagada) — por
+// isso usa o próprio `session_id` como identificador e um `ownerId`
+// nulo (nunca um valor adivinhado por heurística de string, que
+// poderia mostrar um dono errado com confiança falsa).
 async function listAll() {
   const { rows } = await pool.query(
-    `select id, owner_id as "ownerId", label, created_at as "createdAt"
-     from instances order by owner_id, created_at asc`
+    `select id, owner_id as "ownerId", label, created_at as "createdAt", false as "isOrphan"
+     from instances
+     union all
+     select distinct c.session_id as id, null as "ownerId", '(instância removida)' as label,
+            min(m.created_at) over (partition by c.session_id) as "createdAt", true as "isOrphan"
+     from messages m
+     join conversations c on c.id = m.conversation_id
+     where not exists (select 1 from instances i where i.id = c.session_id)
+     order by "ownerId", "createdAt" asc`
   );
   return rows;
 }

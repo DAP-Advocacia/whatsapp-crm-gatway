@@ -785,16 +785,32 @@ async function isCardGroupId(groupId) {
 // src/routes/internalNotes.js). Serve conversa 1-a-1 e grupo-com-cliente
 // igualmente — ambos já são linhas de `conversations`.
 // ---------------------------------------------------------------
+// Normaliza uma linha de internal_notes pro mesmo formato sempre — usada
+// por toda função que devolve uma nota completa (create/edit/complete),
+// garantindo `editedAt`/`completedAt` como `null` explícito (nunca
+// `undefined`), pra qualquer client não precisar tratar os dois casos
+// como coisas diferentes.
+function mapNoteRow(r) {
+  return {
+    ...r,
+    createdAt: r.createdAt.toISOString(),
+    editedAt: r.editedAt ? r.editedAt.toISOString() : null,
+    completedAt: r.completedAt ? r.completedAt.toISOString() : null,
+  };
+}
+
 async function listInternalNotes(sessionId, phone) {
   const { rows } = await pool.query(
-    `select n.id, n.text, n.author_owner_id as "authorOwnerId", n.author_name as "authorName", n.created_at as "createdAt"
+    `select n.id, n.text, n.author_owner_id as "authorOwnerId", n.author_name as "authorName",
+            n.created_at as "createdAt", n.edited_at as "editedAt",
+            n.completed_at as "completedAt", n.completed_by as "completedBy"
      from internal_notes n
      join conversations c on c.id = n.conversation_id
      where c.session_id = $1 and c.phone = $2
      order by n.created_at asc`,
     [sessionId, phone]
   );
-  return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+  return rows.map(mapNoteRow);
 }
 
 async function addInternalNote(sessionId, phone, { text, authorOwnerId, authorName }) {
@@ -805,7 +821,89 @@ async function addInternalNote(sessionId, phone, { text, authorOwnerId, authorNa
      returning id, created_at as "createdAt"`,
     [conversationId, text, authorOwnerId, authorName || null]
   );
-  return { id: rows[0].id, text, authorOwnerId, authorName: authorName || null, createdAt: rows[0].createdAt.toISOString() };
+  return {
+    id: rows[0].id, text, authorOwnerId, authorName: authorName || null,
+    createdAt: rows[0].createdAt.toISOString(), editedAt: null, completedAt: null, completedBy: null,
+  };
+}
+
+// Dono (autor) de uma nota por id — usado por requireResourceOwner
+// (src/authz.js) pra impedir editar/concluir nota de outra pessoa (só
+// leitura via GET / continua liberada a qualquer um com acesso à
+// conversa). Mesmo padrão de getNotificationOwner (src/store.js).
+async function getInternalNoteAuthorOwner(id) {
+  const { rows } = await pool.query(
+    `select author_owner_id as "authorOwnerId" from internal_notes where id = $1`,
+    [id]
+  );
+  return rows[0] ? rows[0].authorOwnerId : null;
+}
+
+// Edita o texto de uma nota, preservando o texto ANTERIOR em
+// internal_note_revisions — nunca "sobrescreve e pronto" (pedido do
+// usuário). Transação (mesmo padrão de assignConversation acima): ler
+// texto atual + inserir revisão + atualizar texto precisa acontecer
+// atomicamente, senão uma falha no meio perde uma versão do histórico.
+// `for update` trava a linha durante a transação — evita 2 edições
+// concorrentes da mesma nota embaralharem a ordem das revisões.
+async function editInternalNote(id, { text, editedBy }) {
+  const client = await pool.connect();
+  try {
+    await client.query('begin');
+    const cur = await client.query(`select text from internal_notes where id = $1 for update`, [id]);
+    if (!cur.rows.length) {
+      await client.query('rollback');
+      return null;
+    }
+    await client.query(
+      `insert into internal_note_revisions (note_id, text, edited_by) values ($1, $2, $3)`,
+      [id, cur.rows[0].text, editedBy]
+    );
+    const { rows } = await client.query(
+      `update internal_notes set text = $1, edited_at = now() where id = $2
+       returning id, text, author_owner_id as "authorOwnerId", author_name as "authorName",
+                 created_at as "createdAt", edited_at as "editedAt",
+                 completed_at as "completedAt", completed_by as "completedBy"`,
+      [text, id]
+    );
+    await client.query('commit');
+    return mapNoteRow(rows[0]);
+  } catch (err) {
+    await client.query('rollback');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Marca/desmarca uma nota como concluída (toggle explícito, permite
+// reabrir — mesmo espírito de markNotificationRead). Nota concluída
+// continua na MESMA linha/posição cronológica (decisão do usuário) —
+// isto nunca move nem apaga a nota, só marca o estado.
+async function setInternalNoteCompleted(id, { completed, completedBy }) {
+  const { rows } = await pool.query(
+    `update internal_notes
+     set completed_at = case when $1 then now() else null end,
+         completed_by = case when $1 then $2 else null end
+     where id = $3
+     returning id, text, author_owner_id as "authorOwnerId", author_name as "authorName",
+               created_at as "createdAt", edited_at as "editedAt",
+               completed_at as "completedAt", completed_by as "completedBy"`,
+    [completed, completedBy, id]
+  );
+  return rows.length ? mapNoteRow(rows[0]) : null;
+}
+
+// Histórico completo de versões substituídas de uma nota — leitura,
+// sem restrição de autor (quem já pode ler a nota via listInternalNotes
+// pode ler o histórico dela). Ordem do mais antigo pro mais recente.
+async function listInternalNoteRevisions(noteId) {
+  const { rows } = await pool.query(
+    `select text, edited_at as "editedAt", edited_by as "editedBy"
+     from internal_note_revisions where note_id = $1 order by edited_at asc`,
+    [noteId]
+  );
+  return rows.map((r) => ({ ...r, editedAt: r.editedAt.toISOString() }));
 }
 
 // "Esse telefone já me respondeu alguma vez de verdade?" — usado antes de
@@ -869,5 +967,9 @@ module.exports = {
   isCardGroupId,
   listInternalNotes,
   addInternalNote,
+  getInternalNoteAuthorOwner,
+  editInternalNote,
+  setInternalNoteCompleted,
+  listInternalNoteRevisions,
   classifyRecipients,
 };

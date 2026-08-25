@@ -989,8 +989,30 @@
     border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--text);
   }
   .bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--gold-dim); margin-bottom:3px; }
+  .bubble-note-head span{ flex:1; }
   .bubble-note-text{ white-space:pre-wrap; word-break:break-word; }
   .bubble-note-time{ font-size:10px; color:var(--text-faint); margin-top:4px; }
+
+  /* Editar/concluir nota interna (pedido do usuário, 2026-08-25) —
+     concluída continua na MESMA posição cronológica do feed, só riscada/
+     opaca, nunca some nem migra de lugar. */
+  .bubble-note--done{ opacity:.55; }
+  .bubble-note--done .bubble-note-text{ text-decoration: line-through; text-decoration-color: var(--gold-dim); }
+  .note-action-btn{ background:none; border:none; color:var(--gold-dim); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
+  .note-action-btn:hover{ opacity:1; }
+  .note-edited-tag{ background:none; border:none; color:var(--text-faint); font-size:10px; text-decoration:underline; cursor:pointer; padding:0; font-family:inherit; }
+  .bubble-note--editing{ background: rgba(var(--gold-rgb),.1); }
+  .bubble-note-edit-input{
+    width:100%; resize:vertical; min-height:60px; border-radius:8px; font-size:13px; padding:8px 10px;
+    border:1px solid rgba(var(--gold-rgb),.35); background:rgba(var(--gold-rgb),.06); color:var(--text); font-family:inherit;
+  }
+  .bubble-note-edit-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+
+  /* Modal de histórico de edições da nota */
+  .rev-item{ padding:8px 0; border-bottom:1px solid var(--border); }
+  .rev-item:last-child{ border-bottom:none; }
+  .rev-text{ font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+  .rev-time{ font-size:10px; color:var(--text-faint); margin-top:3px; }
 </style>
 </head>
 <body>
@@ -1263,6 +1285,21 @@
     <div class="summary-history-list" id="summaryHistoryList"></div>
     <div class="modal-actions">
       <button class="btn secondary" id="summaryHistoryCancel">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Histórico de EDIÇÕES de uma nota interna — texto anterior a cada
+     versão substituída (ver store.editInternalNote), nunca "sobrescreve
+     e pronto" (pedido do usuário). Conteúdo secundário sob demanda,
+     nunca editável — por isso modal de verdade, diferente da edição em
+     si (que é inline na própria bolha). -->
+<div class="overlay" id="noteRevisionsModal">
+  <div class="modal">
+    <h3>Histórico de edições</h3>
+    <div class="rev-list" id="noteRevisionsList"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="noteRevisionsCancel">Fechar</button>
     </div>
   </div>
 </div>
@@ -2152,6 +2189,11 @@
   // do próprio re-render da lista de mensagens).
   let openReactionPickerId = null;
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Id da nota interna em modo de edição no momento (só uma por vez) —
+  // mesmo espírito de openReactionPickerId, controla o próprio re-render
+  // sem precisar estar em `state`.
+  let editingNoteId = null;
 
   // Painel de detalhes do contato (dados do Bitrix) — aberto por padrão;
   // `contactInfo` fica `undefined` enquanto carrega, `null` se não achar nada
@@ -3350,12 +3392,42 @@
       }
 
       if (msg._kind === 'note') {
+        // Só o AUTOR original vê os botões de editar/concluir (mesma regra
+        // já aplicada no backend, PUT/:id e POST/:id/complete exigem ser o
+        // autor — aqui é só a UI espelhando isso, o backend rejeita de
+        // qualquer forma se alguém tentar burlar via curl direto).
+        const isMine = msg.authorOwnerId === state.ownerId;
+        const isDone = !!msg.completedAt;
+        const wasEdited = !!msg.editedAt;
+        if (editingNoteId === msg.id) {
+          html += `
+            <div class="note-row">
+              <div class="bubble-note bubble-note--editing">
+                <div class="bubble-note-head"><span>Editando nota${msg.authorName ? ' · ' + escapeHtml(msg.authorName) : ''}</span></div>
+                <textarea class="bubble-note-edit-input" data-edit-textarea-id="${msg.id}">${escapeHtml(msg.text)}</textarea>
+                <div class="bubble-note-edit-actions">
+                  <button type="button" class="btn secondary" data-cancel-edit-note-id="${msg.id}">Cancelar</button>
+                  <button type="button" class="btn" data-save-note-id="${msg.id}">Salvar</button>
+                </div>
+              </div>
+            </div>
+          `;
+          return;
+        }
         html += `
           <div class="note-row">
-            <div class="bubble-note">
-              <div class="bubble-note-head">Nota interna${msg.authorName ? ' · ' + escapeHtml(msg.authorName) : ''}</div>
+            <div class="bubble-note${isDone ? ' bubble-note--done' : ''}">
+              <div class="bubble-note-head">
+                <span>Nota interna${msg.authorName ? ' · ' + escapeHtml(msg.authorName) : ''}</span>
+                ${isMine ? `
+                  <button type="button" class="note-action-btn" data-edit-note-id="${msg.id}" title="Editar nota">✎</button>
+                  <button type="button" class="note-action-btn" data-toggle-done-note-id="${msg.id}" data-done="${isDone ? '1' : '0'}" title="${isDone ? 'Reabrir' : 'Marcar como concluída'}">${isDone ? '↺' : '✓'}</button>
+                ` : ''}
+              </div>
               <div class="bubble-note-text">${escapeHtml(msg.text)}</div>
-              <div class="bubble-note-time">${formatTime(msg.createdAt)}</div>
+              <div class="bubble-note-time">
+                ${formatTime(msg.createdAt)}${wasEdited ? ` · <button type="button" class="note-edited-tag" data-show-revisions-id="${msg.id}">editada</button>` : ''}${isDone ? ' · concluída' : ''}
+              </div>
             </div>
           </div>
         `;
@@ -3548,9 +3620,111 @@
           row.classList.add('flash');
           setTimeout(() => row.classList.remove('flash'), 1200);
         }
+        return;
+      }
+
+      // ---------- Editar/concluir nota interna ----------
+      const editNoteBtn = e.target.closest('[data-edit-note-id]');
+      if (editNoteBtn) {
+        editingNoteId = editNoteBtn.getAttribute('data-edit-note-id');
+        renderMessages();
+        return;
+      }
+      const cancelEditBtn = e.target.closest('[data-cancel-edit-note-id]');
+      if (cancelEditBtn) {
+        editingNoteId = null;
+        renderMessages();
+        return;
+      }
+      const saveNoteBtn = e.target.closest('[data-save-note-id]');
+      if (saveNoteBtn) {
+        saveEditedNote(saveNoteBtn.getAttribute('data-save-note-id'));
+        return;
+      }
+      const toggleDoneBtn = e.target.closest('[data-toggle-done-note-id]');
+      if (toggleDoneBtn) {
+        toggleNoteCompleted(toggleDoneBtn.getAttribute('data-toggle-done-note-id'), toggleDoneBtn.getAttribute('data-done') !== '1');
+        return;
+      }
+      const revBtn = e.target.closest('[data-show-revisions-id]');
+      if (revBtn) {
+        showNoteRevisions(revBtn.getAttribute('data-show-revisions-id'));
       }
     });
   }
+
+  // ---------------------------------------------------------
+  // Editar/concluir nota interna — PUT/POST em /api/internal-notes/:id
+  // (rotas novas, backend já exige ser o autor original; a UI só espelha
+  // essa regra escondendo os botões pra quem não é, ver renderMessages).
+  // ---------------------------------------------------------
+  async function saveEditedNote(noteId) {
+    const el = document.querySelector(`[data-edit-textarea-id="${CSS.escape(noteId)}"]`);
+    if (!el) return;
+    const text = el.value.trim();
+    if (!text) return;
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, text }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao editar nota');
+      const idx = state.internalNotes.findIndex((n) => n.id === data.note.id);
+      if (idx !== -1) state.internalNotes[idx] = data.note;
+      editingNoteId = null;
+      renderMessages();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  async function toggleNoteCompleted(noteId, completed) {
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, completed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao atualizar nota');
+      const idx = state.internalNotes.findIndex((n) => n.id === data.note.id);
+      if (idx !== -1) state.internalNotes[idx] = data.note;
+      renderMessages();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  async function showNoteRevisions(noteId) {
+    const a = state.active;
+    const modal = document.getElementById('noteRevisionsModal');
+    const list = document.getElementById('noteRevisionsList');
+    list.innerHTML = '<p class="empty">Carregando…</p>';
+    modal.classList.add('open');
+    try {
+      const res = await apiFetch(`${API_ROOT}/internal-notes/${noteId}/revisions?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao carregar histórico');
+      const revisions = data.revisions || [];
+      list.innerHTML = revisions.length
+        ? revisions.map((r) => `
+            <div class="rev-item">
+              <div class="rev-text">${escapeHtml(r.text)}</div>
+              <div class="rev-time">${formatDayLabel(r.editedAt)} · ${formatTime(r.editedAt)}</div>
+            </div>
+          `).join('')
+        : '<p class="empty">Nenhuma edição anterior.</p>';
+    } catch (err) {
+      list.innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
+    }
+  }
+  document.getElementById('noteRevisionsCancel').addEventListener('click', () => {
+    document.getElementById('noteRevisionsModal').classList.remove('open');
+  });
 
   async function reactToMessage(msgId, fromMe, emoji) {
     const a = state.active;
@@ -4241,6 +4415,16 @@
       if (payload.type === 'internal-note' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
         const alreadyShown = state.internalNotes.some((n) => n.id === payload.note.id);
         if (!alreadyShown) { state.internalNotes.push(payload.note); renderMessages(); }
+      }
+
+      // Nota editada ou marcada/desmarcada como concluída em OUTRA aba —
+      // mesmo type pros dois casos (o backend manda 'internal-note-updated'
+      // tanto de PUT /:id quanto de POST /:id/complete): do ponto de vista
+      // do client, os dois são "esta nota mudou, substitua pelo objeto
+      // novo". Mesma guarda dupla sessionId+phone de 'internal-note' acima.
+      if (payload.type === 'internal-note-updated' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+        const idx = state.internalNotes.findIndex((n) => n.id === payload.note.id);
+        if (idx !== -1) { state.internalNotes[idx] = payload.note; renderMessages(); }
       }
     };
 

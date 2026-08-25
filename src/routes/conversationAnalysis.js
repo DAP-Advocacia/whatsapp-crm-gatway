@@ -61,7 +61,14 @@ function createConversationAnalysisRouter() {
       const [instances, employees] = await Promise.all([instancesStore.listAll(), listEmployees()]);
       const nameByOwnerId = new Map((employees || []).map((e) => [ownerIdFor(e.id), e.name]));
       res.json({
-        instances: instances.map((i) => ({ ...i, ownerName: nameByOwnerId.get(i.ownerId) || i.ownerId })),
+        // Instância "órfã" (ownerId null — removida de `instances`, mas com
+        // histórico real preservado, ver instancesStore.listAll) nunca teria
+        // match no mapa de nomes; sem este `isOrphan` explícito o fallback
+        // `|| i.ownerId` mostraria "null" literal no dropdown.
+        instances: instances.map((i) => ({
+          ...i,
+          ownerName: i.isOrphan ? i.label : (nameByOwnerId.get(i.ownerId) || i.ownerId),
+        })),
       });
     } catch (err) {
       console.error('[conversation-analysis:instances] erro:', err.message);
