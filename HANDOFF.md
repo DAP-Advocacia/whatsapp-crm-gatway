@@ -9489,3 +9489,60 @@ dos pendentes → aparece nos aprovados); regressão das 4 rotas antigas
 do Agente de IA confirmada sem quebra. Banco varrido ao final —
 nenhum resíduo de teste em nenhuma das 6 tabelas do Agente de IA.
 
+### Parte EM — Migra criação de negócio de LP: do envio do formulário pro momento em que o lead responde (2026-08-26)
+
+Última pendência real do plano da Parte EJ, agora sem bloqueio
+(webhook e categoria 628 já validados na Parte EK): `POST /:slug`
+(`src/routes/leads.js`) ainda criava contato+negócio no Bitrix no
+**envio do formulário**, mesmo que o lead nunca respondesse à
+boas-vindas — diferente do fluxo de Campanha (que só cria quando o
+lead manda a 1ª mensagem de verdade, via `agentDispatch.js`).
+
+**Achado crítico antes de mexer** (não estava detalhado no plano
+original): `handleNewLeadMessage` só criava negócio se
+`agentConfig.active` fosse `true` naquela instância (`if
+(!config.active) return` logo no topo). Migrar `leads.js` sem mais
+nada teria feito LP em instância **sem** o Agente de IA ativado parar
+de criar negócio quando o lead responde — mudança de comportamento
+não pedida. Confirmado com o usuário: negócio deve continuar sendo
+criado **sempre** que o lead responde, com ou sem IA ativa; só a
+**resposta automática** da IA (não a criação do card) deve continuar
+condicionada a `active`.
+
+**Correção**: `handleNewLeadMessage` (`src/agentDispatch.js`)
+dividida em 2 responsabilidades — a função principal agora sempre
+cria negócio + aplica tag de origem (LP ou Campanha), incondicional;
+uma sub-função nova `dispatchAgentReplyIfActive` isola o que antes
+era condicionado (`setAgentEnabled` + geração de resposta), só
+chamada se `config.active`. `resolveLeadOrigin` passou a trazer
+também `submissionId` (id da linha em `lead_form_submissions`) — usado
+pra gravar `bitrix_deal_id`/`bitrix_contact_id` de volta na própria
+submissão do formulário no momento em que o negócio é criado (mesmo
+campo que `leads.js` preenchia antes, só que agora "quando responde",
+não "quando envia").
+
+`src/routes/leads.js`: removido o bloco inteiro de criação de
+negócio/contato no Bitrix do `POST /:slug` — a rota agora só salva a
+submissão, aplica a tag da LP e tenta a boas-vindas (tudo já existente,
+inalterado). Imports órfãos (`bitrixCrm`, `logMessageToTimeline`)
+removidos. `bitrixCrm.createBitrixArtifactsForLead` fica órfã no
+código (decisão deliberada de não apagar sem necessidade, mesma
+prática já usada com `createDealForLead`).
+
+**Validação**: sintaxe validada em todos os arquivos tocados; testado
+o cenário mais crítico — LP **sem** Agente de IA ativo, lead responde,
+confirmado que o negócio É criado (`bitrix_deal_id`/`bitrix_contact_id`
+gravados corretamente na submissão) e `agent_enabled` continua `null`
+(IA não assume); testado o cenário complementar — LP **com** IA ativa,
+confirmado negócio criado E `agent_enabled: true`; testado o
+enfileiramento em `agent_retry_queue` isoladamente (confirma que a
+degradação graciosa continua funcionando); testado regressão do fluxo
+de Campanha (sem formulário) — `origin.submissionId: null` correto,
+tag "Campanha" aplicada, sem quebra; testada a rota `POST /:slug` via
+servidor HTTP real de ponta a ponta — submissão salva,
+`bitrix_deal_id: null` (confirma que não cria mais ali), tag da LP
+aplicada. Banco varrido ao final, zero resíduo de teste.
+
+**Fecha a última pendência técnica do plano original da Parte EJ.**
+Não há mais nenhum item bloqueado do desenho inicial do Agente de IA.
+

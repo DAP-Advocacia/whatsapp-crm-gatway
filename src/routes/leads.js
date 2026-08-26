@@ -2,8 +2,6 @@ const express = require('express');
 const leadForms = require('../leadForms');
 const contacts = require('../contacts');
 const store = require('../store');
-const bitrixCrm = require('../bitrixCrm');
-const { logMessageToTimeline } = require('../bitrix');
 const { getOwnNumbersBySession } = require('../ownNumbers');
 
 /**
@@ -105,35 +103,20 @@ function createLeadsRouter({ sessions, broadcast }) {
         console.error('[leads:submit] falha ao enviar mensagem de boas-vindas:', err.message);
       }
 
-      const submissionId = await leadForms.recordSubmission(form.id, { name: cleanName, phone: cleanPhone, contactId: contact.id, whatsappSent });
+      await leadForms.recordSubmission(form.id, { name: cleanName, phone: cleanPhone, contactId: contact.id, whatsappSent });
 
-      // Responde ANTES das chamadas ao Bitrix (até 4 roundtrips HTTP ≈ 2-4s;
-      // o visitante da LP não deve esperar por isso). O lead local já está
-      // gravado acima — falha no Bitrix nunca perde o lead, só deixa
-      // bitrix_deal_id NULL.
+      // NÃO cria negócio/contato no Bitrix aqui mais (Parte EM) — isso
+      // migrou pro momento em que o LEAD RESPONDE à boas-vindas, via
+      // src/agentDispatch.js::handleNewLeadMessage (chamado de dentro
+      // de onMessage em src/server.js), unificando com o mesmo gatilho
+      // já usado pelo fluxo de Campanha. Roda SEMPRE que o lead
+      // responde, com ou sem o Agente de IA ativo na instância — só a
+      // RESPOSTA AUTOMÁTICA da IA (não a criação do card) depende de
+      // agentConfig.active. Motivo da mudança: antes, um lead que
+      // preenchia o formulário mas nunca respondia à boas-vindas já
+      // virava negócio no Bitrix mesmo sem nenhuma interação real —
+      // agora só vira negócio quando existe conversa de fato.
       res.json({ ok: true });
-
-      (async () => {
-        const { contactId, dealId } = await bitrixCrm.createBitrixArtifactsForLead({
-          form,
-          name: cleanName,
-          phone: cleanPhone,
-        });
-        if (dealId || contactId) {
-          await leadForms.setSubmissionBitrixIds(submissionId, { dealId, contactId });
-        }
-        if (dealId) {
-          // Liga a conversa de WhatsApp ao negócio recém-criado — a partir
-          // daqui o logMessageToTimeline existente (mensagens enviadas/
-          // recebidas) passa a alimentar a timeline desse negócio.
-          await store.setDealForPhone(form.sessionId, cleanPhone, dealId);
-          // A mensagem de boas-vindas saiu ANTES do vínculo existir — loga
-          // retroativamente pra timeline não nascer vazia.
-          if (whatsappSent && welcomeText) {
-            await logMessageToTimeline(dealId, welcomeText, 'out');
-          }
-        }
-      })().catch((err) => console.error('[leads:bitrix] falha ao criar artefatos no Bitrix:', err.message));
     } catch (err) {
       console.error('[leads:submit] erro:', err.message);
       res.status(502).json({ error: err.message });

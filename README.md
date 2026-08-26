@@ -992,20 +992,30 @@ formulários.
 - **Visualizações**: cada carregamento da página pública incrementa um contador
   diário (`lead_form_views`, via `GET /api/leads/:slug/config`) — métrica de
   tendência, sem dedupe de visitante (reloads/bots contam).
-- **Negócio no Bitrix por lead, num pipeline ÚNICO compartilhado**: cada submissão
-  cria, em background (depois da resposta ao visitante, best-effort — falha no
-  Bitrix **nunca perde o lead local**: `lead_form_submissions` grava sempre,
-  `bitrix_deal_id` fica NULL se o Bitrix falhar): contato no CRM (reusa por telefone
-  via `crm.duplicate.findbycomm`, senão `crm.contact.add`) e UM negócio na categoria
-  fixa `BITRIX_LEADS_CATEGORY_ID` (a MESMA pra todas as LPs), **atribuído ao SDR
-  dono da LP** (`ASSIGNED_BY_ID` = sufixo do `ownerId`). A visibilidade "cada SDR só
-  vê os próprios leads" é resolvida por **permissão nativa do Bitrix** (CRM >
-  Permissões, escopo "somente próprios" pro papel do SDR) — configuração manual no
-  portal, fora do alcance da API. O deal também é vinculado à conversa de WhatsApp
-  (`setDealForPhone`) — a partir daí a timeline do negócio recebe as mensagens
-  trocadas (feature já existente), incluindo a de boas-vindas retroativamente. Um
-  único link **"Ver leads no Bitrix"** (não mais um por LP) aparece no topo da lista
-  de formulários, apontando pro kanban dessa categoria.
+- **Negócio no Bitrix por lead, num pipeline ÚNICO compartilhado**: contato no CRM
+  (reusa por telefone via `crm.duplicate.findbycomm`, senão `crm.contact.add`) e UM
+  negócio na categoria fixa `BITRIX_LEADS_CATEGORY_ID` (a MESMA pra todas as LPs e
+  pro Agente de IA, §14.7), **atribuído ao SDR dono da LP** (`ASSIGNED_BY_ID` =
+  sufixo do `ownerId`). A visibilidade "cada SDR só vê os próprios leads" é
+  resolvida por **permissão nativa do Bitrix** (CRM > Permissões, escopo "somente
+  próprios" pro papel do SDR) — configuração manual no portal, fora do alcance da
+  API. O deal também é vinculado à conversa de WhatsApp (`setDealForPhone`) — a
+  partir daí a timeline do negócio recebe as mensagens trocadas (feature já
+  existente). Um único link **"Ver leads no Bitrix"** (não mais um por LP) aparece
+  no topo da lista de formulários, apontando pro kanban dessa categoria.
+  - **Gatilho: quando o LEAD RESPONDE, não quando o formulário é enviado**
+    (mudou na Parte EM, 2026-08-26 — antes o negócio nascia no próprio envio do
+    formulário). O envio salva o lead local + tag da LP + tenta a boas-vindas;
+    o negócio só é criado depois, quando o visitante manda a 1ª mensagem de
+    verdade respondendo — mesmo gatilho já usado pelo fluxo de Campanha (número
+    direto, sem formulário), via `agentDispatch.js::handleNewLeadMessage`
+    (chamado de dentro de `onMessage`, `src/server.js`). Roda **sempre** que o
+    lead responde, com ou sem o Agente de IA ativo naquela instância — só a
+    *resposta automática* da IA (não a criação do card) depende de
+    `agentConfig.active`. `bitrix_deal_id`/`bitrix_contact_id` continuam
+    gravados de volta em `lead_form_submissions` nesse momento (não mais no
+    envio). Falha no Bitrix **nunca perde o lead local** — a submissão já foi
+    gravada antes, `bitrix_deal_id` só fica `NULL`.
   - **Histórico de arquitetura**: a primeira versão criava um pipeline NOVO por LP
     (`crm.category.add`) — abandonado. Uma automação de controle de duplicidade já
     existente neste portal (checa o campo "Número do Processo") apaga automaticamente
@@ -1014,9 +1024,8 @@ formulários.
     HANDOFF.md Partes AT/AV para o diagnóstico completo). Pivotado pra um pipeline
     único e fixo, decisão do usuário — resolve o problema de raiz (não cria mais
     pipeline novo via API) e simplifica a visibilidade pra permissão nativa do CRM.
-- **Quando alguém preenche** (fluxo local, inalterado): cria/atualiza o Contato e
-  tenta mandar a boas-vindas pela instância configurada — offline não bloqueia o
-  lead.
+- **Quando alguém preenche**: cria/atualiza o Contato, aplica a tag da LP e tenta
+  mandar a boas-vindas pela instância configurada — offline não bloqueia o lead.
 - Rotas públicas (`/api/leads/*`) ficam **fora** de `requireAuth` de propósito — quem
   preenche o formulário nunca autenticou com nada, o `slug` é o único "segredo" de
   acesso, como qualquer link público de formulário (ver §16).
@@ -2022,7 +2031,7 @@ acesso, como qualquer link público de formulário.
 | Rota | Método | Uso |
 |---|---|---|
 | `leads/:slug/config` | GET | `{ title, subtitle, active, accentColor, logoUrl, heroImageUrl, contactPhone, testimonials, stats, differentials, faq, storyTitle, storyText }` — 404 se o slug não existir. Também incrementa a visualização do dia (`lead_form_views`, best-effort). `contactPhone` vem da instância conectada (`getOwnNumbersBySession`, ver `src/ownNumbers.js`), `null` se nunca pareada. |
-| `leads/:slug` | POST | Body `{ name?, phone }`. Cria/atualiza o contato e tenta mandar a mensagem de boas-vindas por WhatsApp (best-effort — não falha se a instância estiver offline). Depois de responder, cria em background contato+negócio(s) no Bitrix (ver §11.5). 404 se o formulário não existir ou estiver inativo. |
+| `leads/:slug` | POST | Body `{ name?, phone }`. Cria/atualiza o contato, aplica a tag da LP e tenta mandar a mensagem de boas-vindas por WhatsApp (best-effort — não falha se a instância estiver offline). Não cria negócio no Bitrix aqui — isso só acontece quando o lead RESPONDE à boas-vindas (ver §11.5, HANDOFF Parte EM). 404 se o formulário não existir ou estiver inativo. |
 
 Fora de `/api`: `GET /t/:slug` (público, `src/server.js`) — URL única do teste A/B;
 302 pra `/l/<slug>` da variante sorteada (cookie sticky `ab_<id>`, 90 dias; teste
@@ -2663,12 +2672,17 @@ reintroduzidos por engano:
   atualizando a variável direto no painel + reiniciando o processo;
   validado com um 2º teste real (negócio criado na 628 de verdade,
   sem "FUNIL DE TESTE"). Ver HANDOFF Parte EK.
-- [ ] **Agente de IA (§14.7) — `src/routes/leads.js` ainda cria o
-  negócio no `POST /:slug`** (envio do formulário de LP), não quando o
-  lead responde — a migração desse gatilho pra `agentDispatch` (parte
-  do plano aprovado) segue pendente; não há mais bloqueio técnico
-  (webhook e categoria já validados de ponta a ponta, Parte EK), só
-  ainda não foi feita. Ver HANDOFF Partes EJ/EK.
+- [x] ~~Agente de IA (§14.7) — `src/routes/leads.js` ainda cria o
+  negócio no `POST /:slug`~~ — migrado: o negócio agora é criado
+  quando o lead RESPONDE à boas-vindas (via `agentDispatch.js`, mesmo
+  gatilho já usado por Campanha), não mais no envio do formulário.
+  Roda **sempre**, com ou sem o Agente de IA ativo naquela instância —
+  só a resposta automática da IA continua condicionada a
+  `agentConfig.active` (achado importante durante a migração: sem essa
+  separação, LP em instância sem IA teria parado de criar negócio).
+  `bitrix_deal_id`/`bitrix_contact_id` continuam gravados na própria
+  submissão do formulário, só que depois, no momento da resposta. Ver
+  HANDOFF Parte EM.
 - [ ] **Agente de IA (§14.7) — auditar outros pontos que aplicam tag
   fora de ação direta do usuário na tela** — a tag de origem aplicada
   pelo Agente de IA (background, sem UI aberta) ficava sem aparecer no

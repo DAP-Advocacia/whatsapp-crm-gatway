@@ -5,26 +5,42 @@ const agentConfigStore = require('./agentConfig');
 const { generateAgentReply } = require('./agent');
 const bitrixCrm = require('./bitrixCrm');
 const agentRetryQueue = require('./agentRetryQueue');
+const leadForms = require('./leadForms');
 
 /**
  * Orquestração central do Agente de IA — chamado de dentro de
  * onMessage (src/server.js) quando uma mensagem NOVA de um lead
- * (conversa que não existia antes) chega. Decide se o agente deve
- * assumir, cria o card no Bitrix (categoria única, BITRIX_LEADS_
- * CATEGORY_ID), aplica a tag de origem, e dispara a resposta —
- * sempre best-effort: uma falha aqui nunca derruba o resto do
- * processamento de onMessage, que já rodou antes desta chamada
+ * (conversa que não existia antes) chega, de QUALQUER origem (LP ou
+ * Campanha). Sempre best-effort: uma falha aqui nunca derruba o resto
+ * do processamento de onMessage, que já rodou antes desta chamada
  * (broadcast/timeline/notificação de mensagem recebida).
+ *
+ * Duas responsabilidades DELIBERADAMENTE separadas (ver HANDOFF Parte
+ * EM):
+ * - Criação do card no Bitrix + tag de origem — roda SEMPRE que um
+ *   lead novo manda mensagem, com ou sem o Agente de IA ativo naquela
+ *   instância. Antes de existir handleNewLeadMessage, isso era feito
+ *   no ENVIO DO FORMULÁRIO (src/routes/leads.js), só pra LP; migrado
+ *   pra "quando o lead responde" pra unificar com o fluxo de Campanha
+ *   (que nunca teve formulário) — mas o card continua sendo criado
+ *   independente de IA, exatamente como sempre foi pra quem não usa
+ *   Agente de IA.
+ * - Resposta automática da IA — só roda se `agentConfig.active` for
+ *   `true` pra aquela instância (handleAgentReplyForNewLead).
  */
 
 // Distingue a origem do lead pro rótulo do card — telefone com linha
 // em lead_form_submissions (passou pelo formulário de uma LP) = "LP:
 // <nome da LP>"; senão = "Campanha" (hipótese mais provável pra um
 // número desconhecido mandando mensagem direta, sem form nenhum —
-// decisão confirmada com o usuário).
+// decisão confirmada com o usuário). `submissionId` (só presente pra
+// 'lp') é usado por handleNewLeadMessage pra gravar o vínculo com o
+// negócio Bitrix de volta na PRÓPRIA submissão do formulário (mesmo
+// campo que src/routes/leads.js preenchia antes da Parte EM, só que
+// agora no momento em que o lead responde, não no envio do form).
 async function resolveLeadOrigin(phone) {
   const { rows } = await pool.query(
-    `select lf.name as "formName"
+    `select s.id as "submissionId", lf.name as "formName"
      from lead_form_submissions s
      join lead_forms lf on lf.id = s.form_id
      where s.phone = $1
@@ -32,36 +48,39 @@ async function resolveLeadOrigin(phone) {
      limit 1`,
     [phone]
   );
-  return rows[0] ? { kind: 'lp', label: rows[0].formName } : { kind: 'campanha', label: 'Campanha' };
+  return rows[0]
+    ? { kind: 'lp', label: rows[0].formName, submissionId: rows[0].submissionId }
+    : { kind: 'campanha', label: 'Campanha', submissionId: null };
 }
 
 // Chamado de dentro de onMessage toda vez que uma mensagem 'in' chega
-// numa conversa RECÉM-CRIADA. Só age se a instância tiver o agente
-// ativo — instância sem config, ou com active:false, mantém o
-// comportamento de sempre (sem negócio novo, sem tag, sem resposta
-// automática) — o Agente de IA nunca muda nada numa instância que não
-// optou por ele explicitamente.
+// numa conversa RECÉM-CRIADA (LP ou Campanha) — SEMPRE, com ou sem o
+// Agente de IA ativo na instância. Cria o card no Bitrix + aplica a
+// tag de origem incondicionalmente (era o comportamento de
+// src/routes/leads.js até a Parte EM, só pra LP, disparado no envio
+// do formulário — migrado pra cá, "quando o lead responde", pra
+// unificar com o fluxo de Campanha, que nunca teve formulário). A
+// RESPOSTA AUTOMÁTICA da IA, essa sim, continua condicionada a
+// agentConfig.active (ver dispatchAgentReplyIfActive abaixo) — só
+// isso muda de comportamento por instância, nunca a criação do card.
 async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageText }) {
-  const config = await agentConfigStore.get(sessionId);
-  if (!config.active) return;
-
-  // Marca ANTES de gerar a resposta — evita corrida se 2 mensagens do
-  // mesmo lead novo chegarem quase juntas (ex: manda 2 mensagens
-  // seguidas antes da 1ª resposta sair): a 2ª chamada veria
-  // conversationExistedBefore=true (já que a conversa já foi criada
-  // pela 1ª) e nunca chegaria a re-executar este bloco.
-  await store.setAgentEnabled(sessionId, phone, true);
-
   const origin = await resolveLeadOrigin(phone);
   const ownerId = await instancesStore.ownerOf(sessionId);
 
   // Criação do card no Bitrix é BEST-EFFORT e EM BACKGROUND — nunca
-  // atrasa a resposta da IA ao lead (mesmo padrão já usado pelo fluxo
-  // de LP hoje, src/routes/leads.js). Falha aqui nunca impede o
-  // agente de responder.
+  // atrasa nada do resto do processamento de onMessage nem a possível
+  // resposta da IA.
   bitrixCrm.createDealForNewLead({ ownerId, phone, pushName, origin })
-    .then(({ dealId }) => {
-      if (dealId) return store.setDealForPhone(sessionId, phone, dealId);
+    .then(async ({ contactId, dealId }) => {
+      if (dealId) await store.setDealForPhone(sessionId, phone, dealId);
+      // Se veio de LP, grava o vínculo de volta na PRÓPRIA submissão
+      // do formulário (bitrix_deal_id/bitrix_contact_id em
+      // lead_form_submissions) — mesmo campo que existia antes da
+      // Parte EM, só que preenchido agora (quando o lead responde),
+      // não no envio do form.
+      if (origin.submissionId && (dealId || contactId)) {
+        await leadForms.setSubmissionBitrixIds(origin.submissionId, { dealId, contactId });
+      }
     })
     .catch((err) => console.error(`[agent-dispatch] falha ao criar negócio no Bitrix (${sessionId}/${phone}):`, err.message));
 
@@ -79,6 +98,26 @@ async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageTex
       if (_broadcast) _broadcast(sessionId, phone, { type: 'tags-updated', tags: await store.getConversationTags(sessionId, phone) });
     })
     .catch((err) => console.error(`[agent-dispatch] falha ao aplicar tag de origem (${sessionId}/${phone}):`, err.message));
+
+  await dispatchAgentReplyIfActive({ sessionId, phone, leadMessageText });
+}
+
+// Resposta automática — só entra em ação se a instância tiver o
+// Agente de IA ativo; instância sem config, ou com active:false,
+// nunca marca agent_enabled nem gera resposta (o Agente de IA nunca
+// muda o comportamento de conversa numa instância que não optou por
+// ele explicitamente — só a criação do card acima, que é
+// independente disso, ver comentário de handleNewLeadMessage).
+async function dispatchAgentReplyIfActive({ sessionId, phone, leadMessageText }) {
+  const config = await agentConfigStore.get(sessionId);
+  if (!config.active) return;
+
+  // Marca ANTES de gerar a resposta — evita corrida se 2 mensagens do
+  // mesmo lead novo chegarem quase juntas (ex: manda 2 mensagens
+  // seguidas antes da 1ª resposta sair): a 2ª chamada veria
+  // conversationExistedBefore=true (já que a conversa já foi criada
+  // pela 1ª) e nunca chegaria a re-executar este bloco.
+  await store.setAgentEnabled(sessionId, phone, true);
 
   await dispatchAgentReply({ sessionId, phone, leadMessageText });
 }
