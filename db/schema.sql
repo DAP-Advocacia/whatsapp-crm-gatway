@@ -942,3 +942,143 @@ create table if not exists instance_metrics_daily (
   created_at timestamptz not null default now(),
   primary key (instance_id, snapshot_date)
 );
+
+-- ================================================================
+-- Agente de IA — atendimento automático de LEADS NOVOS via WhatsApp
+-- (tela dedicada public/agente-ia.html). Responde AUTOMATICAMENTE
+-- (não é sugestão que um humano aprova), focado em TRIAGEM INICIAL —
+-- nunca em conversa já existente de cliente antigo.
+--
+-- Gatilho: quando o LEAD MANDA MENSAGEM (não mais quando o formulário
+-- de LP é enviado, que é como a criação de negócio funcionava antes
+-- desta feature) — cobre 2 origens: lead de LP (form -> boas-vindas
+-- fixa, inalterada -> aguarda resposta -> IA assume) e lead de
+-- Campanha/mensagem direta (número desconhecido manda a 1ª mensagem
+-- sem ter passado por formulário nenhum). A IA nunca fala primeiro.
+--
+-- A IA nunca para de responder sozinha por heurística de linguagem —
+-- só por: (a) botão manual "Desativar IA nesta conversa"
+-- (conversations.agent_enabled) ou (b) HUMANO mandar mensagem manual
+-- na própria conversa (detectado em POST /send e /send-media,
+-- src/routes/whatsapp.js). Nunca reativa sozinha depois de false.
+-- ================================================================
+
+-- pgvector — necessário pra busca semântica na base de conhecimento
+-- (embeddings da OpenAI, text-embedding-3-small, 1536 dimensões).
+-- Confirmado disponível no catálogo de extensões do Supabase deste
+-- projeto (versão 0.8.2, nunca habilitada antes) — roda com o mesmo
+-- DIRECT_URL já usado por toda migração deste arquivo.
+create extension if not exists vector;
+
+-- Controle do agente POR CONVERSA (não por instância) — cada
+-- conversa nova de lead começa com agent_enabled = null (estado
+-- "nunca decidido"; conversa antiga de cliente já existente NUNCA
+-- ganha valor aqui, fica null pra sempre), vira true no momento em
+-- que o agente assume (src/agentDispatch.js) e false só quando: o
+-- usuário aperta "Desativar IA nesta conversa" no Chat, OU um humano
+-- manda mensagem manual nessa conversa (auto-desativação). NUNCA
+-- volta a true sozinho depois de false — reativar exige ação manual
+-- explícita.
+-- `agent_activated_at`: quando a IA passou a responder esta conversa
+-- pela 1ª vez — só pra diagnóstico/exibição, nunca pra lógica.
+alter table conversations add column if not exists agent_enabled boolean;
+alter table conversations add column if not exists agent_activated_at timestamptz;
+
+-- Configuração do Agente de IA POR INSTÂNCIA (não por owner) — cada
+-- número de WhatsApp conectado (instances.id, mesmo id usado como
+-- session_id em todo o resto do app) tem sua própria configuração:
+-- ativo/inativo, texto livre de base de conhecimento (colado direto
+-- no prompt, sem embeddings) e a mensagem de sistema (persona/tom)
+-- que a IA deve seguir. PK em session_id (mesmo padrão de
+-- `instances`, não um id bigserial à parte) — uma linha por
+-- instância, nunca mais de uma config simultânea faz sentido aqui.
+-- `active`: false por padrão — a feature NUNCA liga sozinha numa
+-- instância só porque a tabela existe; precisa ser ativada
+-- explicitamente na tela /agente-ia.html.
+create table if not exists agent_config (
+  session_id text primary key references instances(id) on delete cascade,
+  active boolean not null default false,
+  system_message text,
+  knowledge_text text,
+  updated_at timestamptz not null default now()
+);
+
+-- Documentos enviados como base de conhecimento (PDF/DOCX/TXT/MD) —
+-- por instância (mesma FK de agent_config). `content` é o TEXTO JÁ
+-- EXTRAÍDO do arquivo (via pdf-parse/mammoth/leitura direta pra
+-- txt/md, ver src/knowledgeDocs.js) — nunca o binário original em si
+-- (isso fica só no Storage, ver `storage_path`, reaproveitando
+-- saveMedia de src/media.js). `storage_path` permite reprocessar o
+-- arquivo original no futuro sem pedir upload de novo. `status`:
+-- 'processing' logo após o upload (extração/chunking/embeddings
+-- ainda rodando em background), 'ready' quando os chunks já estão
+-- prontos pra busca, 'error' se a extração falhou (ex: PDF escaneado
+-- sem texto) — `error_message` guarda o motivo pra exibir na lista.
+create table if not exists agent_knowledge_docs (
+  id bigserial primary key,
+  session_id text not null references instances(id) on delete cascade,
+  file_name text not null,
+  file_type text not null check (file_type in ('pdf', 'docx', 'txt', 'md')),
+  content text,
+  storage_path text,
+  status text not null default 'processing' check (status in ('processing', 'ready', 'error')),
+  error_message text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_agent_knowledge_docs_session on agent_knowledge_docs (session_id, created_at desc);
+
+-- Chunks de um documento, cada um com seu próprio embedding — a
+-- unidade real de busca semântica (nunca o documento inteiro de uma
+-- vez: um PDF de 40 páginas não cabe inteiro num prompt, e buscar por
+-- similaridade em pedaços menores acha o trecho relevante, não o
+-- documento inteiro). `chunk_index` preserva a ordem original dentro
+-- do documento (só pra eventual exibição ordenada/debug, não usado
+-- pra ranquear busca). `embedding vector(1536)`: dimensão fixa do
+-- modelo text-embedding-3-small da OpenAI (src/embeddings.js) — mudar
+-- de modelo de embedding no futuro exigiria migrar esta coluna (fora
+-- de escopo agora, mesma decisão implícita de fixar num modelo só que
+-- o resto do app já faz com gpt-4o-mini).
+create table if not exists agent_knowledge_chunks (
+  id bigserial primary key,
+  doc_id bigint not null references agent_knowledge_docs(id) on delete cascade,
+  session_id text not null references instances(id) on delete cascade,
+  chunk_index int not null,
+  content text not null,
+  embedding vector(1536),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_agent_knowledge_chunks_doc on agent_knowledge_chunks (doc_id, chunk_index);
+
+-- Índice IVFFlat pra acelerar a busca por similaridade (operador <=>,
+-- distância de cosseno, ver src/agentKnowledge.js) — sem ele o
+-- Postgres faz um scan sequencial calculando distância linha a linha.
+-- `lists = 100` é um valor de partida razoável pra poucos milhares de
+-- chunks (regra prática: lists ≈ sqrt(total de linhas) — reavaliar se
+-- o volume real crescer muito além disso).
+create index if not exists idx_agent_knowledge_chunks_embedding
+  on agent_knowledge_chunks using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+
+-- Fila de retry — resiliência pedida explicitamente: se TODAS as
+-- instâncias do usuário caírem no momento em que o lead manda
+-- mensagem, a intenção de resposta não pode se perder — fica
+-- registrada aqui e um worker (src/agentRetryWorker.js) reprocessa
+-- assim que a instância reconectar. `status`: 'pending' (aguardando
+-- instância voltar), 'sent' (worker confirmou envio), 'failed'
+-- (excedeu MAX_ATTEMPTS do worker — nunca fica tentando pra sempre).
+-- `attempts`/`last_error` só pra diagnóstico. Deliberadamente SEM
+-- guardar aqui a resposta já pronta da IA — o worker RE-GERA a
+-- resposta do zero no momento do reenvio, usando o histórico real da
+-- conversa até aquele ponto (que pode ter mudado enquanto a instância
+-- estava offline) — mais robusto que reenviar um texto potencialmente
+-- desatualizado.
+create table if not exists agent_retry_queue (
+  id bigserial primary key,
+  session_id text not null references instances(id) on delete cascade,
+  phone text not null,
+  status text not null default 'pending' check (status in ('pending', 'sent', 'failed')),
+  attempts int not null default 0,
+  last_error text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_agent_retry_queue_pending on agent_retry_queue (session_id, status) where status = 'pending';

@@ -60,6 +60,9 @@ pode rodar de novo a qualquer momento sem duplicar nada):
 | `campaigns` / `campaign_results` | Histórico de disparos em massa (cabeçalho + resultado por destinatário). |
 | `scheduled_campaigns` | Campanhas agendadas pra disparo futuro (Kanban/Calendário), com o payload inteiro (destinatários, texto, mídia em base64) até virarem um envio real. |
 | `notifications` | Histórico de notificações por dono (`owner_id`) — Central de Notificações (§15, Kanban/Calendário). |
+| `agent_config` | Config do Agente de IA por instância (§14.7) — `active` (nasce `false`), `system_message`, `knowledge_text`. |
+| `agent_knowledge_docs` / `agent_knowledge_chunks` | Documentos enviados pra base de conhecimento (status `processing`/`ready`/`error`) e os pedaços de texto com embedding (`vector(1536)`, extensão **pgvector**) usados na busca semântica — §14.7. |
+| `agent_retry_queue` | Fila de reenvio quando a instância cai no momento em que o lead manda a mensagem — a resposta é gerada de novo do zero ao reprocessar (§14.7). |
 
 - **Mídia** (imagem/áudio/vídeo trocada em conversas): bucket público `media` no
   Supabase Storage. `mediaUrl` nas mensagens é a URL pública direta do arquivo.
@@ -126,6 +129,9 @@ POST /campaign/schedule  →  scheduled_campaigns (status: scheduled)
   altas sem correção — Prototype Pollution, ReDoS), nem pra ler nem pra gerar planilha
 - **cors**, **dotenv**
 - **swagger-ui-express** — serve a documentação interativa da API em `GET /api-docs` (§16), a partir do spec OpenAPI em `src/openapi.js`
+- **pdf-parse** / **mammoth** — extração de texto de PDF/DOCX enviados na base de conhecimento do Agente de IA (§14.7); TXT/Markdown não precisam de parsing
+- **pgvector** (extensão do Postgres, habilitada via `create extension if not exists vector` em `db/schema.sql`) — busca semântica da base de conhecimento (§14.7), sem lib Node dedicada (query SQL direta via `pg`)
+- OpenAI (`OPENAI_API_KEY`) via `fetch` cru, sem SDK (`src/openai.js`/`src/embeddings.js`) — chat (`gpt-4o-mini`) e embeddings (`text-embedding-3-small`), modelo sempre fixo, sem opção de escolha em nenhuma tela
 
 Scripts (`package.json`):
 ```bash
@@ -1434,6 +1440,67 @@ mecanismo automático que os mantenha em dia sozinho.
 
 ---
 
+## 14.7. Agente de IA (`/agente-ia.html`)
+
+Atendimento automático de **leads novos** (nunca conversa já existente
+de cliente antigo) que chegam por WhatsApp — configurável por
+instância, desligado por padrão. Tela própria com sidebar (mesmo
+boilerplate de autenticação/paleta/heartbeat de `instances.html`),
+acessível pelo link "Agente de IA" logo abaixo de "Chat" em todas as
+16 telas com sidebar.
+
+- **Ativação por instância** (`agent_config`, PK `session_id`): toggle
+  "Agente ativo nesta instância" — **nasce desligado** (`active =
+  false`) pra toda instância nova; nenhum negócio é criado nem resposta
+  automática é enviada até o usuário ativar manualmente. Não existe
+  ativação em massa nem herança entre instâncias.
+- **Comportamento quando ativo**: a IA responde automaticamente à
+  **1ª mensagem** de um número nunca visto naquela instância — função é
+  triagem inicial, não a conversa inteira. Nunca fala primeiro (a
+  boas-vindas fixa de LP continua exatamente como sempre foi). Nunca se
+  desativa sozinha por conteúdo da mensagem (nada de heurística de
+  linguagem) — só para por (a) botão "Desativar IA nesta conversa" no
+  Chat, ou (b) automaticamente assim que um humano manda uma mensagem
+  manual naquela mesma conversa (evita os dois respondendo em cima um
+  do outro); depois de desativada, nunca reativa sozinha.
+- **Origem do lead**, refletida no card criado no Bitrix (categoria
+  **628**, mesma variável `BITRIX_LEADS_CATEGORY_ID` usada pelas LPs,
+  ver §11.5): telefone com submissão de formulário em
+  `lead_form_submissions` → título/tag "LP: `<nome da LP>`"; número
+  desconhecido mandando mensagem direta, sem formulário → "Campanha".
+  Criação do negócio + aplicação da tag rodam **em background**
+  (fire-and-forget), nunca atrasam a resposta da IA ao lead.
+- **Mensagem de sistema**: texto livre por instância, complementa (não
+  substitui) uma persona padrão embutida — em branco, a IA usa só a
+  persona padrão.
+- **Base de conhecimento — 3 capacidades juntas**:
+  1. **Texto livre**: colado direto na tela, sempre incluído no prompt
+     inteiro (sem busca, sem limite de relevância).
+  2. **Upload de documento** (PDF, DOCX, TXT ou Markdown): processado
+     em segundo plano — extrai o texto, quebra em pedaços de ~2000
+     caracteres (com sobreposição de 200), gera embedding de cada
+     pedaço (`text-embedding-3-small`) e grava tudo num banco vetorial
+     (pgvector). Lista de documentos mostra status (**Processando** →
+     **Pronto**/**Erro**, nunca fica preso em "Processando" pra
+     sempre) e botão de remover (apaga do banco E do arquivo original
+     no Storage).
+  3. **Busca semântica**: a cada mensagem do lead, os ~5 pedaços mais
+     relevantes de TODOS os documentos da instância entram no prompt
+     junto do texto livre — é isso que permite a IA responder com base
+     no conteúdo real de um PDF/DOCX enviado, não só o que foi digitado
+     na tela.
+- **Modelo fixo**, sem campo de escolha: `gpt-4o-mini` pras respostas,
+  `text-embedding-3-small` pros embeddings — mesmo par já usado no
+  resto do sistema (Análise de Conversas, Insights).
+- **Resiliência**: se a instância cai justo no momento em que o lead
+  manda a mensagem, o pedido entra numa fila de retry
+  (`agent_retry_queue`, até 3 tentativas) — assim que a instância
+  reconecta, a resposta é **gerada de novo do zero** (usa o histórico
+  real da conversa naquele momento, nunca reenvia um texto congelado
+  que pode ter ficado desatualizado).
+
+---
+
 ## 15. Central de Notificações — Kanban e Calendário (`/notifications.html`)
 
 O sino da sidebar (compartilhado pelas 8 páginas) deixou de abrir um dropdown
@@ -1677,6 +1744,7 @@ revelar que o recurso existe).
 | `/suggestions.html` | GET/POST | Sugestões — enviar e acompanhar status (ver §15.5). |
 | `/faq.html` | GET/POST | FAQ pública — perguntas já respondidas (ver §15.5). |
 | `/conversation-analysis.html` | GET/POST | Auditoria de Conversas — acesso restrito (ver §15.6). |
+| `/agente-ia.html` | GET/POST | Agente de IA — configuração por instância (ver §14.7). |
 | `/api/whatsapp/page-session/close` | POST | Fora do middleware `requireAuth` de propósito (ver tabela `/api/whatsapp/*` abaixo) — montada aqui, direto em `src/server.js`, ANTES do `app.use('/api/whatsapp', requireAuth, ...)`. |
 | `/*` (estático) | GET | Arquivos de `public/`. |
 
@@ -1744,6 +1812,22 @@ revelar que o recurso existe).
 | `admin/diagnostics/resolve-lid` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Só leitura (não altera nenhuma linha do banco, não envia nada pro WhatsApp). Body `{ sessionId, lidNumbers:[...] }` (máx. 500). Tenta resolver cada número do sistema LID do WhatsApp pro telefone real, via o socket JÁ CONECTADO daquela sessão (`signalRepository.lidMapping`) — `null` no resultado se não conseguir. 400 se a sessão não estiver `online` agora. Usada pra medir/corrigir conversas antigas salvas com o LID cru no lugar do telefone — ver `scripts/fix-lid-phones.js`/`fix-lid-contacts.js` e HANDOFF Parte CP. |
 | `admin/feed-post` | POST | Restrito a `requireSuperAdmin`. Body `{ title?, content }` — o nome é `content`, não `message` (ver §14.5, o bloqueio real descoberto em produção). Publica no Feed nativo do Bitrix (`src/bitrixFeed.js`) e registra em `feed_posts` (sucesso ou falha). 400 sem `content`; 502 se a publicação em si falhar (webhook não configurado, erro da API do Bitrix). |
 | `admin/feed-posts` | GET | Restrito a `requireSuperAdmin`. `{ posts:[{id, ownerId, title, message, bitrixPostId, status, error, createdAt}] }` — histórico LOCAL, últimos 100, mais recente primeiro. |
+
+### `/api/agent/*` (`src/routes/agent.js`)
+
+Ver §14.7. Toda rota exige `session` (query em GET/DELETE, body em
+POST/PUT) — `requireSession` confere que a instância pertence ao
+`ownerId` autenticado.
+
+| Rota | Método | Uso |
+|---|---|---|
+| `config?session=` | GET | `{ sessionId, active, systemMessage, knowledgeText, updatedAt }` — config atual do agente daquela instância. Instância sem linha em `agent_config` devolve `active:false` e os demais campos `null` (nunca 404). |
+| `config` | PUT | Body `{ session, active?, systemMessage?, knowledgeText? }`. Upsert dinâmico — só os campos presentes no body são alterados (mesmo padrão de `PUT /api/settings`); `active:false` explícito é tratado como valor real, não como "campo ausente". Nasce `active:false` na 1ª vez que a instância recebe qualquer config. |
+| `knowledge/upload` | POST | Body `{ session, fileName, fileType, dataBase64 }` (`fileType` é `pdf`/`docx`/`txt`/`md`; `dataBase64` sem o prefixo `data:...;base64,`, mesmo padrão de `/send-media`). Processa em segundo plano (extrai texto → chunка → embeddings → grava) e devolve `{ docId, status, chunkCount }` já com o resultado — não é assíncrono do ponto de vista do client, a resposta só volta depois de pronto (ou com `status:'error'`). |
+| `knowledge?session=` | GET | `{ docs:[{id, fileName, fileType, status, errorMessage, createdAt}] }` — mais recente primeiro. |
+| `knowledge/:docId?session=` | DELETE | Remove o documento (chunks em cascata) e o arquivo original do Storage. 404 se o documento não existir ou não for dessa instância. |
+| `conversations/toggle` | POST | Body `{ session, phone, enabled }`. Liga/desliga o agente numa conversa específica — usado pelo botão "Desativar IA nesta conversa" do Chat (§9) e pela auto-desativação quando um humano responde manualmente. |
+| `conversations/status?session=&phone=` | GET | `{ enabled }` — `null` se a conversa nunca teve o agente envolvido (cliente antigo, nunca foi lead novo com agente ativo). |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
@@ -1916,7 +2000,15 @@ src/
   scheduler.js          # dispara um agendamento (manual ou pelo poller) e faz o poller de 30s
   bitrix.js             # cliente REST mínimo p/ webhook do Bitrix (log opcional na timeline)
   bitrixCrm.js           # criação de contato/negócio no Bitrix pra LPs, pipeline único fixo (best-effort, nunca lança)
-  openai.js              # OpenAI (gpt-4o-mini): sugestão de análise de teste A/B, resumo de conversa do Chat e insights do Dashboard, sob demanda
+  openai.js              # OpenAI (gpt-4o-mini): sugestão de análise de teste A/B, resumo de conversa do Chat, insights do Dashboard + callOpenAIRaw (usado pelo Agente de IA, §14.7)
+  embeddings.js          # OpenAI (text-embedding-3-small): generateEmbedding/generateEmbeddingsBatch — base de conhecimento do Agente de IA (§14.7)
+  knowledgeDocs.js       # extração de texto (pdf-parse/mammoth/TXT-MD) + chunking + orquestra processUploadedDocument/listDocs/deleteDoc (§14.7)
+  agentKnowledge.js      # searchRelevantChunks — busca semântica via pgvector (<=>, cosseno) na base de conhecimento (§14.7)
+  agentConfig.js         # get/upsert da config do Agente de IA por instância (agent_config, upsert dinâmico por patch) (§14.7)
+  agent.js               # generateAgentReply — monta system message (persona+texto livre+chunks relevantes) + histórico, chama a OpenAI (§14.7)
+  agentDispatch.js        # orquestrador central: resolveLeadOrigin (LP vs Campanha), handleNewLeadMessage, dispatchAgentReply, cria negócio+tag em background (§14.7)
+  agentRetryQueue.js       # fila de retry (agent_retry_queue) — enqueue/listPendingForSession/markSent/markFailed, MAX_ATTEMPTS=3 (§14.7)
+  agentRetryWorker.js      # reprocessa a fila quando a instância volta a ficar online — re-gera a resposta do zero (§14.7)
   auth.js               # verifica access_token contra o Bitrix de verdade + emite/valida o token de app (sessão + API)
   authz.js              # confere que session/owner de cada request pertence ao dono autenticado
   adminAuth.js           # requireSuperAdmin — confere req.ownerId contra SUPER_ADMIN_OWNER_IDS (Painel Admin, §14.5)
@@ -1941,6 +2033,7 @@ src/
     conversationAnalysis.js # rotas REST /api/conversation-analysis/* (Auditoria de Conversas, acesso restrito, §15.6)
     cardGroup.js           # rotas REST /api/card-group/* ("Criar grupo" no card do negócio, §15.7)
     internalNotes.js        # rotas REST /api/internal-notes/* (nota interna, nunca visível ao cliente, §15.7)
+    agent.js               # rotas REST /api/agent/* (config, upload de base de conhecimento, toggle por conversa, §14.7)
 public/
   index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância, "Criar grupo"/switch Cliente-Grupo e nota interna no cabeçalho (§15.7)
   dashboard.html        # Análise de Conversas
@@ -1959,6 +2052,7 @@ public/
   admin.html             # Painel Admin — restrito a SUPER_ADMIN_OWNER_IDS (§14.5)
   conversation-analysis.html # Auditoria de Conversas — acesso restrito, leitura cross-instância (§15.6)
   apresentacao.html      # relatório executivo (scrollytelling) pra diretoria/CEO — sem sidebar, exportável em PDF
+  agente-ia.html         # Agente de IA — config por instância, base de conhecimento, upload de documentos (§14.7)
 db/
   schema.sql            # DDL de todas as tabelas
   migrate.js            # roda schema.sql contra o Postgres (usa DIRECT_URL)
@@ -2492,3 +2586,16 @@ reintroduzidos por engano:
   Aparelhos conectados) e à rede da máquina que roda o gateway; ver
   HANDOFF Parte AY, itens 257-258, e o caveat em §11.5 sobre a taxa de
   "entrega" não medir entrega de verdade.
+- [ ] **Agente de IA (§14.7) — webhook `BITRIX_WEBHOOK_URL` (CRM) com
+  credencial inválida** ("Invalid request credentials", confirmado via
+  curl direto contra o Bitrix, fora do código deste app) — bloqueia o
+  teste real de `createDealForNewLead` (criação de negócio quando um
+  lead novo responde à IA). Todo o resto do fluxo (config, base de
+  conhecimento, geração de resposta, fila de retry) já foi validado
+  sem depender dessa peça. Ver HANDOFF Parte EJ.
+- [ ] **Agente de IA (§14.7) — `src/routes/leads.js` ainda cria o
+  negócio no `POST /:slug`** (envio do formulário de LP), não quando o
+  lead responde — a migração desse gatilho pra `agentDispatch` (parte
+  do plano aprovado) foi deliberadamente adiada até o item acima ser
+  resolvido, pra não trocar uma via já validada (formulário) por uma
+  ainda bloqueada por credencial inválida. Ver HANDOFF Parte EJ.

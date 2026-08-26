@@ -103,6 +103,35 @@ async function createBitrixArtifactsForLead({ form, name, phone }) {
   return { contactId, dealId };
 }
 
+// Orquestração pro Agente de IA (src/agentDispatch.js) — dispara
+// quando o LEAD MANDA MENSAGEM (não mais quando um formulário de LP é
+// enviado, que é o gatilho de createBitrixArtifactsForLead acima).
+// Mesma categoria única (LEADS_CATEGORY_ID — 628 desde que o Agente de
+// IA existe, era 229 antes), mesmo contrato best-effort (nunca lança).
+// `origin`: { kind: 'lp'|'campanha', label } — já resolvido por
+// src/agentDispatch.js::resolveLeadOrigin, usado só pra compor
+// título/descrição do card, nunca pra decidir a categoria (sempre a
+// mesma pra ambas as origens, decisão confirmada com o usuário).
+async function createDealForNewLead({ ownerId, phone, pushName, origin }) {
+  const assignedById = (ownerId || '').split('_').pop() || null;
+  const title = origin.kind === 'lp' ? `LP: ${origin.label}` : 'Campanha';
+  const sourceDescription = origin.kind === 'lp' ? `LP: ${origin.label}` : 'Campanha/mensagem direta';
+
+  const contactId = await ensureBitrixContact({ name: pushName, phone });
+
+  const dealId = LEADS_CATEGORY_ID
+    ? await createDealForLead({
+        categoryId: LEADS_CATEGORY_ID,
+        contactId,
+        assignedById,
+        title,
+        sourceDescription,
+      })
+    : null;
+
+  return { contactId, dealId };
+}
+
 // Distribuição de negócios por etapa no Bitrix, pros `dealId` já vinculados
 // a conversas de WhatsApp (usado no gráfico "Leads por etapa" do dashboard
 // de Análise Conversas — src/routes/whatsapp.js GET /metrics). Best-effort
@@ -158,5 +187,6 @@ module.exports = {
   ensureBitrixContact,
   createDealForLead,
   createBitrixArtifactsForLead,
+  createDealForNewLead,
   getStageDistribution,
 };

@@ -89,4 +89,20 @@ async function downloadMedia(relativeUrl) {
   return Buffer.from(await data.arrayBuffer());
 }
 
-module.exports = { saveMedia, getSignedMediaUrl, downloadMedia };
+// Remove um arquivo salvo por saveMedia, a partir do caminho relativo
+// devolvido por ela (`/api/whatsapp/media/<sessionId>%2F<id>.<ext>`,
+// preserva a barra do sessionId como parte do path do Storage —
+// diferente de downloadMedia acima, que só pega o último segmento
+// depois de '/', isto aqui precisa do path INTEIRO dentro do bucket).
+// Usado pela base de conhecimento do Agente de IA ao remover um
+// documento (src/knowledgeDocs.js::deleteDoc) — nunca lança se o
+// arquivo já não existir mais, best-effort.
+async function deleteMedia(relativeUrl) {
+  const prefix = '/api/whatsapp/media/';
+  const encoded = String(relativeUrl).startsWith(prefix) ? relativeUrl.slice(prefix.length) : relativeUrl;
+  const filename = decodeURIComponent(encoded);
+  const { error } = await supabase.storage.from(BUCKET).remove([filename]);
+  if (error) throw error;
+}
+
+module.exports = { saveMedia, getSignedMediaUrl, downloadMedia, deleteMedia };

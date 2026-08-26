@@ -34,6 +34,7 @@ const { createSettingsRouter } = require('./routes/settings');
 const { createConversationAnalysisRouter } = require('./routes/conversationAnalysis');
 const { createCardGroupRouter } = require('./routes/cardGroup');
 const { createInternalNotesRouter } = require('./routes/internalNotes');
+const { createAgentRouter } = require('./routes/agent');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -45,6 +46,8 @@ const { verifyBitrixToken, ownerIdFor, issueAppToken, verifyAppToken, requireAut
 const { assertOwnsSession } = require('./authz');
 const instancesStore = require('./instances');
 const instanceHealthStore = require('./instanceHealthStore');
+const agentDispatch = require('./agentDispatch');
+const agentRetryWorker = require('./agentRetryWorker');
 
 const PORT = process.env.PORT || 3333;
 const AUTH_FOLDER = process.env.AUTH_FOLDER || './auth_session';
@@ -436,6 +439,14 @@ const sessions = new SessionManager({
     handleStatusForHealth(sessionId, status).catch((err) =>
       console.error(`[whatsapp:${sessionId}] falha ao processar histórico de status:`, err.message)
     );
+    // Fila de retry do Agente de IA (src/agentRetryQueue.js) — reprocessa
+    // mensagens de lead que não puderam ser respondidas enquanto esta
+    // instância estava offline, agora que ela voltou.
+    if (status === 'online') {
+      agentRetryWorker.processRetryQueueForSession(sessionId).catch((err) =>
+        console.error(`[agent-retry:${sessionId}] falha ao processar fila:`, err.message)
+      );
+    }
   },
   onMessage: async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
     try {
@@ -451,6 +462,14 @@ const sessions = new SessionManager({
         message.groupSenderPhone = senderPhone;
         message.groupSenderName = senderName;
       }
+      // Agente de IA (src/agentDispatch.js) — precisa saber se esta
+      // conversa JÁ EXISTIA antes desta mensagem, pra decidir se é um
+      // lead novo. Checado ANTES de addMessage (que sempre cria a
+      // conversa via upsert se ela não existir) — depois disso seria
+      // tarde demais pra saber. Não se aplica a grupo (JID de grupo
+      // nunca é "lead").
+      const conversationExistedBefore = isGroupMsg ? true : await store.conversationExists(sessionId, phone);
+
       const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName);
       if (!isNew) return; // já tínhamos essa mensagem (ex: eco da que nós mesmos enviamos)
 
@@ -540,6 +559,19 @@ const sessions = new SessionManager({
             body: label || null,
             target: { sessionId, phone, contactName },
           })));
+        }
+
+        // Agente de IA — só em conversa NOVA (lead), nunca em cliente
+        // já existente. Best-effort: tudo acima (broadcast/timeline/
+        // notificação) já rodou, uma falha aqui nunca deve apagar
+        // esse processamento já feito.
+        if (!isGroupMsg && !conversationExistedBefore) {
+          agentDispatch.handleNewLeadMessage({
+            sessionId,
+            phone,
+            pushName,
+            leadMessageText: message.text || '',
+          }).catch((err) => console.error('[agent] falha ao processar lead novo:', err.message));
         }
       }
     } catch (err) {
@@ -861,6 +893,13 @@ app.use('/api/settings', requireAuth, createSettingsRouter());
 app.use('/api/conversation-analysis', requireAuth, createConversationAnalysisRouter());
 app.use('/api/card-group', requireAuth, createCardGroupRouter({ sessions }));
 app.use('/api/internal-notes', requireAuth, createInternalNotesRouter({ broadcast }));
+// agentDispatch precisa de `sessions`/`broadcast` (pra enviar a resposta
+// gerada e persistir/broadcastar como qualquer mensagem de saída) — módulo
+// separado, sem acesso a essas variáveis por closure, então injetado
+// explicitamente aqui (mesmo momento em que os outros routers recebem os
+// mesmos objetos).
+agentDispatch.configure({ sessions, broadcast });
+app.use('/api/agent', requireAuth, createAgentRouter());
 
 // ---------------------------------------------------------------
 // Sobe HTTP + WebSocket no mesmo servidor/porta

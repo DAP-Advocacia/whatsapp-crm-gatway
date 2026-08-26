@@ -28,6 +28,46 @@ async function getOrCreateConversation(sessionId, phone, dealId, pushName) {
   return rows[0].id;
 }
 
+// Agente de IA (src/agentDispatch.js) — precisa saber se uma conversa
+// JÁ EXISTIA antes de processar a mensagem que está chegando agora,
+// pra decidir se é um lead novo. Deliberadamente uma função à parte,
+// chamada ANTES de addMessage/getOrCreateConversation (que sempre
+// cria a conversa se ela não existir) — em vez de alterar o upsert
+// compartilhado por 8+ chamadores pra também informar isso.
+async function conversationExists(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select 1 from conversations where session_id = $1 and phone = $2`,
+    [sessionId, phone]
+  );
+  return rows.length > 0;
+}
+
+// Liga/desliga o controle do Agente de IA numa conversa — nunca
+// muda sozinho por heurística de linguagem, só por: (a) o usuário
+// clicar "Desativar IA nesta conversa" no Chat, ou (b) um humano
+// mandar mensagem manual nessa conversa (auto-desativação, ver
+// POST /send e /send-media em src/routes/whatsapp.js). `agent_
+// activated_at` só é setado na 1ª vez que vira true (coalesce —
+// nunca sobrescrito depois, é só um registro de diagnóstico de
+// "quando a IA assumiu por aqui pela primeira vez").
+async function setAgentEnabled(sessionId, phone, enabled) {
+  await pool.query(
+    `update conversations
+     set agent_enabled = $3,
+         agent_activated_at = case when $3 then coalesce(agent_activated_at, now()) else agent_activated_at end
+     where session_id = $1 and phone = $2`,
+    [sessionId, phone, !!enabled]
+  );
+}
+
+async function getAgentEnabled(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select agent_enabled from conversations where session_id = $1 and phone = $2`,
+    [sessionId, phone]
+  );
+  return rows[0]?.agent_enabled ?? null;
+}
+
 // Retorna true se a mensagem foi de fato adicionada, false se já existia (mesmo
 // `id` para essa conversa) — usado para não duplicar quando o WhatsApp ecoa de
 // volta uma mensagem que nós mesmos já salvamos ao enviar (ver sendMessage/sendMedia).
@@ -588,7 +628,8 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        coalesce(tg.tags, '[]'::json) as tags,
        coalesce(un.count, 0)::int as "unreadCount",
        c.assigned_to as "assignedTo",
-       c.assigned_to_name as "assignedToName"
+       c.assigned_to_name as "assignedToName",
+       c.agent_enabled as "agentEnabled"
      from conversations c
      left join instances i on i.id = c.session_id
      left join contacts ct on ct.owner_id = coalesce(i.owner_id, c.session_id) and ct.phone = c.phone
@@ -986,4 +1027,7 @@ module.exports = {
   listInternalNoteRevisions,
   classifyRecipients,
   countConversations,
+  conversationExists,
+  setAgentEnabled,
+  getAgentEnabled,
 };

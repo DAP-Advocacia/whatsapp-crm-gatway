@@ -52,6 +52,15 @@ async function callChatCompletion(systemPrompt, userPrompt, maxTokens, jsonMode)
   return (await _callOpenAI(systemPrompt, userPrompt, maxTokens, jsonMode)).text;
 }
 
+// Interface pública que EXPÕE tokensUsed (diferente de
+// callChatCompletion acima) — usada pelo Agente de IA
+// (src/agent.js), que precisa da contagem de tokens pra métricas,
+// mesmo padrão de summarizeConversation (única outra consumidora
+// direta de _callOpenAI até agora). Repassa 1:1, sem lógica extra.
+async function callOpenAIRaw(systemPrompt, userPrompt, maxTokens, jsonMode) {
+  return _callOpenAI(systemPrompt, userPrompt, maxTokens, jsonMode);
+}
+
 // Resumo de uma conversa de WhatsApp (últimas até 80 mensagens, pra manter
 // o prompt num tamanho razoável) — usado pelo painel de detalhes do
 // contato na tela Chat. `messages`: mesmo formato de store.getHistory()
@@ -351,4 +360,5 @@ module.exports = {
   generateDashboardInsights,
   generateTeamInsights,
   generateConversationAnalysisInsight,
+  callOpenAIRaw,
 };

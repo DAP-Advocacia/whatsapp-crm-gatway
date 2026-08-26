@@ -9100,3 +9100,211 @@ servido via HTTP local, 6 telas amostradas (dashboard, chat, campaign,
 instances, admin, conversation-analysis) confirmadas com a correção
 presente no HTML real entregue.
 
+### Parte EJ — Agente de IA: atendimento automático a leads novos + pipeline único (628) (2026-08-26)
+
+Pedido novo, grande: uma aba "Agente de IA" com fluxo completo de
+criação de um agente que responde automaticamente leads novos que
+chegam pela instância de WhatsApp — configurável por base de
+conhecimento (texto livre + upload PDF/DOCX/TXT/MD + busca semântica),
+system message e histórico da conversa (modelo fixo, sem escolha).
+Junto, os leads atendidos passam a criar um negócio no pipeline Bitrix
+categoria **628** (produção real), substituindo a categoria **229**
+("FUNIL DE TESTE (NÃO UTILIZAR)" dentro do próprio Bitrix, com
+histórico de bug de duplicidade do portal apagando negócios — ver
+Partes AT/AV) — mesma variável `BITRIX_LEADS_CATEGORY_ID`, só troca o
+valor.
+
+**Decisões de comportamento, confirmadas explicitamente com o
+usuário antes de implementar** (não reabrir sem pedido novo):
+- A IA responde **automaticamente** ao lead (não é sugestão que um
+  humano aprova) — função é **triagem inicial**, não a conversa
+  inteira.
+- **Nunca se desativa sozinha por linguagem** (mensagem ambígua/hostil
+  não desliga) — só para por (a) botão manual "Desativar IA nesta
+  conversa", ou (b) automaticamente quando um humano manda mensagem
+  manual na mesma conversa (evita os dois respondendo por cima um do
+  outro). Nunca reativa sozinha depois de desativada.
+- A IA **nunca fala primeiro** — só entra em ação depois que o lead já
+  mandou uma mensagem. A boas-vindas fixa que a LP já manda hoje
+  continua **inalterada**.
+- Ativa só em conversas **novas** (nunca em conversa já existente de
+  cliente antigo) — vindas de **LP** (formulário → boas-vindas →
+  lead responde → IA assume) ou de **Campanha** (número desconhecido
+  manda a 1ª mensagem direta, sem formulário). Rótulo do card: telefone
+  com linha em `lead_form_submissions` → "LP: `<nome da LP>`"; senão
+  → "Campanha".
+- **Importante, pedido explícito de segurança**: o agente **nunca vem
+  ativado por padrão** — `agent_config.active` nasce `false` por
+  instância; nenhum card é criado nem resposta automática é enviada
+  até o usuário ativar manualmente na tela. Confirmado com teste real
+  (não assumido): instância sem config de agente gerando 0 tags, 0
+  itens de retry, `agent_enabled: null` na conversa.
+- Base de conhecimento com as **3 capacidades juntas** desde o início
+  (texto livre + upload de arquivo + busca semântica via embeddings),
+  sem versão reduzida faseada — só entregue quando as 3 partes
+  estivessem prontas.
+- Resiliência: se todas as instâncias da conta caírem no momento em
+  que o lead manda a mensagem, entra numa **fila de retry** — a IA
+  **re-gera** a resposta do zero (nunca guarda texto pronto) assim que
+  a instância reconectar.
+
+**Schema novo** (`db/schema.sql`, aplicado via `node db/migrate.js`,
+confirmado no banco real): extensão `create extension if not exists
+vector` (pgvector 0.8.2, confirmada disponível no catálogo do Supabase,
+habilitada pela primeira vez no projeto nesta Parte); 2 colunas novas em
+`conversations` (`agent_enabled boolean`, `agent_activated_at
+timestamptz`); 4 tabelas novas — `agent_config` (PK `session_id`, 1
+linha por instância, `active` nasce `false`), `agent_knowledge_docs`
+(status `processing`→`ready`/`error`, nunca preso), `agent_knowledge_chunks`
+(`embedding vector(1536)`, índice IVFFlat `vector_cosine_ops`, `lists =
+100`) e `agent_retry_queue` (`status pending/sent/failed`, `attempts`
+com teto).
+
+**Módulos backend novos**:
+- [src/embeddings.js](src/embeddings.js) — `generateEmbedding`/
+  `generateEmbeddingsBatch`, fetch cru contra
+  `/v1/embeddings` (`text-embedding-3-small`), mesmo estilo de
+  `src/openai.js`. Testado contra a API real (vetor de 1536 dims).
+- [src/knowledgeDocs.js](src/knowledgeDocs.js) — `extractText`
+  (pdf-parse v2 via `new PDFParse({data}).getText()` — API diferente
+  da v1, descoberta testando; mammoth pra DOCX; decode direto pra
+  TXT/MD; remove rodapé "-- N of M --" do pdf-parse via regex),
+  `splitIntoChunks` (2000 chars, overlap 200),
+  `processUploadedDocument` (extrai→salva original no Storage
+  best-effort→chunka→gera embeddings em lote→grava tudo em
+  transação→marca doc `ready`; qualquer falha marca `error` com
+  `error_message`, nunca fica preso em `processing`), `listDocs`/
+  `deleteDoc` (lê `storage_path` antes de apagar a linha, remove do
+  Storage best-effort depois — bug encontrado e corrigido no processo,
+  ver abaixo).
+- [src/agentKnowledge.js](src/agentKnowledge.js) — `searchRelevantChunks`
+  (embedding da pergunta, `order by embedding <=> $1::vector limit
+  $3`). Testado com 3 chunks de teste (horário/serviços/clima) — 3
+  perguntas diferentes rankearam o chunk certo em 1º lugar.
+- [src/agentConfig.js](src/agentConfig.js) — `get`/`upsert` por
+  `session_id`, upsert dinâmico por patch parcial (mesmo padrão de
+  `src/settings.js`), com cuidado extra pra `active: false` explícito
+  ser tratado como valor real via `hasOwnProperty` + `case when` (não
+  confundido com "campo ausente" por `coalesce`).
+- [src/agent.js](src/agent.js) — `generateAgentReply(sessionId, phone,
+  leadMessage)`: se `!config.active` devolve `null`; busca chunks
+  relevantes (best-effort, catch→`[]`) + histórico real
+  (`store.getHistory`); monta system message (persona padrão +
+  texto livre + trechos relevantes) + transcript; chama
+  `callOpenAIRaw` (função nova exposta em `src/openai.js`, só repassa
+  pra `_callOpenAI` já existente — nada mais mudou nesse arquivo).
+- [src/agentDispatch.js](src/agentDispatch.js) — orquestrador central:
+  `resolveLeadOrigin` (join `lead_form_submissions`+`lead_forms` por
+  `phone`); `handleNewLeadMessage` (só age se `config.active`; marca
+  `agent_enabled=true` **antes** de gerar a resposta, evita corrida;
+  cria negócio + tag **em background**, fire-and-forget, nunca atrasa
+  a resposta ao lead); `dispatchAgentReply` (gera resposta, tenta
+  enviar via `sessions.get(sessionId).sendMessage`, se falhar
+  enfileira em vez de perder a mensagem). Recebe `sessions`/`broadcast`
+  via `configure()` — não tem acesso por closure, é módulo separado de
+  `server.js`.
+- [src/agentRetryQueue.js](src/agentRetryQueue.js) /
+  [src/agentRetryWorker.js](src/agentRetryWorker.js) — fila com
+  `MAX_ATTEMPTS=3`; worker roda quando `onStatus` reporta instância
+  `online`, **re-gera** a resposta do zero pra cada pendente (usa o
+  histórico real naquele momento, que pode ter mudado) em vez de
+  reenviar texto congelado.
+- [src/routes/agent.js](src/routes/agent.js) — router novo, montado em
+  `/api/agent` (`requireAuth` + `requireSession` por rota): `GET/PUT
+  /config`, `POST /knowledge/upload`, `GET /knowledge`, `DELETE
+  /knowledge/:docId`, `POST /conversations/toggle`, `GET
+  /conversations/status`.
+
+**Mudanças em módulos existentes** (nenhuma função antiga alterada,
+só funções novas adicionadas): [src/store.js](src/store.js) —
+`conversationExists`, `setAgentEnabled`, `getAgentEnabled` (decisão
+deliberada: em vez de sobrecarregar `getOrCreateConversation`,
+compartilhada por 8+ chamadores, com detecção de insert/update, uma
+função separada chamada explicitamente antes, mais segura), mais
+`agentEnabled` na projeção de `listConversations`;
+[src/media.js](src/media.js) — `deleteMedia` (nova, pro Storage);
+[src/bitrixCrm.js](src/bitrixCrm.js) — `createDealForNewLead` (mesma
+categoria `LEADS_CATEGORY_ID`, agora 628, título/descrição derivados da
+origem); [src/server.js](src/server.js) — em `onMessage`, guarda
+`conversationExists` **antes** de `store.addMessage` e, se a conversa
+era nova e a mensagem é de entrada, chama
+`agentDispatch.handleNewLeadMessage` (best-effort, catch isolado); em
+`onStatus`, quando `online`, chama
+`agentRetryWorker.processRetryQueueForSession`; registra
+`agentDispatch.configure({sessions, broadcast})` e `app.use('/api/agent',
+requireAuth, createAgentRouter())`.
+`BITRIX_LEADS_CATEGORY_ID` trocada de `229` para `628` em `.env`/
+`.env.example`, comentário atualizado. `pdf-parse` e `mammoth`
+adicionados ao `package.json`.
+
+**Frontend**: [public/agente-ia.html](public/agente-ia.html) (nova) —
+boilerplate replicado de `instances.html` (já com a correção da Parte
+EI, `window.resolveBrandReady`); seletor de instância, toggle
+ativo/inativo, textarea de system message, textarea de base de
+conhecimento em texto livre, upload de documento (FileReader→base64)
+com lista de status, botão salvar. Link "Agente de IA" adicionado na
+sidebar de 16 telas existentes (`dashboard`, `chat`, `campaign`,
+`campaign-metrics`, `campaign-schedule`, `contacts`, `sites`,
+`lead-metrics`, `instances`, `notifications`, `settings`, `suggestions`,
+`faq`, `conversation-analysis`, `admin`, `onboarding`) logo após o link
+"Chat".
+
+**Erros encontrados e corrigidos durante a implementação**:
+1. `deleteDoc` não limpava o Storage — arquivo `kb_1.pdf` confirmado
+   órfão depois do delete. Corrigido com `deleteMedia` nova, chamada
+   antes de apagar a linha do Postgres.
+2. Esqueci de exportar as 3 funções novas de `store.js` no primeiro
+   teste (`"is not a function"`) — corrigido no `module.exports`.
+3. `pdf-parse` v2 tem API diferente da v1 (classe `PDFParse`, não
+   função direta) — descoberto testando com PDF real gerado via
+   `pdfkit`.
+4. Rodapé "-- N of M --" do pdf-parse poluindo o texto extraído —
+   corrigido com regex antes de gravar.
+5. Webhook `BITRIX_WEBHOOK_URL` (CRM, diferente do de Feed criado na
+   Parte EE) devolvendo **"Invalid request credentials"** ao testar
+   `createDealForNewLead` contra o Bitrix real — confirmado via curl
+   direto que é o próprio Bitrix recusando, não bug do código. **Ainda
+   não resolvido** — usuário avisado, verificando/gerando webhook novo.
+   Bloqueia só o teste real de criação de negócio; todo o resto
+   (best-effort) foi testado sem essa peça.
+6. `curl -d` no Git Bash/Windows corrompe UTF-8 (acentos) no corpo da
+   requisição — não é bug do sistema (o frontend real usa `fetch()` do
+   browser, que lida com UTF-8 corretamente); testes com acentuação
+   feitos via `http` nativo do Node em vez disso.
+
+**Validação**: sintaxe validada (`node -c`) em todos os módulos
+novos/alterados; extensão + 4 tabelas + índices confirmados no banco
+real; cada módulo testado isoladamente contra API/banco reais
+(embeddings, extração PDF/DOCX/TXT, busca semântica com ranking
+correto, CRUD de config com `active:false` explícito, geração de
+resposta citando corretamente conteúdo da base de conhecimento
+configurada); fluxo completo de `agentDispatch` testado (sucesso com
+resposta enviada/persistida/broadcast + fila vazia; falha de envio
+enfileirando corretamente; `dispatchAgentReply` sem `configure()`
+degradando pra fila em vez de propagar erro); `agentRetryQueue` testada
+até bater `MAX_ATTEMPTS` exatamente; todas as 17 telas com sidebar (16
++ a nova) servidas via HTTP real (200, link presente); rotas de
+`/api/agent` testadas via HTTP real, incluindo upload de PDF real de
+ponta a ponta (`{status:'ready', chunkCount:1}`) e delete confirmando
+limpeza dupla (Postgres + Storage). Estado final do banco: 1 linha de
+config de teste deixada propositalmente ativa (`agent_config`, sessão
+`2c39349ea593c27fd3092b4fe2c47de7_180388`) pro usuário testar a tela
+real; demais tabelas novas zeradas.
+
+**ABERTO — pendências reais, não concluídas nesta Parte**:
+1. `src/routes/leads.js` **ainda não foi alterado** — o plano aprovado
+   prevê remover a criação de negócio do `POST /:slug` (o formulário de
+   LP ainda cria negócio no envio; deveria passar a criar só quando o
+   lead responde, via `agentDispatch`, igual ao fluxo de Campanha).
+   Adiado de propósito para depois do webhook do Bitrix (CRM) ser
+   confirmado funcionando — evita trocar o gatilho de criação de
+   negócio de uma via já validada (formulário) por uma ainda bloqueada
+   por credencial inválida.
+2. Webhook `BITRIX_WEBHOOK_URL` (CRM) com credencial inválida — sem
+   isso, `createDealForNewLead` não foi validado contra o Bitrix real
+   (só testado com mocks/lógica isolada).
+3. Teste end-to-end real completo (lead novo mandando mensagem de
+   verdade, IA respondendo de verdade, negócio criado em 628 de
+   verdade) fica bloqueado pelo item 2 — fazer assim que o webhook for
+   resolvido.
+
