@@ -1448,6 +1448,9 @@
   // (src/routes/internalNotes.js), não dentro de routes/whatsapp.js.
   // Mesmo padrão de nomeação já usado em public/index.html.
   const API_ROOT = window.location.origin + '/api';
+  // Rotas do Agente de IA (routes/agent.js) — botão "Marcar como
+  // exemplo" no painel de detalhes, mesmo padrão de public/agente-ia.html.
+  const AGENT_API_BASE = window.location.origin + '/api/agent';
   const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
   let appToken = null;
@@ -1829,6 +1832,8 @@
     });
     const historyBtn = document.getElementById('summaryHistoryBtn');
     if (historyBtn) historyBtn.addEventListener('click', openSummaryHistoryModal);
+    const markExampleBtn = document.getElementById('markAsExampleBtn');
+    if (markExampleBtn) markExampleBtn.addEventListener('click', markAsExample);
     hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
   }
 
@@ -1863,8 +1868,51 @@
             <button type="button" class="contact-summary-history-link" id="summaryHistoryBtn">Ver histórico</button>
           </p>
         ` : ''}
+        <p class="contact-summary-meta">
+          <button type="button" class="contact-summary-history-link" id="markAsExampleBtn">Marcar como exemplo</button>
+        </p>
       </div>
     `;
+  }
+
+  // Botão "Marcar como exemplo" (Agente de IA, aprendizado por
+  // exemplos) — cria uma candidata a exemplo few-shot com o histórico
+  // ATUAL da conversa (state.messages já carregado, sem round-trip
+  // novo ao servidor). Fica pendente de revisão/aprovação manual em
+  // public/agent-examples.html — nunca vira exemplo utilizável sem
+  // passar por lá (anonimização + revisão humana).
+  function buildExampleTranscript(messages, contactName) {
+    return messages
+      .map((m) => {
+        const who = m.direction === 'out' ? 'Empresa' : (contactName || 'Contato');
+        const body = m.text || (m.type && m.type !== 'text' ? `[${m.type}]` : '(mensagem vazia)');
+        return `${who}: ${body}`;
+      })
+      .join('\n');
+  }
+
+  async function markAsExample() {
+    const a = state.active;
+    if (!a) return;
+    const transcriptRaw = buildExampleTranscript(state.messages || [], a.contactName);
+    if (!transcriptRaw.trim()) {
+      if (window.showToast) window.showToast('Conversa sem mensagens ainda — nada para marcar como exemplo.', 'error');
+      return;
+    }
+    try {
+      const res = await apiFetch(`${AGENT_API_BASE}/examples/candidates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: a.sessionId, phone: a.phone, contactName: a.contactName,
+          transcriptRaw, markedByName: myBitrixName,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao marcar como exemplo');
+      if (window.showToast) window.showToast('Marcado como exemplo — aguardando revisão em "Exemplos de conversa".', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
   }
 
   // Modal de histórico de resumos — todas as versões já geradas pra essa

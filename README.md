@@ -63,6 +63,7 @@ pode rodar de novo a qualquer momento sem duplicar nada):
 | `agent_config` | Config do Agente de IA por instância (§14.7) — `active` (nasce `false`), `system_message`, `knowledge_text`. |
 | `agent_knowledge_docs` / `agent_knowledge_chunks` | Documentos enviados pra base de conhecimento (status `processing`/`ready`/`error`) e os pedaços de texto com embedding (`vector(1536)`, extensão **pgvector**) usados na busca semântica — §14.7. |
 | `agent_retry_queue` | Fila de reenvio quando a instância cai no momento em que o lead manda a mensagem — a resposta é gerada de novo do zero ao reprocessar (§14.7). |
+| `agent_example_candidates` / `agent_examples` | Aprendizado few-shot do Agente de IA (§14.8) — fila de candidatas marcadas manualmente (`transcript_raw` com PII de verdade, pro humano revisar) e exemplos já aprovados/anonimizados/com embedding (nunca contém dado bruto). |
 
 - **Mídia** (imagem/áudio/vídeo trocada em conversas): bucket público `media` no
   Supabase Storage. `mediaUrl` nas mensagens é a URL pública direta do arquivo.
@@ -1500,6 +1501,57 @@ acessível pelo link "Agente de IA" logo abaixo de "Chat" em todas as
   reconecta, a resposta é **gerada de novo do zero** (usa o histórico
   real da conversa naquele momento, nunca reenvia um texto congelado
   que pode ter ficado desatualizado).
+- **Aprendizado por exemplos de conversa (few-shot)**: ver §14.8 —
+  conversas passadas boas, aprovadas manualmente e anonimizadas,
+  entram no prompt como referência de estilo/conteúdo (mesmo
+  mecanismo de busca semântica da base de conhecimento, aplicado a
+  "exemplos" em vez de "documentos").
+
+---
+
+## 14.8. Exemplos de conversa — aprendizado few-shot do Agente de IA (`/agent-examples.html`)
+
+Extensão do Agente de IA (§14.7): conversas passadas **boas** viram
+referência de estilo/conteúdo pras respostas futuras — não é
+fine-tuning (o modelo continua fixo, `gpt-4o-mini`), é busca semântica
+de exemplos aprovados incluída no prompt a cada resposta, igual à
+base de conhecimento de documentos. Tela própria, acessada só pelo
+link "Exemplos de conversa (N pendentes) →" no topo de
+`agente-ia.html` — sem item de sidebar próprio.
+
+- **Nada entra automaticamente** — nenhum job varre conversas
+  arquivadas nem usa qualquer sinal indireto (ex: "negócio avançou de
+  estágio no Bitrix"). O único jeito de uma conversa virar candidata é
+  o botão **"Marcar como exemplo"** no Chat (painel de detalhes, ao
+  lado de "Resumo da conversa") — sempre uma decisão humana explícita.
+- **Fila de revisão, 2 passos, nunca automática**:
+  1. **Revisar**: dispara a anonimização (regex + IA) e mostra o
+     resultado num textarea **editável** — o humano pode corrigir
+     antes de confirmar.
+  2. **Confirmar aprovação**: só então o exemplo é gravado (com
+     embedding), disponível pra busca semântica. **Rejeitar** em
+     qualquer momento antes da confirmação nunca anonimiza nem grava
+     nada — a candidata só existe com o texto bruto até ali.
+- **Anonimização — nunca "confia" na IA sozinha**: regex determinístico
+  primeiro (CPF, CNPJ, telefone, e-mail, valor em R$) redige o que dá
+  pra reconhecer por padrão fixo; a IA reescreve o resto (nome próprio,
+  endereço, detalhe de caso) substituindo por placeholders (`[NOME]`,
+  `[TELEFONE]`, `[VALOR]` etc.); e uma **reverificação determinística**
+  roda de novo sobre a saída da IA — se qualquer padrão reconhecível
+  ainda sobrar, a anonimização é reprovada (nada é gravado). A mesma
+  checagem roda **outra vez** sobre o texto final que o humano
+  confirma (mesmo que ele tenha editado manualmente) — última rede de
+  segurança contra a própria edição reintroduzir algo sensível.
+- **`agent_examples` nunca guarda dado bruto** — só o texto já
+  anonimizado e confirmado por um humano. O transcript original (com
+  PII de verdade) fica isolado em `agent_example_candidates`, nunca
+  exposto pra busca semântica nem pro prompt do agente.
+- **Escopo por instância**, mesmo padrão do resto do Agente de IA —
+  exemplo aprovado numa instância nunca aparece pra outra.
+- **Influência real na resposta**, não só inclusão inerte no prompt —
+  a IA é instruída explicitamente a usar os exemplos como referência
+  de estilo/estrutura, nunca a copiar um placeholder literal (`[NOME]`)
+  na resposta de verdade ao lead.
 
 ---
 
@@ -1747,6 +1799,7 @@ revelar que o recurso existe).
 | `/faq.html` | GET/POST | FAQ pública — perguntas já respondidas (ver §15.5). |
 | `/conversation-analysis.html` | GET/POST | Auditoria de Conversas — acesso restrito (ver §15.6). |
 | `/agente-ia.html` | GET/POST | Agente de IA — configuração por instância (ver §14.7). |
+| `/agent-examples.html` | GET/POST | Exemplos de conversa — fila de aprovação few-shot (ver §14.8). |
 | `/api/whatsapp/page-session/close` | POST | Fora do middleware `requireAuth` de propósito (ver tabela `/api/whatsapp/*` abaixo) — montada aqui, direto em `src/server.js`, ANTES do `app.use('/api/whatsapp', requireAuth, ...)`. |
 | `/*` (estático) | GET | Arquivos de `public/`. |
 
@@ -1830,6 +1883,13 @@ POST/PUT) — `requireSession` confere que a instância pertence ao
 | `knowledge/:docId?session=` | DELETE | Remove o documento (chunks em cascata) e o arquivo original do Storage. 404 se o documento não existir ou não for dessa instância. |
 | `conversations/toggle` | POST | Body `{ session, phone, enabled }`. Liga/desliga o agente numa conversa específica — usado pelo botão "Desativar IA nesta conversa" do Chat (§9) e pela auto-desativação quando um humano responde manualmente. |
 | `conversations/status?session=&phone=` | GET | `{ enabled }` — `null` se a conversa nunca teve o agente envolvido (cliente antigo, nunca foi lead novo com agente ativo). |
+| `examples/candidates` | POST | Body `{ session, phone, contactName?, transcriptRaw, markedByName? }`. Cria uma candidata a exemplo few-shot (§14.8) — usado pelo botão "Marcar como exemplo" do Chat. `markedBy` é sempre `req.ownerId` (nunca do body). |
+| `examples/candidates?session=&status=` | GET | `{ candidates:[...] }` — lista candidatas, `status` opcional filtra (`pending_review`/`approved`/`rejected`/`anonymization_failed`). |
+| `examples/candidates/:id/review` | POST | Body `{ session }`. Passo 1 de aprovação: roda a anonimização (regex+IA+reverificação), devolve `{ status:'ready_for_review', draft }` ou `{ status:'anonymization_failed', error }` — nunca cria exemplo definitivo aqui. |
+| `examples/candidates/:id/confirm` | POST | Body `{ session, finalText, approvedByName? }`. Passo 2: reverifica `finalText` (editado ou não) antes de gravar — 400 se ainda houver dado sensível reconhecível. Sucesso grava embedding + linha em `agent_examples`. |
+| `examples/candidates/:id/reject` | POST | Body `{ session, reviewedByName? }`. Rejeita sem nunca anonimizar nem gravar nada. |
+| `examples?session=` | GET | `{ examples:[{id, anonymizedText, approvedBy, approvedByName, createdAt}] }` — exemplos já aprovados daquela instância. |
+| `examples/:id?session=` | DELETE | Remove um exemplo aprovado. 404 se não existir/não for dessa instância. |
 
 ### `/api/*` (Contatos, listas, modelos — `src/routes/crm.js`)
 
@@ -2011,6 +2071,10 @@ src/
   agentDispatch.js        # orquestrador central: resolveLeadOrigin (LP vs Campanha), handleNewLeadMessage, dispatchAgentReply, cria negócio+tag em background (§14.7)
   agentRetryQueue.js       # fila de retry (agent_retry_queue) — enqueue/listPendingForSession/markSent/markFailed, MAX_ATTEMPTS=3 (§14.7)
   agentRetryWorker.js      # reprocessa a fila quando a instância volta a ficar online — re-gera a resposta do zero (§14.7)
+  exampleCandidates.js     # CRUD da fila de candidatas a exemplo few-shot (agent_example_candidates), mesma máquina de estados de suggestions.js (§14.8)
+  exampleAnonymizer.js     # anonymizeTranscript (regex+IA+reverificação) + findPiiLeaks reusada 3x (pós-regex/pós-IA/pós-edição-humana) (§14.8)
+  exampleApproval.js       # orquestra os 2 passos de aprovação (reviewCandidate/confirmApproval), grava embedding + agent_examples (§14.8)
+  agentExamples.js         # searchRelevantExamples — busca semântica de exemplos aprovados, espelha agentKnowledge.js (§14.8)
   auth.js               # verifica access_token contra o Bitrix de verdade + emite/valida o token de app (sessão + API)
   authz.js              # confere que session/owner de cada request pertence ao dono autenticado
   adminAuth.js           # requireSuperAdmin — confere req.ownerId contra SUPER_ADMIN_OWNER_IDS (Painel Admin, §14.5)
@@ -2035,7 +2099,7 @@ src/
     conversationAnalysis.js # rotas REST /api/conversation-analysis/* (Auditoria de Conversas, acesso restrito, §15.6)
     cardGroup.js           # rotas REST /api/card-group/* ("Criar grupo" no card do negócio, §15.7)
     internalNotes.js        # rotas REST /api/internal-notes/* (nota interna, nunca visível ao cliente, §15.7)
-    agent.js               # rotas REST /api/agent/* (config, upload de base de conhecimento, toggle por conversa, §14.7)
+    agent.js               # rotas REST /api/agent/* (config, upload de base de conhecimento, toggle por conversa, §14.7; fila de exemplos few-shot, §14.8)
 public/
   index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância, "Criar grupo"/switch Cliente-Grupo e nota interna no cabeçalho (§15.7)
   dashboard.html        # Análise de Conversas
@@ -2055,6 +2119,7 @@ public/
   conversation-analysis.html # Auditoria de Conversas — acesso restrito, leitura cross-instância (§15.6)
   apresentacao.html      # relatório executivo (scrollytelling) pra diretoria/CEO — sem sidebar, exportável em PDF
   agente-ia.html         # Agente de IA — config por instância, base de conhecimento, upload de documentos (§14.7)
+  agent-examples.html    # Exemplos de conversa — fila de aprovação few-shot, anonimização, edição manual (§14.8)
 db/
   schema.sql            # DDL de todas as tabelas
   migrate.js            # roda schema.sql contra o Postgres (usa DIRECT_URL)

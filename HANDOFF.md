@@ -9367,3 +9367,125 @@ broadcast) pode existir em outros pontos que criam/alteram tag fora de
 uma ação direta do usuário na tela — não auditado neste Parte, só o
 caminho do Agente de IA foi corrigido.
 
+### Parte EL — Agente de IA: aprendizado por exemplos de conversa (few-shot), com anonimização automática + aprovação manual (2026-08-26)
+
+Pedido novo do usuário, direto: "toda a conversa trocada deve ser
+usada como few-shot para o aprendizado do agente". Esclarecido antes
+de implementar (o modelo `gpt-4o-mini` não faz fine-tuning — a única
+forma real é buscar exemplos parecidos e colar no prompt a cada
+resposta nova, mesmo mecanismo já usado pra documentos da base de
+conhecimento) e confirmadas 3 decisões de produto, todas mantidas sem
+reabrir: **aprovação sempre manual** (nunca heurística automática tipo
+"negócio avançou de estágio no Bitrix"); **anonimização automática e
+confiável** antes de qualquer transcript virar exemplo reutilizável
+(escritório de advocacia — dado de cliente nunca pode vazar de uma
+conversa pra outra); **escopo por instância**, mesmo padrão de
+`agent_config`. Planejado via `EnterPlanMode` (2 agentes Explore +
+1 agente Plan, revisados criticamente contra o código real antes de
+implementar) antes de qualquer código.
+
+**Fluxo completo**: usuário clica "Marcar como exemplo" no Chat (não
+existe gatilho automático — decisão deliberada, coerente com "sempre
+manual"; nem "conversa arquivada" foi usado, porque isso reintroduziria
+um sinal indireto) → vira candidata `pending_review` → na tela nova
+`agent-examples.html`, o humano clica "Revisar" (anonimização
+regex+IA roda, rascunho aparece num textarea editável) → edita se
+quiser → "Confirmar aprovação" (reverifica o texto FINAL antes de
+gravar) → vira exemplo aprovado, com embedding, disponível pra busca
+semântica na próxima resposta do agente. "Rejeitar" em qualquer ponto
+antes da confirmação nunca anonimiza nem grava nada.
+
+**Anonimização — híbrida, com garantia real de "nunca vaza"**: regex
+determinístico primeiro (CPF, CNPJ, telefone BR, e-mail, valor R$) +
+IA reescreve o que sobra (nome próprio, endereço, detalhe de caso) +
+**reverificação determinística**: os MESMOS regexes rodam de novo
+sobre a saída da IA — se algo reconhecível ainda sobrar, a
+anonimização é reprovada (`anonymization_failed`) e nada é gravado.
+Uma 3ª reverificação roda sobre o texto FINAL (já editado ou não pelo
+humano) no momento de confirmar — protege contra a própria edição
+manual reintroduzir algo sensível por acidente.
+
+**Achado real durante os testes de `applyRegexRedactions`**: um
+número de 11 dígitos sem pontuação é estruturalmente idêntico entre
+CPF e celular BR sem formatação — nenhum dos dois patterns sozinho
+cobria 100% dos casos (um CPF sem o dígito `9` na posição de celular
+escapava do pattern de telefone). Corrigido com um pattern de
+fallback (`documento_11_digitos` → `[DOCUMENTO]`) que roda por último,
+sobre o que sobrou — prioriza nunca deixar vazar sobre acertar o
+rótulo exato. Outro achado menor: o `\b` no início do regex de
+telefone "pulava" o `(` de abertura em números com parênteses,
+deixando ele sobrando no texto redigido — corrigido trocando por
+`(?<!\d)`.
+
+**Schema novo** (`db/schema.sql`): `agent_example_candidates` (fila,
+`transcript_raw` COM dado sensível de verdade — necessário pro humano
+revisar o original; `status`: `pending_review`→`approved`/`rejected`/
+`anonymization_failed`, mesma máquina de estados de `suggestions.js`,
+toda transição via `update ... where status = '<esperado>'`) e
+`agent_examples` (só o texto FINAL já anonimizado, `embedding
+vector(1536)` + índice IVFFlat — nunca guarda transcript bruto,
+estruturalmente impossível vazar um rascunho não aprovado pro prompt
+do agente).
+
+**Módulos backend novos**: [src/exampleCandidates.js](src/exampleCandidates.js)
+(CRUD da fila, replica literalmente o padrão de `suggestions.js`);
+[src/exampleAnonymizer.js](src/exampleAnonymizer.js) (`anonymizeTranscript`
++ `applyRegexRedactions`/`findPiiLeaks` exportados separadamente, a
+2ª reusada 3x: pós-regex, pós-IA, pós-edição-humana);
+[src/exampleApproval.js](src/exampleApproval.js) (orquestra os 2
+passos — `reviewCandidate`/`confirmApproval`, com proteção extra
+contra corrida: se outra requisição já aprovou/rejeitou a candidata
+entre o `get` inicial e o `insert`, a transação inteira sofre
+rollback em vez de duplicar exemplo); [src/agentExamples.js](src/agentExamples.js)
+(espelha `agentKnowledge.js` ponto a ponto — `searchRelevantExamples`,
+`topK=3` por padrão, menor que os 5 de chunks porque um exemplo de
+conversa é mais longo).
+
+**Mudanças em `src/agent.js`**: `buildSystemMessage` ganha 3º
+parâmetro `relevantExamples = []` (default, retrocompatível) e uma
+seção nova no prompt, com aviso explícito pra IA nunca copiar um
+placeholder literal (`[NOME]` etc.) na resposta real ao lead.
+`generateAgentReply` busca chunks e exemplos **em paralelo**
+(`Promise.all`), ambos best-effort (`.catch(() => [])`).
+
+**Rotas novas**, estendendo `src/routes/agent.js` (não um router
+separado): `POST/GET /examples/candidates`, `POST .../reject`,
+`POST .../review` (passo 1), `POST .../confirm` (passo 2), `GET
+/examples`, `DELETE /examples/:id`. `markedBy`/`reviewedBy`/
+`approvedBy` são sempre `req.ownerId` (nunca do client) — só o
+`*Name` vem do body, resolvido no frontend via `BX24.callMethod(
+'user.current', ...)` (descoberto durante a investigação:
+**`req.ownerName` não existe** em nenhum lugar do projeto, correção a
+uma suposição errada do desenho inicial).
+
+**Frontend**: botão "Marcar como exemplo" em
+[public/chat.html](public/chat.html), painel de detalhes, ao lado de
+"Resumo da conversa" — monta o transcript a partir de `state.messages`
+já carregado (sem round-trip novo). [public/agent-examples.html](public/agent-examples.html)
+(nova) — tela dedicada (não um painel a mais em `agente-ia.html`,
+porque a fila cresce sem limite, diferente da lista pequena de
+documentos), linkada a partir de `agente-ia.html` ("Exemplos de
+conversa (N pendentes) →"), com tabs Pendentes/Aprovados/Rejeitados+
+Falhas e modal de revisão com textarea editável. Sem item de sidebar
+próprio — acessível só via esse link.
+
+**Validação**: sintaxe validada em todos os módulos; `applyRegexRedactions`/
+`findPiiLeaks` testados isoladamente com 13 casos (incluindo os 2
+achados acima); `anonymizeTranscript` testado contra a API real
+(sucesso reescrevendo nome próprio corretamente) E o caminho de falha
+forçado via mock (confirma que a reverificação bloqueia de verdade,
+não é só teórico); fluxo de aprovação de 2 passos testado via API
+real — sucesso sem edição, sucesso com edição, e falha real no passo
+2 (edição reintroduzindo PII, recusada com 400, candidata preservada
+em `pending_review`); busca semântica testada com escopo por
+instância confirmado (exemplo de uma sessão nunca aparece em outra);
+`generateAgentReply` testado com e sem exemplo aprovado — no cenário
+com exemplo, a resposta gerada citou uma frase presente só no
+exemplo ("direcioná-lo ao advogado especialista"), confirmando
+influência real, não só inclusão inerte no prompt; as 2 telas
+servidas via HTTP real (200), fluxo completo ponta a ponta simulando
+o uso real (marcar → pendente → revisar → editar → confirmar → some
+dos pendentes → aparece nos aprovados); regressão das 4 rotas antigas
+do Agente de IA confirmada sem quebra. Banco varrido ao final —
+nenhum resíduo de teste em nenhuma das 6 tabelas do Agente de IA.
+

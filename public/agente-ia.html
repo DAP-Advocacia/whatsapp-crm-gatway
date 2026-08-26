@@ -517,6 +517,7 @@
 <div id="app">
   <h1>Agente de IA</h1>
   <p class="subtitle">Atendimento automático de triagem para leads novos — a IA responde a mensagem de quem acabou de entrar em contato, até um humano assumir a conversa.</p>
+  <p class="subtitle" style="margin-top:-14px;"><a href="/agent-examples.html" id="examplesLink" style="color:var(--gold-dim);">Exemplos de conversa <span id="examplesPendingCount"></span>→</a></p>
 
   <div class="panel">
     <h2>Instância</h2>
@@ -990,12 +991,28 @@
     }
   });
 
+  // Contagem de candidatas pendentes de revisão (link "Exemplos de
+  // conversa" no topo) — best-effort, nunca bloqueia o resto da tela
+  // se a rota falhar por qualquer motivo.
+  async function loadExamplesPendingCount(sessionId) {
+    const countEl = document.getElementById('examplesPendingCount');
+    if (!countEl) return;
+    try {
+      const res = await apiFetch(`${AGENT_API_BASE}/examples/candidates?session=${encodeURIComponent(sessionId)}&status=pending_review`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const count = (data.candidates || []).length;
+      countEl.textContent = count > 0 ? `(${count} pendente${count > 1 ? 's' : ''}) ` : '';
+    } catch {}
+  }
+
   instanceSelect.addEventListener('change', async () => {
     currentSessionId = instanceSelect.value;
     if (!currentSessionId) return;
     try {
       await loadConfigForInstance(currentSessionId);
       await loadKnowledgeDocs(currentSessionId);
+      loadExamplesPendingCount(currentSessionId);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }
@@ -1012,6 +1029,7 @@
       if (!currentSessionId) return;
       await loadConfigForInstance(currentSessionId);
       await loadKnowledgeDocs(currentSessionId);
+      loadExamplesPendingCount(currentSessionId);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
       console.error(err);

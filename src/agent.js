@@ -1,5 +1,6 @@
 const { callOpenAIRaw } = require('./openai');
 const { searchRelevantChunks } = require('./agentKnowledge');
+const { searchRelevantExamples } = require('./agentExamples');
 const store = require('./store');
 const agentConfig = require('./agentConfig');
 
@@ -36,10 +37,14 @@ function buildTranscript(messages, contactName) {
 // Monta o system message final: persona configurada pelo usuário (ou
 // a genérica padrão, se a instância nunca configurou uma) + base de
 // conhecimento em texto livre (colada direto) + trechos relevantes
-// vindos da busca semântica (se houver documentos processados).
+// vindos da busca semântica de documentos + exemplos de conversas
+// passadas boas (aprovadas manualmente e anonimizadas, ver
+// src/exampleApproval.js — nunca contém dado sensível de verdade).
 // Tudo isso é CONTEXTO estático — o histórico da conversa em si vai
 // como transcript separado, no user prompt (buildTranscript acima).
-function buildSystemMessage(config, relevantChunks) {
+// `relevantExamples` default [] pra retrocompatibilidade com qualquer
+// chamador que ainda passe só 2 argumentos.
+function buildSystemMessage(config, relevantChunks, relevantExamples = []) {
   const parts = [config.systemMessage?.trim() || DEFAULT_SYSTEM_MESSAGE];
 
   if (config.knowledgeText?.trim()) {
@@ -49,6 +54,15 @@ function buildSystemMessage(config, relevantChunks) {
   if (relevantChunks.length) {
     const chunksText = relevantChunks.map((c) => `- ${c.content}`).join('\n');
     parts.push(`Trechos relevantes de documentos da empresa (pode não cobrir tudo — use só o que for pertinente):\n${chunksText}`);
+  }
+
+  if (relevantExamples.length) {
+    const examplesText = relevantExamples.map((e, i) => `--- Exemplo ${i + 1} ---\n${e.text}`).join('\n\n');
+    parts.push(
+      `Exemplos de atendimentos anteriores bem avaliados (dados pessoais já removidos/substituídos ` +
+      `por placeholders como [NOME], [TELEFONE], [VALOR] — use como referência de ESTILO e ESTRUTURA de ` +
+      `resposta, nunca copie um placeholder literal na sua resposta real):\n${examplesText}`
+    );
   }
 
   return parts.join('\n\n');
@@ -64,16 +78,23 @@ async function generateAgentReply(sessionId, phone, leadMessage) {
   const config = await agentConfig.get(sessionId);
   if (!config.active) return null;
 
-  const relevantChunks = await searchRelevantChunks(sessionId, leadMessage).catch((err) => {
-    // best-effort: base de conhecimento sem embeddings ainda (nenhum
-    // doc processado, ou a própria busca falhando) NUNCA deve impedir
-    // a resposta — só empobrece o contexto.
-    console.error(`[agent] falha ao buscar conhecimento relevante (seguindo sem isso):`, err.message);
-    return [];
-  });
+  // Busca de chunks (documentos) e de exemplos (conversas passadas)
+  // são independentes entre si — rodam em paralelo pra não somar as
+  // duas latências. Ambas best-effort: nenhuma falha aqui impede a
+  // resposta, só empobrece o contexto.
+  const [relevantChunks, relevantExamples] = await Promise.all([
+    searchRelevantChunks(sessionId, leadMessage).catch((err) => {
+      console.error(`[agent] falha ao buscar conhecimento relevante (seguindo sem isso):`, err.message);
+      return [];
+    }),
+    searchRelevantExamples(sessionId, leadMessage).catch((err) => {
+      console.error(`[agent] falha ao buscar exemplos relevantes (seguindo sem isso):`, err.message);
+      return [];
+    }),
+  ]);
 
   const history = await store.getHistory(sessionId, phone);
-  const systemMessage = buildSystemMessage(config, relevantChunks);
+  const systemMessage = buildSystemMessage(config, relevantChunks, relevantExamples);
   const transcript = buildTranscript(history, null);
 
   const userPrompt = transcript

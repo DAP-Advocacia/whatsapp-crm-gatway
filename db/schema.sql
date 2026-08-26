@@ -1082,3 +1082,70 @@ create table if not exists agent_retry_queue (
   updated_at timestamptz not null default now()
 );
 create index if not exists idx_agent_retry_queue_pending on agent_retry_queue (session_id, status) where status = 'pending';
+
+-- ================================================================
+-- Aprendizado por exemplos (few-shot) do Agente de IA — extensão da
+-- base de conhecimento já existente (agent_knowledge_docs/chunks),
+-- mas pra "conversas passadas boas" em vez de "documentos da
+-- empresa". Aprovação SEMPRE manual (nunca heurística automática —
+-- decisão confirmada com o usuário) e anonimização SEMPRE automática
+-- + reverificada antes de um transcript virar exemplo reutilizável
+-- (escritório de advocacia — dado de cliente nunca pode vazar de uma
+-- conversa pra outra). Ver src/exampleCandidates.js,
+-- src/exampleAnonymizer.js, src/exampleApproval.js, src/agentExamples.js.
+-- ================================================================
+
+-- Fila de candidatas — criada só pelo botão manual "Marcar como
+-- exemplo" no painel de detalhes do Chat, nunca automaticamente.
+-- `transcript_raw` é o histórico da conversa NO MOMENTO do clique,
+-- COM dado sensível de verdade — necessário pro humano revisar o
+-- conteúdo original ao decidir aprovar/rejeitar. `status`:
+-- 'pending_review' -> 'approved' (anonimizado+revisado, virou linha
+-- em agent_examples) | 'rejected' (humano descartou sem nunca
+-- anonimizar) | 'anonymization_failed' (a reverificação
+-- determinística achou vazamento residual — NUNCA vira exemplo
+-- utilizável nesse estado). Sem CHECK constraint no texto do status
+-- — mesmo padrão de `suggestions` (validação na aplicação, toda
+-- transição via `where status = '<esperado>'`).
+create table if not exists agent_example_candidates (
+  id bigserial primary key,
+  session_id text not null references instances(id) on delete cascade,
+  phone text not null,
+  contact_name text,
+  transcript_raw text not null,
+  status text not null default 'pending_review',
+  anonymized_draft text,
+  anonymization_error text,
+  marked_by text not null,
+  marked_by_name text,
+  reviewed_by text,
+  reviewed_by_name text,
+  reviewed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_agent_example_candidates_session
+  on agent_example_candidates (session_id, status, created_at desc);
+
+-- Exemplos aprovados — só o texto FINAL (já anonimizado E revisado/
+-- editado por um humano na tela de aprovação, ver src/exampleApproval.js).
+-- NUNCA guarda o transcript bruto/com PII de verdade. `candidate_id`
+-- nullable com "on delete set null" — rastreabilidade de qual
+-- conversa originou o exemplo, mas o exemplo aprovado sobrevive
+-- mesmo se a linha de candidata for removida depois.
+create table if not exists agent_examples (
+  id bigserial primary key,
+  session_id text not null references instances(id) on delete cascade,
+  candidate_id bigint references agent_example_candidates(id) on delete set null,
+  anonymized_text text not null,
+  embedding vector(1536),
+  approved_by text not null,
+  approved_by_name text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_agent_examples_session on agent_examples (session_id, created_at desc);
+
+-- Índice IVFFlat — mesmo padrão/parâmetro de
+-- idx_agent_knowledge_chunks_embedding (lists=100, ponto de partida
+-- razoável pra poucos milhares de linhas).
+create index if not exists idx_agent_examples_embedding
+  on agent_examples using ivfflat (embedding vector_cosine_ops) with (lists = 100);
