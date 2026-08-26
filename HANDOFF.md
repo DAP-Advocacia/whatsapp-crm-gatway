@@ -9699,3 +9699,98 @@ de style, cor global aplicada normalmente); servido via HTTP real nas
 HEAD` que já existia ANTES de qualquer edição desta Parte, não é
 regressão).
 
+### Parte EP — Criação de negócio volta a depender do toggle do Agente de IA + bug real corrigido em `getConversationTags` (2026-08-26)
+
+Usuário reportou, vendo cards reais criados no Bitrix (categoria 628,
+print com 8 leads "Campanha"): só a instância do número
+`5521984490302` deveria ter a funcionalidade de criar card
+automaticamente — as outras não. Isso reverte parte da Parte EM
+(que tinha tornado a criação de card INCONDICIONAL, independente do
+Agente de IA estar ativo, unificando com o fluxo de Campanha).
+Confirmado com o usuário: reaproveitar o MESMO toggle "Agente ativo
+nesta instância" já existente em `agente-ia.html` — sem tela/config
+nova, sem separar "cria card" de "responde automaticamente" (são a
+mesma decisão agora, de novo).
+
+**Correção**: `handleNewLeadMessage` (`src/agentDispatch.js`) volta a
+checar `agentConfig.active` logo no início, saindo cedo (sem criar
+negócio, sem tag, sem `agent_enabled`) se `!active` — exatamente o
+comportamento de antes da Parte EM. A função `dispatchAgentReplyIfActive`
+(que isolava só a resposta) foi removida — a checagem única no topo
+cobre tudo de novo.
+
+**Achado durante os testes, bug real não relacionado à mudança
+principal**: `store.js::getConversationTags(sessionId, phone)`
+devolvia `[{"id":null,"name":null,"color":null,"fixed":null}]` (um
+objeto com todos os campos `null`) em vez de `[]` quando a conversa
+não tinha NENHUMA tag aplicada — só reproduzido agora porque testar o
+cenário "sem IA ativa" foi a primeira vez que testei essa função
+contra uma conversa genuinamente sem tag nenhuma. Causa: o `left join`
+com `conversation_tags`/`tags` sempre produz pelo menos 1 linha (a da
+própria conversa, com os campos das tabelas à direita todos `null`
+quando não há tag), e `json_agg` agrega essa linha "vazia" num array
+de 1 elemento — o `coalesce(...,'[]'::json)` só protegeria se
+`json_agg` recebesse ZERO linhas de entrada, o que nunca acontece
+aqui. **Corrigido** com `filter (where t.id is not null)` dentro do
+`json_agg` — testado com 3 cenários (conversa que nem existe ainda,
+conversa existente sem tag, conversa com tag real) confirmando `[]`
+nos 2 primeiros e o array correto no 3º, sem regressão.
+
+**Achado sério durante a implementação, corrigido antes de commitar**:
+ao investigar como listar instâncias no Painel Admin (pedido separado,
+ver Parte EQ), criei por engano uma 2ª definição de `listAll()` em
+`src/instances.js` — o JS simplesmente sobrescreve silenciosamente
+(sem erro) a função com o mesmo nome declarada depois no arquivo. A
+versão original (Parte ED, com `isOrphan`/union de instâncias órfãs)
+já era usada em produção por `src/routes/conversationAnalysis.js` e
+`src/server.js` — minha duplicata mais simples (sem órfãs) teria
+quebrado silenciosamente as duas. Pego ANTES de commitar, testando
+`listAll()` isoladamente e reparando no campo `isOrphan` que eu não
+tinha escrito — removida minha duplicata, mantida só a original.
+
+**Validação**: sintaxe validada; testado ponta a ponta — instância
+SEM IA ativa: Bitrix NÃO chamado, tags `[]`, `agent_enabled: null`
+(zero efeito colateral agora); instância COM IA ativa: negócio criado,
+tag aplicada, `agent_enabled: true` (comportamento de antes da Parte
+EM, preservado); `getConversationTags` testada isoladamente nos 3
+cenários; varredura completa de resíduo de teste no banco ao final.
+
+### Parte EQ — Instâncias mostram número + dono (pelo ID do Bitrix), no Admin (todas) e na tela normal (delegadas) (2026-08-26)
+
+Pedido do usuário: cada instância deve mostrar o número conectado e a
+pessoa logada (pelo ID do Bitrix) — "assim será melhor pra fazer a
+gestão das instâncias". Esclarecido com o usuário: útil de verdade em
+2 lugares diferentes — Painel Admin (visão de TODAS as instâncias do
+sistema, de qualquer dono) e a tela normal "Instâncias" (só quando
+delegada — instância própria já é obviamente "sua").
+
+**Painel Admin** (`GET /admin/instances`, novo, restrito a
+`requireSuperAdmin`): reaproveita `instancesStore.listAll()` já
+existente (Parte ED, inclui instâncias órfãs) cruzado com
+`listEmployees()`+`ownerIdFor` (mesmo padrão de `GET /admin/users`) +
+`getOwnNumbersBySession()` (mesma fonte de `GET /instances`) pro
+número real. `hrConfigured:false` (200, não erro) se
+`BITRIX_HR_WEBHOOK_URL` não estiver configurada — `ownerName` fica
+`null` pra todo mundo nesse caso, mas a lista de instâncias continua
+completa. Instância órfã sempre com `ownerName: null` (não há dono
+pra resolver). Nova seção "Instâncias" em `admin.html` (busca por
+número/nome/label, tabela simples — mesmo padrão visual de
+"Usuários"), carregada junto no boot da página.
+
+**Tela normal `instances.html`**: `GET /instances?owner=` (rota já
+existente) ganhou `ownerName` no retorno de cada instância — resolvido
+só quando `i.delegated === true` (evita chamar `listEmployees()`
+à toa quando ninguém tem instância delegada). Exibido junto da tag já
+existente "compartilhada com você", que virou "compartilhada por
+`<nome>`" quando o nome está disponível.
+
+**Validação**: sintaxe validada; testado via servidor real com
+`listEmployees`/`getOwnNumbersBySession` mockados — `GET
+/admin/instances` cruzando corretamente número+dono numa amostra real
+(303 instâncias, confirmado o cruzamento funcionando pra quem tinha
+dado mockado); `GET /instances` testado com uma delegação REAL
+criada/removida no banco, confirmando `ownerName` resolvido
+corretamente só na instância delegada; balanceamento de `<div>`
+confirmado em `admin.html` (101/101); banco varrido ao final, zero
+resíduo de teste.
+

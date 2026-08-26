@@ -739,7 +739,13 @@ async function removeTagFromConversation(sessionId, phone, tagId) {
 // pra fazer update otimista local, diferente do botão manual do Chat).
 async function getConversationTags(sessionId, phone) {
   const { rows } = await pool.query(
-    `select coalesce(json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color, 'fixed', t.fixed) order by t.name), '[]'::json) as tags
+    // `filter (where t.id is not null)` é essencial aqui — sem ele, uma
+    // conversa SEM nenhuma tag ainda produz 1 linha via os left joins
+    // (a da própria conversa, com t.id/t.name todos null), e json_agg
+    // agrega essa linha "vazia" num array de 1 elemento em vez de []
+    // (achado testando o cenário real: agente desativado, sem tag
+    // nenhuma aplicada — HANDOFF Parte EP).
+    `select coalesce(json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color, 'fixed', t.fixed) order by t.name) filter (where t.id is not null), '[]'::json) as tags
      from conversations c
      left join conversation_tags ctag on ctag.conversation_id = c.id
      left join tags t on t.id = ctag.tag_id

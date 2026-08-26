@@ -1334,7 +1334,7 @@
           </div>
           <span class="status-badge ${i.status}"><span class="status-dot"></span>${STATUS_LABEL[i.status] || i.status}</span>
         </div>
-        <div class="instance-phone">${i.phone ? 'Número: ' + escapeHtml(i.phone) : 'ainda não pareado'}${i.delegated ? ' · <span class="instance-delegated-tag">compartilhada com você</span>' : ''}</div>
+        <div class="instance-phone">${i.phone ? 'Número: ' + escapeHtml(i.phone) : 'ainda não pareado'}${i.delegated ? ` · <span class="instance-delegated-tag">compartilhada${i.ownerName ? ' por ' + escapeHtml(i.ownerName) : ' com você'}</span>` : ''}</div>
         <div class="instance-stats">
           <span class="instance-stat">${ICON_CONTACTS} ${i.contactCount != null ? i.contactCount : '—'} contatos</span>
           <span class="instance-stat">${ICON_GROUPS} ${i.groupCount != null ? i.groupCount : '—'} grupos</span>

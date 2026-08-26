@@ -1017,13 +1017,16 @@ formulários.
     o negócio só é criado depois, quando o visitante manda a 1ª mensagem de
     verdade respondendo — mesmo gatilho já usado pelo fluxo de Campanha (número
     direto, sem formulário), via `agentDispatch.js::handleNewLeadMessage`
-    (chamado de dentro de `onMessage`, `src/server.js`). Roda **sempre** que o
-    lead responde, com ou sem o Agente de IA ativo naquela instância — só a
-    *resposta automática* da IA (não a criação do card) depende de
-    `agentConfig.active`. `bitrix_deal_id`/`bitrix_contact_id` continuam
-    gravados de volta em `lead_form_submissions` nesse momento (não mais no
-    envio). Falha no Bitrix **nunca perde o lead local** — a submissão já foi
-    gravada antes, `bitrix_deal_id` só fica `NULL`.
+    (chamado de dentro de `onMessage`, `src/server.js`). **Só roda se o
+    Agente de IA estiver ativo** naquela instância (`agentConfig.active` —
+    revertido na Parte EP, 2026-08-26: chegou a ficar incondicional por um
+    tempo, mas o usuário confirmou que deve depender do mesmo toggle que já
+    liga a resposta automática, não são coisas separadas). Instância sem o
+    Agente de IA ativado nunca cria negócio, mesmo que o lead responda.
+    `bitrix_deal_id`/`bitrix_contact_id` continuam gravados de volta em
+    `lead_form_submissions` no momento da resposta (não mais no envio) quando
+    o negócio É criado. Falha no Bitrix **nunca perde o lead local** — a
+    submissão já foi gravada antes, `bitrix_deal_id` só fica `NULL`.
   - **Histórico de arquitetura**: a primeira versão criava um pipeline NOVO por LP
     (`crm.category.add`) — abandonado. Uma automação de controle de duplicidade já
     existente neste portal (checa o campo "Número do Processo") apaga automaticamente
@@ -1489,10 +1492,14 @@ acessível pelo link "Agente de IA" logo abaixo de "Chat" em todas as
   ver §11.5): telefone com submissão de formulário em
   `lead_form_submissions` → título/tag "LP: `<nome da LP>`"; número
   desconhecido mandando mensagem direta, sem formulário → "Campanha".
-  Criação do negócio + aplicação da tag rodam **em background**
-  (fire-and-forget), nunca atrasam a resposta da IA ao lead — a tag
-  aparece na lista de conversas do Chat em tempo real (WebSocket
-  `type: 'tags-updated'`), sem precisar de reload manual.
+  A criação do card **só acontece se o Agente de IA estiver ativo**
+  naquela instância (mesmo toggle acima — decisão confirmada com o
+  usuário na Parte EP: nunca cria negócio automaticamente numa
+  instância que não ativou o agente). Criação do negócio + aplicação
+  da tag rodam **em background** (fire-and-forget), nunca atrasam a
+  resposta da IA ao lead — a tag aparece na lista de conversas do Chat
+  em tempo real (WebSocket `type: 'tags-updated'`), sem precisar de
+  reload manual.
 - **Mensagem de sistema**: texto livre por instância, complementa (não
   substitui) uma persona padrão embutida — em branco, a IA usa só a
   persona padrão.
@@ -1832,7 +1839,7 @@ revelar que o recurso existe).
 | `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
 | `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
-| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `openConnectionEvent` (Alerta de instância caída, §14) — resposta também traz `limit`. |
+| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `openConnectionEvent` (Alerta de instância caída, §14) + `ownerName` (nome do dono pelo ID do Bitrix, só resolvido/exibido pra instância DELEGADA — Parte EQ) — resposta também traz `limit`. |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |
 | `instances/:id` | PUT | Body `{ owner, label }`. Renomeia. |
 | `instances/:id?owner=` | DELETE | Desconecta e remove a instância. |
@@ -1877,6 +1884,7 @@ revelar que o recurso existe).
 | `page-session/close` | POST | Body `{ sessionId, token }`. **Fora de `requireAuth`** — montada em `src/server.js` antes do `app.use('/api/whatsapp', requireAuth, ...)` de propósito, porque `navigator.sendBeacon` (quem chama essa rota, no `pagehide` de cada página) não permite header `Authorization`; o `token` vai no body e é verificado direto com `verifyAppToken`. |
 | `admin/whoami` | GET | `{ isSuperAdmin }` — sem expor a lista de admins. Usado pra revelar/esconder o item "Admin" da sidebar. |
 | `admin/users` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Lista TODO o cadastro do Bitrix (`listEmployees`, mesmo sem nunca ter aberto o app) cruzado com presença/último acesso/tempo total 30d/página favorita/bloqueio — tabela principal do Admin (§14.5). |
+| `admin/instances` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. TODAS as instâncias do sistema (`instancesStore.listAll()`, inclusive órfãs) cruzado com `listEmployees` (nome do dono) e `getOwnNumbersBySession` (número real) — gestão cross-usuário, seção "Instâncias" do Admin (§14.5, Parte EQ). `hrConfigured:false` (200) se `BITRIX_HR_WEBHOOK_URL` não estiver configurada — `ownerName` fica `null` pra todo mundo, lista de instâncias continua completa. |
 | `admin/users/:ownerId` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Histórico completo de `page_sessions` de uma pessoa, mais recente primeiro — botão "Detalhado". |
 | `admin/usage-metrics?days=` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Agregados globais (online agora, usuários ativos, tempo total do time, página mais acessada) + os 2 gráficos de barra — `days` padrão 30. |
 | `admin/users/:ownerId/block` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Body `{ reason? }`. Bloqueia o `ownerId` de usar o app inteiro (§14.5) — 400 se `ownerId === req.ownerId` (não dá pra se autobloquear). |

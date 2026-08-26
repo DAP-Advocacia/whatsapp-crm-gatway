@@ -793,6 +793,20 @@
   </div>
 
   <div class="panel">
+    <h2>Instâncias <span class="panel-count" id="instancesCount">—</span></h2>
+    <p class="panel-hint">Todas as instâncias de WhatsApp do sistema, de qualquer usuário — número conectado e quem está logado (pelo ID do Bitrix), pra gestão sem precisar entrar em cada conta.</p>
+    <input type="search" id="instancesSearch" placeholder="Buscar por número, nome ou label da instância…" style="margin-bottom:12px">
+    <table class="admin-table" id="instancesTable">
+      <thead>
+        <tr><th>Instância</th><th>Número</th><th>Dono (Bitrix)</th><th>Criada em</th></tr>
+      </thead>
+      <tbody id="instancesBody">
+        <tr><td colspan="4" class="skeleton-row">Carregando…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="panel">
     <h2>Publicar no Feed do Bitrix</h2>
     <p class="panel-hint">Anuncia uma novidade do sistema no Feed nativo do Bitrix ("Para todos os colaboradores"). Publicação é sempre manual — revise o texto com cuidado, edição/remoção depois só é possível direto no Bitrix.</p>
     <input type="text" id="feedPostTitle" placeholder="Título (opcional)" style="margin-bottom:10px;">
@@ -1227,6 +1241,52 @@
   function usersSearchTerm() {
     return (document.getElementById('usersSearch')?.value || '').trim().toLowerCase();
   }
+
+  // TODAS as instâncias do sistema (GET /admin/instances) — número real +
+  // dono resolvido pelo ID do Bitrix, pra gestão cross-usuário sem precisar
+  // entrar em cada conta. Mesmo padrão de busca client-side de loadUsers.
+  let instancesAdminRows = [];
+
+  async function loadInstancesAdmin() {
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/instances`);
+      if (!res.ok) throw new Error('falha ao carregar instâncias');
+      const data = await res.json();
+      instancesAdminRows = data.instances || [];
+      renderInstancesAdmin();
+    } catch (err) {
+      console.error('[admin] erro ao carregar instâncias:', err.message);
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  function renderInstancesAdmin() {
+    const term = (document.getElementById('instancesSearch')?.value || '').trim().toLowerCase();
+    const filtered = term
+      ? instancesAdminRows.filter((i) =>
+          (i.phone || '').toLowerCase().includes(term) ||
+          (i.ownerName || '').toLowerCase().includes(term) ||
+          (i.label || '').toLowerCase().includes(term)
+        )
+      : instancesAdminRows;
+
+    document.getElementById('instancesCount').textContent = instancesAdminRows.length;
+    const body = document.getElementById('instancesBody');
+    if (!filtered.length) {
+      body.innerHTML = `<tr><td colspan="4" class="empty-state">${instancesAdminRows.length ? 'Nenhuma instância corresponde à busca.' : 'Nenhuma instância ainda.'}</td></tr>`;
+      return;
+    }
+    body.innerHTML = filtered.map((i) => `
+      <tr>
+        <td>${escapeHtml(i.label)}${i.isOrphan ? ' <span style="color:var(--text-faint);font-size:11px;" title="Instância já removida, mantida por ter histórico de conversa">(removida)</span>' : ''}</td>
+        <td>${i.phone ? escapeHtml(i.phone) : '<span style="color:var(--text-faint);">não pareada</span>'}</td>
+        <td>${i.ownerName ? escapeHtml(i.ownerName) : '<span style="color:var(--text-faint);">—</span>'}</td>
+        <td>${new Date(i.createdAt).toLocaleDateString('pt-BR')}</td>
+      </tr>
+    `).join('');
+  }
+
+  document.getElementById('instancesSearch')?.addEventListener('input', renderInstancesAdmin);
 
   // Preenche os dropdowns de "Página favorita" e "Cargo" com os valores
   // que de fato aparecem em usersRows (não uma lista fixa) — evita opção
@@ -1977,7 +2037,7 @@
       startPresenceHeartbeat();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
 
-      await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions(), loadFeedPosts()]);
+      await Promise.all([loadUsageMetrics(), loadUsers(), loadInstancesAdmin(), loadSuggestions(), loadFeedPosts()]);
       setInterval(loadUsageMetrics, 30000);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');

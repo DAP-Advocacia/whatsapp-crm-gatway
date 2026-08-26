@@ -284,6 +284,14 @@ function createWhatsappRouter({ sessions, broadcast }) {
       await instancesStore.ensureDefault(owner); // garante que o próprio dono tem ao menos 1
       const list = await instancesStore.listAccessible(owner); // próprias + delegadas (ver instance_delegates)
       const ownNumbers = getOwnNumbersBySession();
+      // Nome do dono (pelo ID do Bitrix) — só resolvido/exibido pra
+      // instância DELEGADA (i.delegated), onde "de quem é" é informação
+      // nova pra quem está olhando; a própria instância já é óbvio de
+      // quem é (best-effort: null se BITRIX_HR_WEBHOOK_URL não estiver
+      // configurada, sem quebrar o resto da lista).
+      const needsOwnerName = list.some((i) => i.delegated);
+      const employees = needsOwnerName ? await listEmployees() : null;
+      const nameByOwnerId = employees ? new Map(employees.map((e) => [ownerIdFor(e.id), e.name])) : new Map();
       const withStatus = await Promise.all(list.map(async (i) => {
         let gateway = null;
         let status = 'offline';
@@ -306,7 +314,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // no card ("fora do ar há Xh") sem precisar de uma 2ª chamada por
         // instância visível na tela.
         const openConnectionEvent = await instanceHealthStore.getOpenConnectionEvent(i.id);
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent };
+        const ownerName = i.delegated ? (nameByOwnerId.get(i.ownerId) || null) : null;
+        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent, ownerName };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {
@@ -1778,6 +1787,47 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ users, hrConfigured: true });
     } catch (err) {
       console.error('[admin] falha ao listar usuários:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/instances
+  // TODAS as instâncias do sistema (instancesStore.listAll(), inclusive
+  // órfãs — mesma fonte já usada pela Auditoria de Conversas), com o
+  // NÚMERO real de WhatsApp (getOwnNumbersBySession, mesma fonte de
+  // GET /instances) e o NOME do dono resolvido via listEmployees() +
+  // ownerIdFor (mesmo padrão de GET /admin/users) — pra gestão
+  // cross-usuário sem precisar entrar em cada conta. hrConfigured:false
+  // (200, não erro) se BITRIX_HR_WEBHOOK_URL não estiver configurada —
+  // nesse caso ownerName fica null pra todo mundo (sem cadastro do
+  // Bitrix pra cruzar), mas a lista de instâncias em si continua
+  // completa. Instância órfã sempre com ownerName null (não há dono
+  // pra resolver, ver instancesStore.listAll()). Restrito a super
+  // admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/instances', requireSuperAdmin, async (req, res) => {
+    try {
+      const [allInstances, employees] = await Promise.all([
+        instancesStore.listAll(),
+        listEmployees(),
+      ]);
+      const ownNumbers = getOwnNumbersBySession();
+      const nameByOwnerId = employees ? new Map(employees.map((e) => [ownerIdFor(e.id), e.name])) : new Map();
+
+      const result = allInstances.map((i) => ({
+        id: i.id,
+        ownerId: i.ownerId,
+        ownerName: i.ownerId ? (nameByOwnerId.get(i.ownerId) || null) : null,
+        label: i.label,
+        phone: ownNumbers[i.id] || null,
+        isOrphan: i.isOrphan,
+        createdAt: i.createdAt,
+      }));
+
+      res.json({ instances: result, hrConfigured: employees !== null });
+    } catch (err) {
+      console.error('[admin] falha ao listar instâncias:', err.message);
       res.status(502).json({ error: err.message });
     }
   });
