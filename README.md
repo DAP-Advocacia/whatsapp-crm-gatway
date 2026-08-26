@@ -1473,6 +1473,18 @@ boilerplate de autenticação/paleta/heartbeat de `instances.html`),
 acessível pelo link "Agente de IA" logo abaixo de "Chat" em todas as
 16 telas com sidebar.
 
+**Edição em wizard de 4 etapas** (Parte ES, 2026-08-26 — antes era
+uma lista única com as 5 seções abaixo todas empilhadas visíveis de
+uma vez): barra de progresso no topo (`.wizard-steps`, puro CSS, sem
+lib) + botões Voltar/Próximo navegando entre (1) Instância + Ativação,
+(2) Mensagem de sistema, (3) Base de conhecimento — texto e upload
+lado a lado num grid de 2 colunas em tela larga, (4) Revisão (resumo
+somente-leitura de tudo, lido ao vivo do DOM das etapas anteriores) +
+"Salvar configuração", que só aparece na última etapa. Layout
+`#app` também ficou mais largo (`max-width: 1100px`, era `820px`),
+aproveitando melhor o espaço em tela grande sem virar uma linha de
+texto difícil de ler.
+
 - **Ativação por instância** (`agent_config`, PK `session_id`): toggle
   "Agente ativo nesta instância" — **nasce desligado** (`active =
   false`) pra toda instância nova; nenhum negócio é criado nem resposta

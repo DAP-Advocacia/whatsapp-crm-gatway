@@ -9794,3 +9794,100 @@ corretamente só na instância delegada; balanceamento de `<div>`
 confirmado em `admin.html` (101/101); banco varrido ao final, zero
 resíduo de teste.
 
+### Parte ER — Limpeza manual: 12 negócios de teste apagados da categoria 628 (2026-08-26)
+
+Ação de dados, não de código — registrada aqui por ser destrutiva e
+irreversível. Usuário pediu, com print confirmando "Follow up 12":
+apagar todos os negócios da categoria 628 (pipeline de produção) pra
+zerar o kanban antes de começar a usar de verdade. Confirmado com o
+usuário o escopo exato (todos, qualquer etapa/responsável) antes de
+executar.
+
+**Bloqueio real**: `.env` local com `BITRIX_WEBHOOK_URL` inválida de
+novo (mesmo tipo de problema já documentado — a credencial válida só
+existe no processo de produção). Usuário forneceu o valor real
+(webhook do usuário "Gabriel Alves", domínio
+`bitrix.dapadvocacia.com.br`, user `5305` — diferente do user `183168`
+que estava no `.env` antes) — testado com `profile.json` antes de
+qualquer ação (confirmado válido), depois `crm.deal.list` (leitura)
+listando os 12 negócios reais (todos "Campanha", criados entre
+26/08 15h07 e 19h46) pra confirmação final do usuário antes de apagar.
+
+**Execução**: `crm.deal.delete` chamado individualmente pros 12 IDs
+confirmados (5611015, 5611758, 5611767, 5611768, 5611801, 5611876,
+5612178, 5612204, 5612394, 5612411, 5612426, 5612476) — todos `result:
+true`. Confirmado o resultado REAL depois (não só o retorno da
+chamada): nova consulta `crm.deal.list` na categoria 628 devolveu 0
+negócios.
+
+**Limpeza complementar, confirmada com o usuário antes de fazer**: as
+12 conversas locais que guardavam esses `deal_id` (agora apontando pra
+negócio inexistente — clicar "Abrir no CRM" daria erro) foram
+atualizadas pra `deal_id = null`, escopado exatamente aos 12 IDs
+confirmados (não uma condição genérica). Nenhuma linha de
+`lead_form_submissions` afetada (os 12 eram todos origem "Campanha",
+sem formulário envolvido).
+
+`.env` local mantido com a credencial nova (confirmado com o usuário)
+— é a credencial válida em uso agora, útil pra testes futuros contra
+o Bitrix real sem precisar pedir de novo.
+
+### Parte ES — Agente de IA vira wizard de 4 etapas + layout mais largo (2026-08-26)
+
+Usuário reportou (com print): a tela de edição do Agente de IA
+(`agente-ia.html`) tinha as 5 seções todas visíveis empilhadas de uma
+vez, e o layout era uma coluna estreita centralizada (`max-width:
+820px`) com muito espaço vazio nas laterais em tela grande. Pedido:
+dividir em etapas + usar melhor o espaço da tela. Esclarecido com o
+usuário antes de implementar: wizard sequencial (Voltar/Próximo, não
+abas soltas nem menu lateral) e coluna mais larga mas ainda legível
+(não esticar até as bordas reais da tela).
+
+**Layout**: `#app` cresceu de `max-width: 820px` pra `1100px` — ainda
+centralizado, bem mais largo sem virar uma linha de texto absurda de
+ler. Nova barra de progresso (`.wizard-steps`) no topo do painel: 4
+pontos numerados conectados por uma linha, o atual em dourado, os já
+passados em verde com risco de conclusão — puramente CSS
+(`.done`/`.current` via classe, sem lib externa).
+
+**As 5 seções antigas viraram 4 etapas** (agrupadas por "o que a
+pessoa está decidindo", não uma seção = uma etapa 1:1, confirmado com
+o usuário): (1) Instância + Ativar/desativar juntos; (2) Mensagem de
+sistema; (3) Base de conhecimento — texto livre e upload de documento
+lado a lado num grid de 2 colunas (`@media (min-width: 760px)`,
+aproveitando a largura nova — cai pra 1 coluna em tela estreita); (4)
+Revisão + Salvar — resumo somente-leitura de tudo antes de confirmar
+(lê o DOM ao vivo das etapas anteriores, não um snapshot congelado —
+qualquer edição feita sem clicar "Próximo" de novo já aparece
+correta), com um placeholder explícito ("em branco — usa o padrão")
+pra campo vazio em vez de deixar a linha muda.
+
+**Navegação**: `wizardStep` (1-4) controla qual `.wizard-panel` está
+`.active` via `renderWizardStep()`; `goToWizardStep(n)` faz clamping
+(nunca sai de 1-4, mesmo chamado com 0 ou 99). Botão "Voltar" escondido
+(`visibility:hidden`, não `display:none` — preserva o espaço no layout,
+sem o botão "Próximo" pular de lugar) só na etapa 1; botão "Próximo"
+vira "Salvar configuração" só na última etapa (troca de `display`, não
+os dois nunca aparecem juntos). `boot()` chama `renderWizardStep()`
+logo no topo do `try`, antes de qualquer chamada de rede — a barra de
+progresso e a etapa 1 aparecem mesmo que a autenticação demore ou
+falhe.
+
+**Validação**: sintaxe validada (4 blocos `<script>`, todos OK);
+balanceamento de `<div>` confirmado (57/57); servido via HTTP real
+(200, toda a estrutura de 4 `wizardPanel`+barra de progresso+botões
+presente no HTML entregue). Testado o comportamento REAL do wizard
+(não só a leitura do código) via um agente que extraiu o bloco
+`<script>` de verdade e rodou num DOM simulado, com a própria
+metodologia validada injetando um bug proposital numa cópia à parte
+(confirmou que o harness de fato detecta regressão isolada) — 8
+cenários, todos passando: estado inicial (etapa 1 ativa, só ela);
+navegação `goToWizardStep(2)` (painel/step certos, anterior marcado
+`.done`); botões Próximo/Salvar trocando de visibilidade corretamente
+na última etapa vs. intermediária (e o inverso); `renderReviewSummary`
+disparado automaticamente ao chegar na etapa 4, com o texto certo
+presente; botão Voltar escondido só na etapa 1; clamping funcionando
+nos 2 sentidos (0→1, 99→4) sem exceção; revisão lendo o DOM ao vivo
+(texto digitado aparece na revisão sem re-clicar "Próximo"); campo
+vazio mostrando o placeholder certo em vez de linha muda.
+

@@ -143,12 +143,12 @@
     -webkit-font-smoothing: antialiased;
   }
   #app{
-    max-width: 820px;
-    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 820px) / 2));
-    padding: 28px 20px 70px;
+    max-width: 1100px;
+    margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 1100px) / 2));
+    padding: 28px 24px 70px;
     transition: margin-left .2s ease;
   }
-  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 820px) / 2)); }
+  html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 1100px) / 2)); }
 
   /* ======================================================
      Sidebar de navegação (retrátil) + notificações/toast
@@ -291,6 +291,57 @@
   }
   .panel h2{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; margin: 0 0 4px; }
   .panel-hint{ font-size: 11.5px; color: var(--text-faint); margin: 0 0 14px; line-height: 1.5; }
+
+  /* ======================================================
+     Wizard — barra de progresso + navegação Voltar/Próximo
+     ====================================================== */
+  .wizard-steps{
+    display: flex; align-items: flex-start; margin-bottom: 22px; padding: 0 4px;
+  }
+  .wizard-step{
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    flex: 1; position: relative; text-align: center;
+  }
+  .wizard-step-dot{
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    background: var(--surface-2); border: 2px solid var(--border);
+    color: var(--text-faint); font-size: 12.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    transition: background .2s, border-color .2s, color .2s;
+    position: relative; z-index: 2;
+  }
+  .wizard-step-label{
+    font-size: 11.5px; font-weight: 600; color: var(--text-faint); line-height: 1.3;
+    max-width: 110px; transition: color .2s;
+  }
+  .wizard-step::after{
+    content: ''; position: absolute; top: 15px; left: calc(50% + 21px); right: calc(-50% + 21px);
+    height: 2px; background: var(--border); z-index: 1; transition: background .2s;
+  }
+  .wizard-step:last-child::after{ display: none; }
+  .wizard-step.done .wizard-step-dot{ background: var(--green); border-color: var(--green); color: #0d1f14; }
+  .wizard-step.done::after{ background: var(--green); }
+  .wizard-step.current .wizard-step-dot{ background: var(--gold); border-color: var(--gold); color: #1a1408; }
+  .wizard-step.current .wizard-step-label{ color: var(--text); }
+  .wizard-step.done .wizard-step-label{ color: var(--text-muted); }
+
+  .wizard-panel{ display: none; }
+  .wizard-panel.active{ display: block; }
+
+  .wizard-grid{ display: grid; grid-template-columns: 1fr; gap: 18px; }
+  @media (min-width: 760px){
+    .wizard-grid.two-col{ grid-template-columns: 1fr 1fr; }
+  }
+  .wizard-field h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 13.5px; margin: 0 0 4px; }
+
+  .wizard-nav{ display: flex; justify-content: space-between; align-items: center; margin-top: 20px; }
+  .wizard-nav-right{ display: flex; gap: 8px; }
+
+  .review-row{ display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .review-row:last-child{ border-bottom: none; }
+  .review-row-label{ color: var(--text-faint); flex-shrink: 0; width: 160px; }
+  .review-row-value{ color: var(--text); text-align: right; white-space: pre-wrap; line-height: 1.5; flex: 1; }
+  .review-row-value.empty-value{ color: var(--text-faint); font-style: italic; }
 
   .field-label{ font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 14px 0 6px; display: block; }
   .field-label:first-child{ margin-top: 0; }
@@ -531,40 +582,83 @@
   <p class="subtitle" style="margin-top:-14px;"><a href="/agent-examples.html" id="examplesLink" style="color:var(--gold-dim);">Exemplos de conversa <span id="examplesPendingCount"></span>→</a></p>
 
   <div class="panel">
-    <h2>Instância</h2>
-    <p class="panel-hint">Cada número de WhatsApp tem sua própria configuração — escolha qual editar.</p>
-    <select id="instanceSelect"></select>
-  </div>
-
-  <div class="panel">
-    <div class="toggle-row">
-      <span class="toggle-label"><b>Agente ativo nesta instância</b></span>
-      <div class="toggle-switch" id="activeToggle" role="button" tabindex="0"><div class="knob"></div></div>
+    <div class="wizard-steps" id="wizardSteps">
+      <div class="wizard-step" data-step="1">
+        <div class="wizard-step-dot">1</div>
+        <div class="wizard-step-label">Instância &amp; ativação</div>
+      </div>
+      <div class="wizard-step" data-step="2">
+        <div class="wizard-step-dot">2</div>
+        <div class="wizard-step-label">Mensagem de sistema</div>
+      </div>
+      <div class="wizard-step" data-step="3">
+        <div class="wizard-step-dot">3</div>
+        <div class="wizard-step-label">Base de conhecimento</div>
+      </div>
+      <div class="wizard-step" data-step="4">
+        <div class="wizard-step-dot">4</div>
+        <div class="wizard-step-label">Revisão &amp; salvar</div>
+      </div>
     </div>
-    <p class="panel-hint" style="margin-bottom:0;">Desligado por padrão — enquanto estiver desligado, nada muda: nenhum card é criado no Bitrix, nenhuma resposta automática é enviada, mesmo com um lead novo mandando mensagem.</p>
-  </div>
 
-  <div class="panel">
-    <h2>Mensagem de sistema</h2>
-    <p class="panel-hint">A persona/tom que a IA deve seguir ao responder. Deixe em branco pra usar o padrão genérico (assistente de triagem cordial e breve).</p>
-    <textarea id="systemMessageInput" rows="4" placeholder="Ex: Você é o assistente virtual do escritório X, especializado em direito trabalhista. Seja cordial, direto e nunca dê aconselhamento jurídico definitivo — apenas oriente o lead a aguardar um advogado."></textarea>
-  </div>
+    <!-- Etapa 1 — Instância & ativação -->
+    <div class="wizard-panel" id="wizardPanel1">
+      <div class="wizard-field" style="margin-bottom:18px;">
+        <h3>Instância</h3>
+        <p class="panel-hint">Cada número de WhatsApp tem sua própria configuração — escolha qual editar.</p>
+        <select id="instanceSelect"></select>
+      </div>
+      <div class="wizard-field">
+        <div class="toggle-row">
+          <span class="toggle-label"><b>Agente ativo nesta instância</b></span>
+          <div class="toggle-switch" id="activeToggle" role="button" tabindex="0"><div class="knob"></div></div>
+        </div>
+        <p class="panel-hint" style="margin-bottom:0;">Desligado por padrão — enquanto estiver desligado, nada muda: nenhum card é criado no Bitrix, nenhuma resposta automática é enviada, mesmo com um lead novo mandando mensagem.</p>
+      </div>
+    </div>
 
-  <div class="panel">
-    <h2>Base de conhecimento — texto</h2>
-    <p class="panel-hint">Informações que a IA deve levar em conta em toda resposta (horário, serviços, preços, endereço…) — colado direto no contexto da conversa.</p>
-    <textarea id="knowledgeTextInput" rows="6" placeholder="Ex: Atendemos de segunda a sexta, das 9h às 18h. Áreas: trabalhista, cível, tributário. Endereço: Rua X, 123."></textarea>
-  </div>
+    <!-- Etapa 2 — Mensagem de sistema -->
+    <div class="wizard-panel" id="wizardPanel2">
+      <div class="wizard-field">
+        <h3>Mensagem de sistema</h3>
+        <p class="panel-hint">A persona/tom que a IA deve seguir ao responder. Deixe em branco pra usar o padrão genérico (assistente de triagem cordial e breve).</p>
+        <textarea id="systemMessageInput" rows="10" placeholder="Ex: Você é o assistente virtual do escritório X, especializado em direito trabalhista. Seja cordial, direto e nunca dê aconselhamento jurídico definitivo — apenas oriente o lead a aguardar um advogado."></textarea>
+      </div>
+    </div>
 
-  <div class="panel">
-    <h2>Base de conhecimento — documentos</h2>
-    <p class="panel-hint">PDF, DOCX ou TXT/Markdown — a IA busca o trecho mais relevante de cada documento pra usar na resposta (busca semântica), sem precisar colar o conteúdo inteiro no campo de texto acima.</p>
-    <input type="file" id="knowledgeFileInput" accept=".pdf,.docx,.txt,.md" style="margin-bottom:12px;">
-    <div id="knowledgeDocsList"></div>
-  </div>
+    <!-- Etapa 3 — Base de conhecimento (texto + documentos lado a lado) -->
+    <div class="wizard-panel" id="wizardPanel3">
+      <div class="wizard-grid two-col">
+        <div class="wizard-field">
+          <h3>Texto livre</h3>
+          <p class="panel-hint">Informações que a IA deve levar em conta em toda resposta (horário, serviços, preços, endereço…) — colado direto no contexto da conversa.</p>
+          <textarea id="knowledgeTextInput" rows="11" placeholder="Ex: Atendemos de segunda a sexta, das 9h às 18h. Áreas: trabalhista, cível, tributário. Endereço: Rua X, 123."></textarea>
+        </div>
+        <div class="wizard-field">
+          <h3>Documentos</h3>
+          <p class="panel-hint">PDF, DOCX ou TXT/Markdown — a IA busca o trecho mais relevante de cada documento pra usar na resposta (busca semântica), sem precisar colar o conteúdo inteiro no campo ao lado.</p>
+          <input type="file" id="knowledgeFileInput" accept=".pdf,.docx,.txt,.md" style="margin-bottom:12px;">
+          <div id="knowledgeDocsList"></div>
+        </div>
+      </div>
+    </div>
 
-  <div class="panel" style="display:flex; justify-content:flex-end;">
-    <button class="btn" id="saveConfigBtn">Salvar configuração</button>
+    <!-- Etapa 4 — Revisão & salvar -->
+    <div class="wizard-panel" id="wizardPanel4">
+      <div class="wizard-field">
+        <h3>Revise antes de salvar</h3>
+        <p class="panel-hint">Confira a configuração desta instância — "Salvar configuração" grava tudo de uma vez.</p>
+        <div id="reviewSummary"></div>
+      </div>
+    </div>
+
+    <div class="wizard-nav">
+      <button class="btn secondary" id="wizardBackBtn">← Voltar</button>
+      <div class="wizard-nav-right">
+        <button class="btn" id="wizardNextBtn">Próximo →</button>
+        <button class="btn" id="saveConfigBtn" style="display:none;">Salvar configuração</button>
+      </div>
+    </div>
   </div>
 
   <div class="credit-row">
@@ -861,6 +955,70 @@
   const knowledgeDocsList = document.getElementById('knowledgeDocsList');
   const saveConfigBtn = document.getElementById('saveConfigBtn');
 
+  // ---------------- Wizard — navegação entre as 4 etapas ----------------
+  const WIZARD_STEP_COUNT = 4;
+  let wizardStep = 1;
+  const wizardBackBtn = document.getElementById('wizardBackBtn');
+  const wizardNextBtn = document.getElementById('wizardNextBtn');
+
+  function renderWizardStep() {
+    for (let n = 1; n <= WIZARD_STEP_COUNT; n++) {
+      const panel = document.getElementById(`wizardPanel${n}`);
+      if (panel) panel.classList.toggle('active', n === wizardStep);
+      const stepEl = document.querySelector(`.wizard-step[data-step="${n}"]`);
+      if (stepEl) {
+        stepEl.classList.toggle('current', n === wizardStep);
+        stepEl.classList.toggle('done', n < wizardStep);
+      }
+    }
+    wizardBackBtn.style.visibility = wizardStep === 1 ? 'hidden' : 'visible';
+    const isLastStep = wizardStep === WIZARD_STEP_COUNT;
+    wizardNextBtn.style.display = isLastStep ? 'none' : '';
+    saveConfigBtn.style.display = isLastStep ? '' : 'none';
+    if (isLastStep) renderReviewSummary();
+  }
+
+  function goToWizardStep(n) {
+    wizardStep = Math.min(Math.max(n, 1), WIZARD_STEP_COUNT);
+    renderWizardStep();
+  }
+
+  wizardBackBtn.addEventListener('click', () => goToWizardStep(wizardStep - 1));
+  wizardNextBtn.addEventListener('click', () => goToWizardStep(wizardStep + 1));
+
+  function reviewRowHtml(label, value) {
+    const isEmpty = !value || !value.trim();
+    return `
+      <div class="review-row">
+        <span class="review-row-label">${escapeHtml(label)}</span>
+        <span class="review-row-value${isEmpty ? ' empty-value' : ''}">${isEmpty ? '(em branco — usa o padrão)' : escapeHtml(value)}</span>
+      </div>
+    `;
+  }
+
+  // Resumo somente-leitura antes de salvar — lê os campos das etapas
+  // anteriores diretamente do DOM (fonte única de verdade, sem duplicar
+  // estado), então reflete qualquer edição feita até o momento de
+  // revisar, mesmo sem ter clicado "Próximo" de novo.
+  function renderReviewSummary() {
+    const summary = document.getElementById('reviewSummary');
+    const instanceLabel = instanceSelect.selectedOptions[0]?.textContent || '—';
+    const docsCount = knowledgeDocsList.querySelectorAll('[data-doc-id]').length;
+    summary.innerHTML = `
+      ${reviewRowHtml('Instância', instanceLabel)}
+      <div class="review-row">
+        <span class="review-row-label">Agente ativo</span>
+        <span class="review-row-value">${activeToggle.classList.contains('on') ? 'Sim' : 'Não (desligado)'}</span>
+      </div>
+      ${reviewRowHtml('Mensagem de sistema', systemMessageInput.value)}
+      ${reviewRowHtml('Base de conhecimento — texto', knowledgeTextInput.value)}
+      <div class="review-row">
+        <span class="review-row-label">Documentos enviados</span>
+        <span class="review-row-value">${docsCount || '(nenhum ainda)'}</span>
+      </div>
+    `;
+  }
+
   async function loadInstanceOptions() {
     const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
     if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar instâncias');
@@ -1031,6 +1189,7 @@
 
   async function boot() {
     try {
+      renderWizardStep(); // começa na etapa 1, mesmo antes da sessão resolver
       myOwnerId = await resolveSession();
       startPresenceHeartbeat();
       revealAdminNavItemIfSuperAdmin();
