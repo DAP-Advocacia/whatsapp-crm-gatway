@@ -149,6 +149,26 @@ async function updateMessageStatus(sessionId, phone, messageId, status) {
   );
 }
 
+// Sobrescreve messages.text com a transcrição (áudio)/descrição (imagem/
+// vídeo) reconhecida via IA (src/mediaRecognition.js) — chamada de
+// src/agentDispatch.js (produção) DEPOIS que a mensagem já foi salva por
+// addMessage (nunca antes — a mensagem original com placeholder já existe
+// no banco/foi broadcastada no momento em que isto roda). Mesmo padrão de
+// updateMessageStatus acima (update por wa_message_id, escopado por
+// session_id+phone via join). Nunca lança por linha não encontrada —
+// best-effort, quem chama já trata falha (ver agentDispatch.js).
+async function updateMessageText(sessionId, phone, waMessageId, text) {
+  await pool.query(
+    `update messages m set text = $1
+     from conversations c
+     where m.conversation_id = c.id
+       and c.session_id = $2
+       and c.phone = $3
+       and m.wa_message_id = $4`,
+    [text, sessionId, phone, waMessageId]
+  );
+}
+
 // `emoji` vazio/null = reação removida (o WhatsApp manda reactionMessage com
 // texto vazio quando alguém tira a própria reação). `direction` é quem reagiu
 // ('in' = contato, 'out' = nosso lado, reagido direto do celular).
@@ -1006,6 +1026,7 @@ module.exports = {
   addMessage,
   getHistory,
   updateMessageStatus,
+  updateMessageText,
   setMessageReaction,
   getMessageForReply,
   setDealForPhone,

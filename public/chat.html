@@ -879,6 +879,13 @@
   .media-frame{ position: relative; line-height: 0; border-radius: 11px; overflow: hidden; background: #000; }
   .media-frame img, .media-frame video{ display: block; width: 100%; max-width: 260px; max-height: 320px; object-fit: cover; background: #000; }
   .caption-text{ padding: 7px 4px 0; }
+  /* Legenda de ÁUDIO gerada por reconhecimento de IA (transcrição via
+     Whisper, ver src/mediaRecognition.js) — visualmente distinta de
+     .caption-text (que é a legenda comum, o que o USUÁRIO escreveu) pra
+     deixar claro que é gerada, não digitada. Áudio nunca teve legenda
+     antes disso, então é sempre inequívoco: se msg.text vier preenchido
+     numa mensagem de áudio, é transcrição. */
+  .media-transcript{ padding: 6px 4px 0; font-size: 11px; font-style: italic; color: var(--text-faint); line-height: 1.4; }
   .bubble audio{ accent-color: var(--gold); height: 34px; }
   /* Fallback visível quando a mídia falha — no fetch (rede/timeout) ou na
      decodificação (evento `error` nativo do elemento, ex: codec sem
@@ -3897,7 +3904,12 @@
       return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video><div class="media-error" hidden><span>Não foi possível carregar o vídeo.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'audio' && msg.mediaUrl) {
-      return `<div class="media-frame media-frame-audio"><audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio><div class="media-error" hidden><span>Não foi possível carregar o áudio.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>`;
+      // msg.text numa mensagem de áudio é SEMPRE transcrição gerada por IA
+      // (áudio nunca teve legenda antes do reconhecimento de mídia, ver
+      // src/agentDispatch.js::recognizeMedia) — .media-transcript, não
+      // .caption-text (que é reservado pra legenda que o usuário digitou).
+      const transcript = msg.text ? `<div class="media-transcript">${escapeHtml(msg.text)}</div>` : '';
+      return `<div class="media-frame media-frame-audio"><audio controls data-media-url="${escapeHtml(msg.mediaUrl)}" style="max-width:220px;"></audio><div class="media-error" hidden><span>Não foi possível carregar o áudio.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${transcript}`;
     }
     if (msg.type === 'document' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';

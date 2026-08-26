@@ -6,6 +6,11 @@ const store = require('../store');
 const exampleCandidates = require('../exampleCandidates');
 const exampleApproval = require('../exampleApproval');
 const agentExamples = require('../agentExamples');
+const { buildSystemMessage, buildTranscript } = require('../agent');
+const { searchRelevantChunks } = require('../agentKnowledge');
+const { searchRelevantExamples } = require('../agentExamples');
+const { callOpenAIRaw } = require('../openai');
+const mediaRecognition = require('../mediaRecognition');
 
 /**
  * Rotas do Agente de IA (tela public/agente-ia.html) — configuração
@@ -118,6 +123,62 @@ function createAgentRouter() {
       res.json({ agentEnabled: await store.getAgentEnabled(session, phone) });
     } catch (err) {
       console.error('[agent] erro ao ler status:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /test-reply — Playground de teste (public/agente-ia.html).
+  // Gera uma resposta REAL da IA usando a config ATUAL DO FORMULÁRIO
+  // (systemMessage/knowledgeText vêm no body, NUNCA lidos de
+  // agent_config — podem ainda nem ter sido salvos) + busca semântica
+  // de documentos/exemplos JÁ SALVOS no banco pra esta instância (essa
+  // parte sim, do banco, igual produção). ISOLADO de qualquer efeito
+  // de produção: nunca chama store.addMessage, nunca agentDispatch,
+  // nunca cria negócio/tag, nunca lê/altera agent_config — só gera
+  // texto e devolve. `history` vem inteiro do body (memória do
+  // navegador, nunca persistido).
+  // ---------------------------------------------------------------
+  router.post('/test-reply', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, systemMessage, knowledgeText, history, leadMessage, mediaBase64, mediaType, mimetype } = req.body || {};
+    if (!leadMessage && !mediaBase64) {
+      return res.status(400).json({ error: 'leadMessage ou mediaBase64 é obrigatório' });
+    }
+    if (mediaBase64 && !['audio', 'image', 'video'].includes(mediaType)) {
+      return res.status(400).json({ error: 'mediaType deve ser "audio", "image" ou "video" quando mediaBase64 é enviado' });
+    }
+    try {
+      let effectiveMessage = leadMessage || '';
+      if (mediaBase64) {
+        const buffer = Buffer.from(mediaBase64, 'base64');
+        if (mediaType === 'audio') effectiveMessage = await mediaRecognition.transcribeAudio(buffer, mimetype);
+        else if (mediaType === 'image') effectiveMessage = await mediaRecognition.describeImage(buffer, mimetype);
+        else if (mediaType === 'video') effectiveMessage = await mediaRecognition.describeVideo(buffer);
+      }
+
+      const [relevantChunks, relevantExamples] = await Promise.all([
+        searchRelevantChunks(session, effectiveMessage).catch(() => []),
+        searchRelevantExamples(session, effectiveMessage).catch(() => []),
+      ]);
+
+      const config = { systemMessage: systemMessage || null, knowledgeText: knowledgeText || null };
+      const fullSystemMessage = buildSystemMessage(config, relevantChunks, relevantExamples);
+
+      // `history` (array de {direction, text, type?}) vem do body — mesmo
+      // formato que store.getHistory() devolveria, então buildTranscript
+      // (já existente, sem mudança) funciona igual. A mensagem atual
+      // (effectiveMessage) NÃO deve estar em `history` ainda (o frontend
+      // manda o histórico ANTERIOR + a mensagem nova separada, mesmo
+      // contrato de generateAgentReply).
+      const transcript = buildTranscript(history || [], null);
+      const userPrompt = transcript
+        ? `Histórico da conversa até agora:\n${transcript}\n\nResponda à última mensagem do contato.`
+        : `Mensagem do contato: ${effectiveMessage}`;
+
+      const reply = await callOpenAIRaw(fullSystemMessage, userPrompt, 500, false);
+      res.json({ reply: reply.text, recognizedText: mediaBase64 ? effectiveMessage : null });
+    } catch (err) {
+      console.error('[agent] erro ao gerar resposta de teste:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

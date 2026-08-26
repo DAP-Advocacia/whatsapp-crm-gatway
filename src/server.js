@@ -571,6 +571,15 @@ const sessions = new SessionManager({
             phone,
             pushName,
             leadMessageText: message.text || '',
+            // Dados de mídia (reconhecimento real via Whisper/Vision, ver
+            // src/mediaRecognition.js) — únicos campos já disponíveis em
+            // `message` (payload de _processIncomingMessage), sem
+            // round-trip novo. waMessageId localiza a linha certa pra
+            // atualizar messages.text depois do reconhecimento.
+            mediaUrl: message.mediaUrl || null,
+            mediaType: message.type !== 'text' ? message.type : null,
+            mimetype: message.mimetype || null,
+            waMessageId: message.id,
           }).catch((err) => console.error('[agent] falha ao processar lead novo:', err.message));
         }
       }

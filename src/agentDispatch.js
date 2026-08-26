@@ -6,6 +6,8 @@ const { generateAgentReply } = require('./agent');
 const bitrixCrm = require('./bitrixCrm');
 const agentRetryQueue = require('./agentRetryQueue');
 const leadForms = require('./leadForms');
+const media = require('./media');
+const mediaRecognition = require('./mediaRecognition');
 
 /**
  * Orquestração central do Agente de IA — chamado de dentro de
@@ -58,7 +60,7 @@ async function resolveLeadOrigin(phone) {
 // "Agente ativo nesta instância" já existente na tela agente-ia.html —
 // não há config separada pra "só criar card, sem responder" ou
 // vice-versa (decisão confirmada com o usuário, Parte EP).
-async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageText }) {
+async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageText, mediaUrl, mediaType, mimetype, waMessageId }) {
   const config = await agentConfigStore.get(sessionId);
   if (!config.active) return;
 
@@ -104,7 +106,60 @@ async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageTex
     })
     .catch((err) => console.error(`[agent-dispatch] falha ao aplicar tag de origem (${sessionId}/${phone}):`, err.message));
 
-  await dispatchAgentReply({ sessionId, phone, leadMessageText });
+  // Reconhecimento real de mídia (Whisper/Vision) — só roda se houver
+  // mídia reconhecível E o agente estiver ativo (já checado acima, mesmo
+  // toggle único que condiciona TUDO do Agente de IA). `await`-ado ANTES
+  // de dispatchAgentReply (decisão de produto: espera terminar antes de
+  // responder, não responde ao placeholder enquanto a mídia ainda está
+  // sendo processada). Best-effort: se falhar, segue com leadMessageText
+  // original (placeholder "[áudio]" etc, já presente no banco desde
+  // addMessage) — nunca bloqueia a resposta da IA.
+  //
+  // Imagem/vídeo com legenda PRÓPRIA do lead: preserva o texto original,
+  // não gera descrição de IA por cima (perderia dado real que o lead
+  // efetivamente escreveu). Áudio sempre reconhece (nunca tem legenda pra
+  // conflitar).
+  let effectiveMessage = leadMessageText;
+  if (mediaUrl && (mediaType === 'audio' || mediaType === 'image' || mediaType === 'video')) {
+    const hasOwnCaption = (mediaType === 'image' || mediaType === 'video') && leadMessageText?.trim();
+    if (!hasOwnCaption) {
+      try {
+        const recognized = await recognizeMedia({ sessionId, phone, waMessageId, mediaUrl, mediaType, mimetype });
+        if (recognized) effectiveMessage = recognized;
+      } catch (err) {
+        console.error(`[agent-dispatch] falha no reconhecimento de mídia (${sessionId}/${phone}), seguindo com placeholder:`, err.message);
+      }
+    }
+  }
+
+  await dispatchAgentReply({ sessionId, phone, leadMessageText: effectiveMessage });
+}
+
+// Baixa o buffer já salvo (media.downloadMedia, server-to-server, sem
+// passar por HTTP/signed URL — ver src/media.js), reconhece via
+// Whisper/Vision (src/mediaRecognition.js), e ATUALIZA messages.text
+// (store.updateMessageText) — pra todo lugar que já lê `text` (histórico
+// da IA, timeline, resumo, Chat) se beneficiar sem mudança adicional.
+// Devolve o texto reconhecido (usado IMEDIATAMENTE pela resposta da IA,
+// sem esperar um novo select) ou null se o tipo não for suportado.
+async function recognizeMedia({ sessionId, phone, waMessageId, mediaUrl, mediaType, mimetype }) {
+  const buffer = await media.downloadMedia(mediaUrl);
+
+  let text;
+  if (mediaType === 'audio') text = await mediaRecognition.transcribeAudio(buffer, mimetype);
+  else if (mediaType === 'image') text = await mediaRecognition.describeImage(buffer, mimetype);
+  else if (mediaType === 'video') text = await mediaRecognition.describeVideo(buffer);
+  else return null;
+
+  // Best-effort separado do reconhecimento em si — se o reconhecimento
+  // funcionou mas o UPDATE falhar (ex: hiccup de rede no banco), a IA
+  // ainda responde ao texto reconhecido (já em mãos, em memória), só a
+  // persistência pro Chat/timeline/histórico futuro que fica sem a
+  // transcrição dessa vez (o placeholder original continua no banco).
+  store.updateMessageText(sessionId, phone, waMessageId, text)
+    .catch((err) => console.error(`[agent-dispatch] falha ao persistir transcrição (${sessionId}/${phone}/${waMessageId}):`, err.message));
+
+  return text;
 }
 
 // Gera a resposta do agente e tenta enviar; se a instância estiver

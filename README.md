@@ -1545,6 +1545,42 @@ texto difícil de ler.
   entram no prompt como referência de estilo/conteúdo (mesmo
   mecanismo de busca semântica da base de conhecimento, aplicado a
   "exemplos" em vez de "documentos").
+- **Reconhecimento real de mídia** (Parte EU, 2026-08-26): a mensagem-
+  gatilho de um lead novo pode ser áudio (transcrito via Whisper),
+  imagem ou vídeo (descritos via Vision, `gpt-4o-mini`) — a IA responde
+  ao CONTEÚDO real, não a um placeholder genérico `[áudio]`/`[imagem]`/
+  `[vídeo]`. Módulo `src/mediaRecognition.js`. **Escopo**: só a 1ª
+  mensagem de um lead novo (mesmo ponto que já dispara a resposta
+  automática) — mídia em conversa já em andamento continua com o
+  placeholder de sempre. **Condicional ao mesmo toggle** "Agente ativo
+  nesta instância" (nunca roda, e portanto nunca gasta API, em instância
+  sem o agente ativado — decisão de custo confirmada com o usuário).
+  Vídeo: descreve **1 frame único** (segundo 1, via ffmpeg), com
+  prefixo `"[Descrição do início do vídeo] "` deixando explícito que é
+  parcial. Imagem/vídeo **com legenda própria do lead** preservam o
+  texto original (não substituem por descrição de IA). O texto
+  reconhecido sobrescreve `messages.text` (sem coluna nova) — todo
+  consumidor que já lê essa coluna (histórico da IA, resumo de
+  conversa, Auditoria) se beneficia automaticamente; no Chat, áudio
+  ganha uma legenda discreta (`.media-transcript`, itálico/menor,
+  visualmente distinta da legenda comum) abaixo do player. **Importante**:
+  transcrição de áudio depende do modelo `whisper-1` estar habilitado
+  no projeto OpenAI associado a `OPENAI_API_KEY` (platform.openai.com →
+  projeto → Model access) — sem isso, `transcribeAudio` lança erro e o
+  fluxo segue best-effort com o placeholder de sempre (nunca quebra a
+  resposta da IA).
+- **Playground de teste**: painel próprio abaixo do wizard (visível em
+  qualquer etapa, não preso à etapa 3) com conversa simulada REAL — a
+  IA responde de verdade, usando a configuração **atual do formulário**
+  (mesmo sem clicar "Salvar configuração") + documentos/exemplos já
+  salvos no banco. Composer aceita texto e anexo de áudio/imagem/vídeo
+  (até 20MB, mesmo limite do Chat) — usa o mesmo `mediaRecognition.js`
+  de produção. Switch **Computador/Tablet** encolhe visualmente o
+  frame (`max-width: 480px`), só CSS. **Totalmente isolado de produção**:
+  histórico só em memória do navegador (nunca persistido), nunca cria
+  negócio/tag/conversa no banco, nunca lê nem altera `agent_config` —
+  rota dedicada `POST /api/agent/test-reply` (ver §16) recebe a config
+  direto no body.
 
 ---
 
@@ -1923,6 +1959,7 @@ POST/PUT) — `requireSession` confere que a instância pertence ao
 | `knowledge/:docId?session=` | DELETE | Remove o documento (chunks em cascata) e o arquivo original do Storage. 404 se o documento não existir ou não for dessa instância. |
 | `conversations/toggle` | POST | Body `{ session, phone, enabled }`. Liga/desliga o agente numa conversa específica — usado pelo botão "Desativar IA nesta conversa" do Chat (§9) e pela auto-desativação quando um humano responde manualmente. |
 | `conversations/status?session=&phone=` | GET | `{ enabled }` — `null` se a conversa nunca teve o agente envolvido (cliente antigo, nunca foi lead novo com agente ativo). |
+| `test-reply` | POST | Body `{ session, systemMessage?, knowledgeText?, history?, leadMessage?, mediaBase64?, mediaType?, mimetype? }` (`leadMessage` ou `mediaBase64` obrigatório; `mediaType` um de `audio`/`image`/`video`). Playground de teste (§14.7) — gera resposta REAL usando a config **do body**, nunca lida de `agent_config` (reflete o formulário mesmo sem "Salvar"). Devolve `{ reply, recognizedText }` (`recognizedText` só quando havia mídia). **Isolado de produção**: nunca chama `store.addMessage`/`agentDispatch`/`agentConfigStore.get` — só lê via busca semântica (`searchRelevantChunks`/`searchRelevantExamples`, read-only). |
 | `examples/candidates` | POST | Body `{ session, phone, contactName?, transcriptRaw, markedByName? }`. Cria uma candidata a exemplo few-shot (§14.8) — usado pelo botão "Marcar como exemplo" do Chat. `markedBy` é sempre `req.ownerId` (nunca do body). |
 | `examples/candidates?session=&status=` | GET | `{ candidates:[...] }` — lista candidatas, `status` opcional filtra (`pending_review`/`approved`/`rejected`/`anonymization_failed`). |
 | `examples/candidates/:id/review` | POST | Body `{ session }`. Passo 1 de aprovação: roda a anonimização (regex+IA+reverificação), devolve `{ status:'ready_for_review', draft }` ou `{ status:'anonymization_failed', error }` — nunca cria exemplo definitivo aqui. |

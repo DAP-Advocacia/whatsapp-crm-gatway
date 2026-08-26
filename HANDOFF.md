@@ -9921,3 +9921,142 @@ de `<div>` confirmado (57/57, sem mudança — só CSS foi alterado);
 servido via HTTP real confirmando os 2 trechos de CSS presentes no
 HTML entregue.
 
+### Parte EU — Reconhecimento real de mídia (produção) + Playground de teste no Agente de IA (2026-08-26)
+
+Pedido do usuário, formado incrementalmente durante os ajustes visuais
+da Parte ET: um "live-preview" no wizard com switch tablet/computador,
+"como se fosse um playground para o usuário fazer testes" — e a
+resposta simulada devendo "reconhecer áudio, imagem, vídeo etc". Ao
+esclarecer o escopo, o pedido se expandiu pra **produção real também**
+(o agente que atende leads de verdade passa a reconhecer mídia, não só
+o playground). Passou por modo de planejamento formal: 2 agentes
+Explore mapearam o fluxo real de mídia (`onMessage`/`_processIncomingMessage`
+em `server.js`/`whatsapp.js`, `media.downloadMedia`, `messages.text`),
+1 agente Plan desenhou a arquitetura, seguido de 4 perguntas de
+esclarecimento via `AskUserQuestion` — todas as 4 seguiram a
+recomendação do plano.
+
+**Decisão de custo importante, com reversão explícita do usuário**: ao
+planejar, perguntei se o reconhecimento deveria rodar "sempre, qualquer
+instância" ou "só quando o Agente de IA está ativo" — a resposta
+inicial foi "sempre". Ao explicitar o custo real (~300 instâncias,
+custo contínuo de API OpenAI por mensagem, sem opção de desligar por
+instância), reperguntei — o usuário reconsiderou e **confirmou "só
+quando ativo"**, decisão final implementada.
+
+**Módulo novo `src/mediaRecognition.js`** — isolado de `_callOpenAI`
+(`src/openai.js`), que é compartilhada por 6 consumidores de produção
+(risco de regressão numa função crítica não valia ~15 linhas de fetch
+economizadas): `transcribeAudio` (Whisper, `/v1/audio/transcriptions`,
+multipart via `FormData`/`Blob` NATIVOS do Node 24 — confirmado runtime
+v24.18.0, nenhuma lib nova), `describeImage` (Vision via `gpt-4o-mini`,
+`content` como array de blocks), `describeVideo` (extrai 1 frame no
+segundo 1 via `fluent-ffmpeg`/`ffmpeg-static` — já dependências do
+projeto, mesmo padrão de tmpdir de `src/audioConvert.js` — e reaproveita
+`describeImage`, com prefixo `"[Descrição do início do vídeo] "`
+deixando explícito que é parcial).
+
+**`src/store.js`**: nova `updateMessageText(sessionId, phone,
+waMessageId, text)`, mesmo padrão exato de `updateMessageStatus` já
+existente (update por `wa_message_id`, escopado por `session_id`+`phone`
+via join) — sobrescreve `messages.text` (sem coluna nova; todo consumidor
+de IA que já lê essa coluna — `buildTranscript`, `summarizeConversation`,
+`generateConversationAnalysisInsight` — se beneficia automaticamente).
+
+**`src/agentDispatch.js`**: `handleNewLeadMessage` ganhou params
+`mediaUrl`/`mediaType`/`mimetype`/`waMessageId`. Logo após `if
+(!config.active) return;` (o mesmo toggle único que já condiciona TUDO
+do Agente de IA) e **antes** de `dispatchAgentReply` (espera terminar
+antes de responder — decisão de produto): reconhece a mídia via
+`recognizeMedia` (nova, mesmo arquivo) se houver `mediaUrl` de tipo
+áudio/imagem/vídeo; imagem/vídeo **com legenda própria do lead**
+preserva o texto original (não gera descrição de IA por cima — evita
+perder dado real que o lead escreveu); best-effort — falha no
+reconhecimento nunca bloqueia a resposta, segue com o placeholder
+original. `recognizeMedia` baixa o buffer via `media.downloadMedia`
+(já existia, 100% reaproveitável, server-to-server), reconhece, e
+dispara `store.updateMessageText` fire-and-forget (a IA já usa o texto
+reconhecido em memória, sem esperar um novo select).
+
+**`src/server.js`**: `onMessage`, no bloco que já chama
+`handleNewLeadMessage`, passa também os 4 campos de mídia — únicos
+dados já disponíveis em `message` (confirmado por leitura de
+`_processIncomingMessage` em `whatsapp.js`: `message.id` = `wa_message_id`,
+`mediaUrl`, `mimetype`, `type`), sem round-trip novo.
+
+**Escopo confirmado com o usuário**: reconhecimento roda **só na
+mensagem-gatilho de lead novo** (mesmo ponto onde o Agente de IA já
+responde automaticamente hoje) — mídia em conversas já em andamento
+continua com o placeholder de sempre, sem regressão mas também sem
+expansão além do pedido. Sem broadcast em tempo real pro Chat — a
+legenda aparece na próxima vez que a conversa for recarregada
+(extremamente improvável um atendente já estar com aquela conversa
+aberta no instante exato em que ela é criada).
+
+**`public/chat.html`**: bolha de áudio (única mídia que nunca tinha
+`text` antes) ganhou `.media-transcript` (menor, itálico,
+`var(--text-faint)`) — visualmente distinto de `.caption-text` (legenda
+comum, o que o usuário digitou). Imagem/vídeo continuam usando
+`.caption-text` como sempre (agora pode vir preenchido por IA quando o
+lead não escreveu nada — indistinguível de legenda manual, aceitável).
+
+**Playground de teste** — `public/agente-ia.html`, painel `#playgroundPanel`
+**fora do grid de etapas do wizard** (não é 3ª coluna da Etapa 3): a
+config de qualquer etapa afeta o teste (system message é etapa 2, base
+de conhecimento é etapa 3), e a altura variável de conversa multi-turno
+não deveria competir com a altura fixa do wizard. Switch tablet/
+computador (`.view-switch`, mesmo precedente de `public/index.html`)
+aplica/remove `max-width:480px` no frame. Bolhas na MESMA paleta
+dourada do resto do app (`--gold`/`#261f16`) — nunca verde. Rota nova
+`POST /api/agent/test-reply` (`src/routes/agent.js`) gera resposta REAL
+usando `systemMessage`/`knowledgeText` **do body** (nunca lidos de
+`agent_config` — reflete o formulário mesmo sem salvar) + busca
+semântica de documentos/exemplos já salvos (`searchRelevantChunks`/
+`searchRelevantExamples`, já existentes, reaproveitados sem duplicação)
++ `buildSystemMessage`/`buildTranscript` (já exportados de `src/agent.js`).
+Isolamento total de produção confirmado: nunca chama `store.addMessage`,
+`agentDispatch`, `agentConfigStore.get`.
+
+**Descoberta de infraestrutura durante o teste real**: testando
+`transcribeAudio` contra a API OpenAI de verdade (áudio de fala real
+gerado via TTS do Windows), veio erro — o projeto associado à
+`OPENAI_API_KEY` atual **não tem acesso ao modelo `whisper-1`**
+(`GET /v1/models` confirmou: só 8 modelos habilitados, nenhum Whisper;
+`gpt-4o`/`gpt-4o-mini` presentes, por isso Vision funciona). Não é bug
+de código — precisa ser habilitado no painel da OpenAI
+(platform.openai.com → projeto → Model access), fora do alcance do
+agente. Avisado ao usuário via `AskUserQuestion`; decisão: seguir com
+imagem/vídeo (já validados) e todo o Playground, deixando o código de
+áudio pronto mas pendente dessa ativação externa.
+
+**Validação — testes reais contra API/banco, não só leitura de código**:
+- `describeImage`: imagem de teste gerada via ffmpeg (padrão de cores),
+  chamada real à Vision → descrição correta do conteúdo.
+- `describeVideo`: vídeo de teste (barras SMPTE) gerado via ffmpeg →
+  frame extraído + descrição real correta (“calibrar monitores”),
+  prefixo presente, **zero arquivos temporários órfãos** depois (cleanup
+  confirmado no caminho de sucesso).
+- `transcribeAudio`: bloqueado por falta de acesso ao modelo (ver acima)
+  — código correto, pendente de ativação externa.
+- Rota `/test-reply`: lógica completa testada direto (sem servidor HTTP,
+  já que `requireAuth` exige token Bitrix real) — config "não salva"
+  (persona em maiúsculas + emoji, base de conhecimento fictícia)
+  refletida corretamente na resposta real da IA; multi-turno com
+  `history` (`buildTranscript` confirmado montando o transcript certo);
+  **zero linhas novas em `messages`/`conversations`** confirmado por
+  contagem real antes/depois (961539/72411 → 961539/72411) — isolamento
+  de produção provado com números, não só inspeção de código.
+- Frontend do playground: 6 testes funcionais reais (harness já usado
+  nesta sessão — bloco `<script>` extraído + DOM mínimo simulado + tudo
+  dentro de um único `eval()`), cobrindo rejeição de arquivo >20MB antes
+  de qualquer rede, tipo não suportado, render de bolha (`in`=`theirs`/
+  `out`=`mine`), montagem correta do body de `/test-reply` (config ao
+  vivo dos inputs, `history` sem a mensagem atual), reset, e toggle
+  tablet/computador — todos passaram.
+- Todos os IDs `getElementById` do bloco novo confirmados existentes no
+  HTML e todas as dependências (`escapeHtml`, `apiFetch`,
+  `AGENT_API_BASE`, `currentSessionId`, `systemMessageInput`,
+  `knowledgeTextInput`) confirmadas declaradas ANTES do bloco, mesmo
+  escopo de `<script>` — evita repetir o bug de escopo já visto nesta
+  sessão (Parte EN).
+
