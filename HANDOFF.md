@@ -9546,3 +9546,88 @@ aplicada. Banco varrido ao final, zero resíduo de teste.
 **Fecha a última pendência técnica do plano original da Parte EJ.**
 Não há mais nenhum item bloqueado do desenho inicial do Agente de IA.
 
+### Parte EN — `onboarding.html` nunca carregava o SDK do BX24: seção Admin sumindo + paleta pessoal nunca aplicava (2026-08-26)
+
+Usuário reportou 2 sintomas juntos, na mesma navegação: (1) print
+mostrando a sidebar sem "Admin"/"Auditoria de Conversas" ao clicar em
+"Onboarding"; (2) "a cor não está seguindo a cor selecionada na aba
+aparência". Também reportado, num momento anterior da mesma sessão, o
+mesmo tipo de sintoma em `agent-examples.html` (tela nova, few-shot) —
+investigado primeiro por um agente em background, que comparou
+byte-a-byte com `agente-ia.html` (que funciona) e testou a execução
+real dos 4 blocos `<script>`: **código idêntico, sem bug** — a
+simulação funcionou perfeitamente. Isso, junto do padrão dos 2
+sintomas aparecendo sempre relacionados a `onboarding.html`,
+redirecionou a investigação pra essa tela especificamente.
+
+**Causa raiz real, confirmada por teste rigoroso (não só leitura)**:
+`public/onboarding.html` **nunca carregava** `<script
+src="https://api.bitrix24.com/api/v1/">` — 0 ocorrências no arquivo
+inteiro, confirmado tanto no disco quanto em produção
+(`curl .../onboarding.html | grep -c api.bitrix24.com` → `0`). A
+autenticação foi adicionada na Parte EG (2026-08-25, "seção Admin
+pisca e some" — antes disso a tela nunca tinha NENHUMA lógica de
+login, decisão deliberada desde a Parte DO), replicando
+`verifyAuth`/`revealAdminNavItemIfSuperAdmin`/`applyPersonalPalette`
+das outras 16 telas — mas sem incluir a tag `<script>` que carrega o
+SDK necessário pra `window.BX24` sequer existir. Todo o código
+(`if (window.BX24) { BX24.init(...) }`) estava correto, mas a
+condição nunca era verdadeira de forma confiável — `window.BX24`
+podia existir "por acaso" (contexto do iframe compartilhado entre
+navegações dentro do Bitrix), explicando por que o sintoma era
+intermitente, não 100% reprodutível.
+
+**Prova rigorosa, com 2 testes reais opostos** (script extraído do
+próprio arquivo, rodado via `eval` num sandbox Node com `document`/
+`fetch`/`BX24` fake — não uma reescrita hipotética):
+1. **Sem `window.BX24`** (cenário do bug, antes do fix): `verifyAuth()`
+   lança `"abra esta página de dentro do Bitrix24"`, log
+   `[auth] falha ao autenticar`, `__applyPalette` chamada só 1 vez
+   (com a paleta GLOBAL de `/api/brand`, nunca a pessoal) — reproduz
+   exatamente os 2 sintomas relatados.
+2. **Com `window.BX24`** (depois do fix, incluindo `BX24.init`
+   demorando 30ms de propósito, pra simular timing real): fluxo
+   completo roda — `/api/brand` → `/api/auth/verify` →
+   `/admin/whoami` + `/conversation-analysis/whoami` → `/api/settings`
+   → `__applyPalette` chamada de novo com a paleta PESSOAL real
+   (`#5b8dd8`, cor de teste usada na simulação).
+
+**Correção**: `<script src="https://api.bitrix24.com/api/v1/">`
+adicionado na posição correta (entre os blocos existentes, antes do
+bloco que usa `BX24.init`), mesmo padrão das outras 16 telas.
+Aproveitado pra reforçar a robustez do código de autenticação com o
+mesmo padrão defensivo já usado em `agente-ia.html`: `bx24Ready`
+(Promise resolvida só quando `BX24.init` de fato termina, não só "já
+estamos dentro do callback"), com `verifyAuth()` fazendo `await
+bx24Ready` antes de chamar `BX24.getAuth()` — evita depender
+implicitamente de que "estar dentro do callback de BX24.init" seja
+garantia suficiente. Isso exigiu remover o `BX24.init` duplicado que
+já existia mais abaixo no arquivo (um só pra resolver `bx24Ready`,
+outro que já fazia `verifyAuth`+`revealAdminNavItemIfSuperAdmin`+
+`applyPersonalPalette`) — unificado num único IIFE que só chama
+`verifyAuth()` diretamente (que já aguarda `bx24Ready` internamente),
+evitando o risco de comportamento indefinido de chamar `BX24.init`
+2x no mesmo documento.
+
+**Varredura de regressão**: confirmado com números reais que a mesma
+lacuna NÃO existe em nenhuma outra tela — `grep -l "BX24\."
+public/*.html | wc -l` = 21, `grep -l "api.bitrix24.com/api/v1"
+public/*.html | wc -l` = 21, igualdade exata (incluindo
+`onboarding.html` já corrigida).
+
+**Validação**: sintaxe validada (3 blocos `&lt;script&gt;` inline, todos
+OK); confirmado via servidor HTTP real que `BX24.init` é chamado
+exatamente 1 vez no HTML servido (não duplicado); os 2 testes opostos
+acima (sem/com `window.BX24`) confirmam empiricamente tanto a
+reprodução do bug quanto a correção — não é suposição.
+
+**Sobre o relato original de `agent-examples.html`**: como o agente em
+background já tinha confirmado que o código dessa tela está correto e
+idêntico ao de `agente-ia.html` (funcional), a hipótese mais provável
+é que o teste do usuário nessa tela tenha coincidido com o mesmo
+estado de sessão/navegação afetado pelo bug de `onboarding.html` (ex:
+navegou de uma pra outra na mesma aba, ou testou logo depois). Pedir
+ao usuário pra reconfirmar `agent-examples.html` depois deste deploy —
+se persistir mesmo assim, é um bug diferente, não coberto por esta
+correção.
+

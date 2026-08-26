@@ -1283,11 +1283,14 @@ todo mundo aparece, mesmo quem nunca abriu o app) com presença, último
 acesso, tempo total (30d), página favorita e bloqueio.
 
 - **Online/offline**: sessão ativa do próprio app, não presença do
-  Bitrix24 em si. Toda tela autenticada (exceto `onboarding.html`, que
-  não tem nenhuma autenticação Bitrix hoje) manda um heartbeat pra `POST
+  Bitrix24 em si. Toda tela manda um heartbeat pra `POST
   /presence/heartbeat` a cada 30s enquanto estiver aberta — qualquer
-  usuário autenticado pode mandar, não só admin. Considerado offline sem
-  heartbeat por 90s (3 ciclos perdidos).
+  usuário autenticado pode mandar, não só admin — **exceto
+  `onboarding.html`**: tem autenticação mínima desde a Parte EG
+  (`verifyAuth`/paleta pessoal/revelar seção Admin, ver HANDOFF Partes
+  EG e EN), mas deliberadamente sem heartbeat/toast/`confirmDialog` —
+  escopo reduzido ao que a tela precisa, nunca aparece como "online" no
+  Admin. Considerado offline sem heartbeat por 90s (3 ciclos perdidos).
 - **Trackeamento real de tempo/página** (tabela `page_sessions`,
   `src/pageSessions.js`) — diferente do heartbeat (que só marca "app
   aberto agora"), aqui é medido tempo de verdade por página, entrada e
