@@ -30,38 +30,48 @@
       }
       return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
     }
-    window.__applyPalette = function (b, prefix) {
+    // `skipVisual` (HANDOFF Parte EO — janela residual deixada em aberto
+    // desde a Parte DP): quando true, grava o cache normalmente mas NUNCA
+    // toca document.documentElement.style — usado pelo fetch de brand
+    // GLOBAL mais abaixo quando já existe paleta PESSOAL em cache, pra não
+    // reaplicar visualmente a cor padrão por um instante antes do fetch da
+    // paleta pessoal confirmar de novo.
+    window.__applyPalette = function (b, prefix, skipVisual) {
       prefix = prefix || 'palette_';
       var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
-          document.documentElement.style.setProperty(MAP[k], values[k]);
+          if (!skipVisual) document.documentElement.style.setProperty(MAP[k], values[k]);
           localStorage.setItem(prefix + k, values[k]);
           if (RGB_MAP[k]) {
             var rgbStr = hexToRgbStr(values[k]);
-            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            if (!skipVisual) document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
             localStorage.setItem(prefix + k + '_rgb', rgbStr);
           }
           if (k === 'bg') {
             var surf = deriveSurfaces(values[k]);
-            document.documentElement.style.setProperty('--surface', surf.surface);
-            document.documentElement.style.setProperty('--surface-2', surf.surface2);
-            document.documentElement.style.setProperty('--border', surf.border);
+            if (!skipVisual) {
+              document.documentElement.style.setProperty('--surface', surf.surface);
+              document.documentElement.style.setProperty('--surface-2', surf.surface2);
+              document.documentElement.style.setProperty('--border', surf.border);
+            }
             localStorage.setItem(prefix + 'surface', surf.surface);
             localStorage.setItem(prefix + 'surface2', surf.surface2);
             localStorage.setItem(prefix + 'border', surf.border);
           }
         } else {
-          document.documentElement.style.removeProperty(MAP[k]);
+          if (!skipVisual) document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem(prefix + k);
           if (RGB_MAP[k]) {
-            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            if (!skipVisual) document.documentElement.style.removeProperty(RGB_MAP[k]);
             localStorage.removeItem(prefix + k + '_rgb');
           }
           if (k === 'bg') {
-            document.documentElement.style.removeProperty('--surface');
-            document.documentElement.style.removeProperty('--surface-2');
-            document.documentElement.style.removeProperty('--border');
+            if (!skipVisual) {
+              document.documentElement.style.removeProperty('--surface');
+              document.documentElement.style.removeProperty('--surface-2');
+              document.documentElement.style.removeProperty('--border');
+            }
             localStorage.removeItem(prefix + 'surface');
             localStorage.removeItem(prefix + 'surface2');
             localStorage.removeItem(prefix + 'border');
@@ -824,7 +834,10 @@
   fetch('/api/brand').then((r) => r.json()).then((b) => {
     if (b.name) document.querySelectorAll('.firm-name').forEach((el) => { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach((el) => { el.textContent = b.subtitle; });
-    if (window.__applyPalette) window.__applyPalette(b);
+    // Já existe paleta PESSOAL em cache? Então só atualiza o cache do
+    // brand GLOBAL em segundo plano (skipVisual) — ver HANDOFF Parte EO.
+    const hasPersonalPalette = !!localStorage.getItem('personalPalette_gold');
+    if (window.__applyPalette) window.__applyPalette(b, 'palette_', hasPersonalPalette);
   }).catch(() => {}).finally(() => { if (window.resolveBrandReady) window.resolveBrandReady(); });
 })();
 </script>

@@ -9631,3 +9631,71 @@ ao usuário pra reconfirmar `agent-examples.html` depois deste deploy —
 se persistir mesmo assim, é um bug diferente, não coberto por esta
 correção.
 
+### Parte EO — Flash residual "cor padrão → cor pessoal" ao navegar entre telas, mesmo com paleta pessoal já configurada há tempo (2026-08-26)
+
+Usuário reportou de novo, em outro usuário (que já usa o sistema com
+paleta pessoal configurada há tempo, não é caso de cache vazio na 1ª
+visita): ao clicar numa aba da sidebar, a tela mostra um
+"screenupdating"/troca rápida — cor padrão (marrom/dourado) → cor
+pessoal escolhida. Investigado achando primeiro que seria o mesmo bug
+do Onboarding (Parte EN) — descartado: reproduzido com evidência real
+que o cache-antes-do-paint (Parte DP) já aplica a cor pessoal
+corretamente ANTES do 1º paint quando ela já está em cache (testado
+via `eval` simulando 2ª visita). O sintoma real é outro, e já estava
+**documentado desde 18/08/2026 como limitação conhecida, nunca
+corrigida** (Parte DP, seção "Limitação conhecida, não corrigida"):
+uma janela real, DENTRO da mesma carga de página, entre o fetch de
+`/api/brand` (paleta GLOBAL, sempre roda) completar e reaplicar a cor
+padrão visualmente por cima, e o fetch de `applyPersonalPalette()`
+(paleta PESSOAL) completar de novo por cima dela — um flash
+"pessoal → global → pessoal" a cada navegação, mesmo com tudo
+funcionando "corretamente" no fim.
+
+**Causa raiz confirmada por leitura + teste**: em todas as 17 telas
+com sidebar, `if (window.__applyPalette) window.__applyPalette(b);`
+(chamado dentro do `.then()` do fetch de `/api/brand`) sempre aplica
+a cor GLOBAL **visualmente** (`document.documentElement.style.
+setProperty`), incondicionalmente — mesmo quando o usuário já tem
+paleta pessoal ativa e o cache já está certo. Só depois, quando
+`applyPersonalPalette()` (que espera `brandReady`) completa seu
+próprio fetch a `/api/settings`, a cor pessoal é reaplicada por cima
+de novo — daí o flash.
+
+**Correção**: `window.__applyPalette(b, prefix, skipVisual)` ganhou um
+3º parâmetro — quando `true`, grava o cache normalmente (`localStorage.
+setItem`) mas NUNCA toca `document.documentElement.style` (nem
+`setProperty` nem `removeProperty`). No fetch de `/api/brand`, antes de
+chamar `__applyPalette`, cada tela agora checa `!!localStorage.getItem(
+'personalPalette_gold')` — se já existe paleta pessoal em cache, chama
+com `skipVisual=true` (só atualiza o cache global em segundo plano,
+sem tocar a tela); sem paleta pessoal, comportamento idêntico ao de
+sempre (aplica a cor global visualmente, sem mudança nenhuma pra quem
+nunca configurou paleta pessoal).
+
+Aplicado nas 18 telas com sidebar (17 com fetch de `/api/brand` + a
+própria `settings.html`, que não faz esse fetch mas recebeu a mesma
+assinatura de função por consistência). Achado no processo: o código
+de `__applyPalette` é IDÊNTICO nas 18 telas — a única diferença real
+era `\r\n` vs `\n` (3 arquivos com CRLF: `dashboard.html`/
+`settings.html`/`onboarding.html`) e 2 estilos de sintaxe no fetch de
+brand (`function(){}` em 14 telas, arrow function `() => {}` em
+`faq.html`/`conversation-analysis.html`/`admin.html`) — nenhuma
+diferença de LÓGICA. Aplicado via script em massa (14 telas,
+confirmado programaticamente antes de gravar) + 4 correções manuais
+pros 4 arquivos com variação de sintaxe (`onboarding.html` — que
+também usa `let resolveBrandReady` local, não `window.
+resolveBrandReady`, ver Parte EI; e os 3 de arrow function).
+
+**Validação**: sintaxe validada nas 18 telas (`node -c` equivalente
+por bloco `<script>`, todos OK); testado via `eval` do código REAL
+extraído de 6 telas amostradas (2 com `function`, 2 com arrow
+function, incluindo `onboarding.html` com seu padrão próprio de
+`resolveBrandReady`) — com paleta pessoal em cache, ZERO mudanças de
+`style` durante o fetch de brand (flash eliminado); sem paleta
+pessoal, comportamento idêntico ao de sempre preservado (11 mudanças
+de style, cor global aplicada normalmente); servido via HTTP real nas
+18 telas (200); balanceamento de `<div>` confirmado em todas (achado
+`chat.html` com 183/182 pré-existente — confirmado via `git show
+HEAD` que já existia ANTES de qualquer edição desta Parte, não é
+regressão).
+

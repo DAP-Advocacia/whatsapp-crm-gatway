@@ -328,9 +328,17 @@ mudança — ver a tabela de rotas mais abaixo). Cache local
 SEPARADAS (`palette_*` vs `personalPalette_*`, HANDOFF Parte DP,
 2026-08-18) — antes usava as mesmas chaves pras duas, o que causava
 um flash visível "cor pessoal → cor global → cor pessoal" a cada
-navegação pra quem tinha paleta pessoal configurada (o fetch de
-`/api/brand`, que sempre roda, reaplicava a cor global por cima do
-cache antes do fetch da paleta pessoal confirmar de novo). A
+navegação pra quem tinha paleta pessoal configurada. O
+cache-antes-do-paint resolveu o flash entre PÁGINAS (recarregando do
+zero); uma janela residual DENTRO da mesma carga (`window.
+__applyPalette` sempre reaplicando a cor global visualmente antes do
+fetch da paleta pessoal confirmar de novo) ficou documentada como
+limitação conhecida por mais de uma semana até ser corrigida de vez
+na Parte EO (2026-08-26): `__applyPalette(b, prefix, skipVisual)`
+ganhou um 3º parâmetro — com paleta pessoal já em cache, o fetch de
+`/api/brand` só atualiza o cache global em segundo plano
+(`skipVisual=true`), sem tocar `document.documentElement.style`
+nenhuma vez; sem paleta pessoal, nada muda. A
 sidebar é duplicada em cada um dos 13 arquivos HTML (não há componente/
 template compartilhado — vanilla JS/HTML, sem build step), então qualquer
 mudança nela (item novo, reordenar, mudar seção) precisa ser replicada
