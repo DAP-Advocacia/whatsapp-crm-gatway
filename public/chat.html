@@ -4397,6 +4397,20 @@
         if (msg) { msg.status = payload.status; renderMessages(); }
       }
 
+      // Tag aplicada pelo BACKEND sem ninguém interagindo na UI (ex:
+      // Agente de IA marcando a origem "LP: <nome>"/"Campanha" ao
+      // assumir um lead novo) — diferente do botão manual de tag no
+      // Chat, que já faz update otimista local sem precisar disso.
+      if (payload.type === 'tags-updated') {
+        const phone = payload.phone;
+        updateConvTagsInList(id, phone, payload.tags || []);
+        renderConvList();
+        if (state.active && state.active.sessionId === id && state.active.phone === phone) {
+          state.active.tags = payload.tags || [];
+          renderTagsRow();
+        }
+      }
+
       if (payload.type === 'reaction' && state.active && state.active.sessionId === id) {
         const msg = state.messages.find((m) => m.id === payload.targetId);
         if (msg) {

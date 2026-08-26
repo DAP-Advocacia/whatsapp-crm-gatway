@@ -9308,3 +9308,62 @@ real; demais tabelas novas zeradas.
    verdade) fica bloqueado pelo item 2 — fazer assim que o webhook for
    resolvido.
 
+### Parte EK — Teste end-to-end real do Agente de IA: 2 achados (categoria errada em produção + tag sem broadcast) (2026-08-26)
+
+Usuário rodou o teste ponta a ponta pendente da Parte EJ: ativou o
+agente de verdade em 2 instâncias (`..._183168`/`..._180388`) e mandou
+mensagens de números nunca vistos. **1º teste** ("Caio Araujo"): IA
+respondeu automaticamente, mas o negócio caiu na categoria **229**
+("FUNIL DE TESTE (NÃO UTILIZAR)"), não na 628 — confirmado abrindo o
+negócio direto no Bitrix (`crm/deal/details/<id>`, sem filtro nenhum).
+
+**Causa raiz**: `BITRIX_LEADS_CATEGORY_ID` foi trocada de 229→628 só
+no `.env` **local** (Parte EJ) — `.env` nunca é versionado no Git
+(corretamente, está no `.gitignore`), então essa troca nunca chegou
+no `.env` de **produção** (EasyPanel), que continuava com `229`. Não é
+bug de código — o valor certo só existia numa máquina que não é a que
+roda o processo real. **Corrigido pelo usuário direto no painel do
+EasyPanel** (variável de ambiente + reinício do processo). Validado
+com um 2º teste real (novo número, "Robson Costa"/pizzaria): negócio
+criado sem "FUNIL DE TESTE" no topo, dentro da categoria 628 de
+verdade, fonte "Campanha/mensagem direta", resposta da IA entregue no
+WhatsApp real, resumo de IA gerado na timeline do card.
+
+**2º achado, no mesmo teste**: a tag de origem ("Campanha") estava
+salva corretamente no banco (confirmado por query direta —
+`conversation_tags`/`tags`), mas não aparecia na lista de conversas do
+Chat sem dar F5. Causa: `agentDispatch.js` aplica a tag em background
+(fire-and-forget, de propósito — nunca atrasa a resposta da IA), mas
+sem nenhum broadcast via WebSocket. Diferente do botão manual de tag
+no Chat (`chat.html:3057-3067`), que já está com a tela aberta e faz
+update **otimista local** sem depender do servidor — aqui é o
+**backend** aplicando a tag sem ninguém interagindo na UI, então só um
+broadcast novo resolve.
+
+**Correção**: nova função [src/store.js](src/store.js)
+`getConversationTags(sessionId, phone)` (mesma forma da subquery
+lateral já usada em `listConversations`, isolada pra uso pontual);
+[src/agentDispatch.js](src/agentDispatch.js) passou a chamar
+`_broadcast(sessionId, phone, { type: 'tags-updated', tags })` logo
+depois de aplicar a tag (mesma variável de módulo `_broadcast` já
+injetada via `configure()`, usada até então só dentro de
+`sendAgentReply`); [public/chat.html](public/chat.html) ganhou o
+handler `payload.type === 'tags-updated'` no WebSocket (mesmo padrão
+de `type === 'assignment'` já existente) — atualiza a tag na lista via
+`updateConvTagsInList` + `renderConvList()`, e a linha de tags da
+conversa aberta (`renderTagsRow()`) se for a mesma que está sendo
+vista.
+
+**Validação**: sintaxe validada (`node -c` nos 2 JS; os 4 blocos
+`<script>` inline de `chat.html` checados individualmente);
+`getConversationTags` testada contra o banco real (conversa com tag →
+array correto; conversa inexistente → `[]`, sem lançar); fluxo completo
+simulado (cria tag + aplica na conversa + monta o payload de broadcast)
+confirmando o formato exato esperado pelo frontend, com limpeza
+completa dos dados de teste depois.
+
+**ABERTO**: o mesmo tipo de lacuna (mudança feita pelo servidor sem
+broadcast) pode existir em outros pontos que criam/alteram tag fora de
+uma ação direta do usuário na tela — não auditado neste Parte, só o
+caminho do Agente de IA foi corrigido.
+

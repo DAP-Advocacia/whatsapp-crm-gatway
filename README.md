@@ -1469,7 +1469,9 @@ acessível pelo link "Agente de IA" logo abaixo de "Chat" em todas as
   `lead_form_submissions` → título/tag "LP: `<nome da LP>`"; número
   desconhecido mandando mensagem direta, sem formulário → "Campanha".
   Criação do negócio + aplicação da tag rodam **em background**
-  (fire-and-forget), nunca atrasam a resposta da IA ao lead.
+  (fire-and-forget), nunca atrasam a resposta da IA ao lead — a tag
+  aparece na lista de conversas do Chat em tempo real (WebSocket
+  `type: 'tags-updated'`), sem precisar de reload manual.
 - **Mensagem de sistema**: texto livre por instância, complementa (não
   substitui) uma persona padrão embutida — em branco, a IA usa só a
   persona padrão.
@@ -1970,7 +1972,7 @@ encerrado → vencedor; preserva query string + `#formulario`).
 
 | Rota | Uso |
 |---|---|
-| `/api/whatsapp/stream?session=&phone=&token=` | Envia `{ type: 'message', message }` (mensagem nova), `{ type: 'status', status }` (mudança de conexão), `{ type: 'reaction', ... }`, `{ type: 'message-status', ... }` e `{ type: 'presence', phone, state }` (contato digitando/gravando — ver §9) em tempo real. Broadcast direcionado por `(session, phone)` — todas as abas olhando a mesma conversa recebem. `token` é obrigatório e precisa pertencer ao dono da `session` (senão a conexão é recusada com 401/403 antes do upgrade). |
+| `/api/whatsapp/stream?session=&phone=&token=` | Envia `{ type: 'message', message }` (mensagem nova), `{ type: 'status', status }` (mudança de conexão), `{ type: 'reaction', ... }`, `{ type: 'message-status', ... }`, `{ type: 'presence', phone, state }` (contato digitando/gravando — ver §9) e `{ type: 'tags-updated', phone, tags }` (tag aplicada pelo SERVIDOR sem ação do usuário na tela — ex: Agente de IA marcando a origem do lead, §14.7) em tempo real. Broadcast direcionado por `(session, phone)` — todas as abas olhando a mesma conversa recebem. `token` é obrigatório e precisa pertencer ao dono da `session` (senão a conexão é recusada com 401/403 antes do upgrade). |
 
 ---
 
@@ -2586,16 +2588,27 @@ reintroduzidos por engano:
   Aparelhos conectados) e à rede da máquina que roda o gateway; ver
   HANDOFF Parte AY, itens 257-258, e o caveat em §11.5 sobre a taxa de
   "entrega" não medir entrega de verdade.
-- [ ] **Agente de IA (§14.7) — webhook `BITRIX_WEBHOOK_URL` (CRM) com
-  credencial inválida** ("Invalid request credentials", confirmado via
-  curl direto contra o Bitrix, fora do código deste app) — bloqueia o
-  teste real de `createDealForNewLead` (criação de negócio quando um
-  lead novo responde à IA). Todo o resto do fluxo (config, base de
-  conhecimento, geração de resposta, fila de retry) já foi validado
-  sem depender dessa peça. Ver HANDOFF Parte EJ.
+- [x] ~~Agente de IA (§14.7) — webhook `BITRIX_WEBHOOK_URL` (CRM) com
+  credencial inválida~~ — resolvido, mas a causa real era outra: o
+  webhook em si sempre esteve válido em produção; o card criado pelo
+  teste real caiu na categoria **229** ("FUNIL DE TESTE") em vez de
+  **628** porque `BITRIX_LEADS_CATEGORY_ID` só tinha sido trocada no
+  `.env` **local** (Parte EJ) — `.env` nunca é versionado, então a
+  troca nunca chegou no `.env` de produção (EasyPanel). Corrigido
+  atualizando a variável direto no painel + reiniciando o processo;
+  validado com um 2º teste real (negócio criado na 628 de verdade,
+  sem "FUNIL DE TESTE"). Ver HANDOFF Parte EK.
 - [ ] **Agente de IA (§14.7) — `src/routes/leads.js` ainda cria o
   negócio no `POST /:slug`** (envio do formulário de LP), não quando o
   lead responde — a migração desse gatilho pra `agentDispatch` (parte
-  do plano aprovado) foi deliberadamente adiada até o item acima ser
-  resolvido, pra não trocar uma via já validada (formulário) por uma
-  ainda bloqueada por credencial inválida. Ver HANDOFF Parte EJ.
+  do plano aprovado) segue pendente; não há mais bloqueio técnico
+  (webhook e categoria já validados de ponta a ponta, Parte EK), só
+  ainda não foi feita. Ver HANDOFF Partes EJ/EK.
+- [ ] **Agente de IA (§14.7) — auditar outros pontos que aplicam tag
+  fora de ação direta do usuário na tela** — a tag de origem aplicada
+  pelo Agente de IA (background, sem UI aberta) ficava sem aparecer no
+  Chat sem F5 até a Parte EK adicionar um broadcast dedicado
+  (`type: 'tags-updated'`); não foi auditado se existe alguma outra
+  rotina do sistema com a mesma lacuna (tag aplicada pelo servidor sem
+  o usuário estar interagindo, logo sem o update otimista local que o
+  botão manual de tag já tem). Ver HANDOFF Parte EK.

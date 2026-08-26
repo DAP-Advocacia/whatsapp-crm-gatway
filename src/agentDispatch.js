@@ -66,9 +66,18 @@ async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageTex
     .catch((err) => console.error(`[agent-dispatch] falha ao criar negócio no Bitrix (${sessionId}/${phone}):`, err.message));
 
   // Tag de origem — mesmo padrão exato já usado pelo fluxo de LP
-  // (fixed=true, tag de sistema sem botão de remover no Chat).
+  // (fixed=true, tag de sistema sem botão de remover no Chat). Emite
+  // um broadcast próprio depois de aplicar — diferente da tag manual
+  // (botão do Chat), que já está com a tela aberta e atualiza a lista
+  // localmente sem depender do servidor, aqui é o BACKEND aplicando a
+  // tag sem ninguém interagindo na UI, então sem isso a tag só
+  // apareceria depois de um reload manual (achado testando o fluxo
+  // real de ponta a ponta).
   store.createTag(sessionId, origin.kind === 'lp' ? `LP: ${origin.label}` : 'Campanha', null, true)
-    .then((tag) => store.addTagToConversation(sessionId, phone, tag.id))
+    .then(async (tag) => {
+      await store.addTagToConversation(sessionId, phone, tag.id);
+      if (_broadcast) _broadcast(sessionId, phone, { type: 'tags-updated', tags: await store.getConversationTags(sessionId, phone) });
+    })
     .catch((err) => console.error(`[agent-dispatch] falha ao aplicar tag de origem (${sessionId}/${phone}):`, err.message));
 
   await dispatchAgentReply({ sessionId, phone, leadMessageText });

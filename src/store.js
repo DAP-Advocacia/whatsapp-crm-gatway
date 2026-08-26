@@ -732,6 +732,23 @@ async function removeTagFromConversation(sessionId, phone, tagId) {
   );
 }
 
+// Tags de UMA conversa específica — mesma forma da subquery lateral já
+// usada dentro de listConversations, só que isolada (sem o resto da
+// projeção) pra uso pontual: ex. agentDispatch precisa broadcastar as
+// tags atuais depois de aplicar uma tag em background (sem UI aberta
+// pra fazer update otimista local, diferente do botão manual do Chat).
+async function getConversationTags(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select coalesce(json_agg(json_build_object('id', t.id, 'name', t.name, 'color', t.color, 'fixed', t.fixed) order by t.name), '[]'::json) as tags
+     from conversations c
+     left join conversation_tags ctag on ctag.conversation_id = c.id
+     left join tags t on t.id = ctag.tag_id
+     where c.session_id = $1 and c.phone = $2`,
+    [sessionId, phone]
+  );
+  return rows[0]?.tags || [];
+}
+
 // Foto de perfil cacheada (ver GET /api/whatsapp/avatar) — evita consultar a
 // API do WhatsApp de novo pra cada contato toda vez que a lista carrega.
 async function getAvatarUrl(sessionId, phone) {
@@ -1012,6 +1029,7 @@ module.exports = {
   deleteTag,
   addTagToConversation,
   removeTagFromConversation,
+  getConversationTags,
   getAvatarUrl,
   setAvatarUrl,
   createGroupRecord,
