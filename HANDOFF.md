@@ -9891,3 +9891,33 @@ nos 2 sentidos (0→1, 99→4) sem exceção; revisão lendo o DOM ao vivo
 (texto digitado aparece na revisão sem re-clicar "Próximo"); campo
 vazio mostrando o placeholder certo em vez de linha muda.
 
+### Parte ET — Ajustes visuais no wizard: painel maior + input de arquivo no tema (2026-08-26)
+
+Usuário viu o wizard novo (Parte ES) no ar e pediu 2 ajustes: (1)
+"aumente o tamanho dos cards" — confirmado que era o painel do
+wizard como um todo, não os campos de texto individuais; (2) o botão
+`<input type="file">` (upload de documento, etapa 3) tinha aparência
+NATIVA do navegador (cinza claro, fora do tema escuro/dourado do
+resto do sistema).
+
+**Painel maior**: `#app > .panel:first-of-type` (o container do
+wizard, distinto de qualquer `.panel` comum de outra tela) ganhou
+`padding: 32px 40px 28px` (era `18px` geral) e `min-height: 560px` +
+`display:flex; flex-direction:column`, com `.wizard-panel.active{
+flex:1 }` — o conteúdo de cada etapa ocupa o espaço disponível, e a
+barra `.wizard-nav` (Voltar/Próximo) ganhou uma linha divisória sutil
+acima, marcando visualmente o rodapé do painel maior.
+
+**Input de arquivo estilizado**: `::file-selector-button` (pseudo-
+elemento padrão moderno, suportado no Chrome/Edge — os navegadores
+usados dentro do iframe do Bitrix) permite recolorir só o botão
+embutido do `<input type="file">`, sem precisar esconder o input real
+atrás de uma `<label>` customizada (técnica mais comum, mas mais
+frágil de manter acessível) — mesmas cores/tipografia do `.btn`
+padrão do sistema (dourado, fonte Inter).
+
+**Validação**: sintaxe validada (4 blocos `<script>`, OK); balanceamento
+de `<div>` confirmado (57/57, sem mudança — só CSS foi alterado);
+servido via HTTP real confirmando os 2 trechos de CSS presentes no
+HTML entregue.
+
