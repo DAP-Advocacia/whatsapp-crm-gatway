@@ -10462,3 +10462,39 @@ deploy do EasyPanel pode não disparar automático a cada push (só um
 clique manual, ou o webhook configurado depois pode falhar
 pontualmente) — reverificação pendente.
 
+### Parte EZ — Corrige vazamento da barra de filtros do Chat (Ativas/Arquivadas/Pendentes/Grupos) (2026-08-27)
+
+Usuário reportou (com print real, já em produção, depois do deploy da
+Parte EY propagar) que a barra de filtros do Chat estava "saindo da
+barra" — o botão "Grupos" (novo) ficava cortado na borda direita, e os
+2 ícones (Grupos do WhatsApp/Novo grupo) sumiam de vez da tela.
+
+**Causa raiz**: `.conv-filters-row` (`display:flex;
+justify-content:space-between`) nunca teve `flex-wrap` — com só
+Ativas/Arquivadas + Pendentes + 2 ícones, cabia (apertado) numa linha
+só na largura real da sidebar (`.conv-pane`, `340px` fixo). O 4º
+elemento (botão "Grupos", Parte EY) estourou esse orçamento; sem
+`flex-wrap`, o navegador tentou manter tudo numa linha e o excesso
+simplesmente TRANSBORDOU pra fora do container (não errou de cálculo —
+é o comportamento padrão do flexbox sem quebra), cortando o texto do
+último pill e empurrando os ícones pra fora da área visível.
+
+**Correção**: `flex-wrap:wrap` em `.conv-filters-row` — quando não cabe
+tudo numa linha, quebra pros ícones/pills excedentes irem pra uma 2ª
+linha, em vez de vazar. Reforço complementar em `.archive-filter`/
+`.archive-filter-standalone` (`flex-shrink:0` + `white-space:nowrap`) —
+garante que nenhum pill aperta/corta o próprio texto antes de a linha
+decidir quebrar (comportamento padrão do flex é encolher os filhos
+antes de qualquer coisa, o que apertaria "Pendentes"/"Grupos" de forma
+feia em vez de simplesmente descer de linha).
+
+**Validação visual real** (não só leitura de CSS): página de teste
+isolada com o MARKUP real extraído de `chat.html` (`.conv-pane`
+completo) + o CSS real do arquivo (extraído via regex, um snapshot do
+commit anterior à correção e outro do estado corrigido), renderizada
+via Playwright/Chromium numa largura de viewport que reproduz o
+espaço real disponível — confirmado visualmente: ANTES reproduz
+exatamente o bug relatado (botão "Grupos" cortado, ícones
+desaparecidos); DEPOIS mostra a 2ª linha completa e legível, nada
+cortado/vazando.
+
