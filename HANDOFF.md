@@ -10498,3 +10498,99 @@ exatamente o bug relatado (botão "Grupos" cortado, ícones
 desaparecidos); DEPOIS mostra a 2ª linha completa e legível, nada
 cortado/vazando.
 
+### Parte FA — Investigação: instâncias "reconectando sozinha" há 36min, não é bug (2026-08-27)
+
+Usuário reportou (print real) as próprias 2 instâncias ("Principal" e
+"WPP 2") desconectadas há 36min, mensagem "reconectando sozinha" sem
+progresso aparente. Investigado via API real de produção (token de
+super admin gerado localmente, `GET /admin/diagnostics/sessions` +
+`GET /instances`) antes de qualquer suposição.
+
+**Causa confirmada, não é bug**: os 3 deploys desta sessão (Partes
+EY/EZ + o registro do achado do `.env`) reiniciaram o processo real na
+VPS 3 vezes. A cada boot, `SessionManager.startAllExisting()`
+(`src/sessions.js:108-125`) reconecta TODAS as sessões com credenciais
+salvas em disco **em fila escalonada**, uma a cada `SESSION_STAGGER_MS`
+(15s, padrão, sem override no `.env`) — proteção deliberada contra o
+WhatsApp interpretar reconexão simultânea de dezenas/centenas de
+sessões como padrão de abuso e banir (o comentário no próprio código
+cita um incidente real de 31/07/2026 que deslogou a instância `183168`
+— a MESMA "Principal" do print deste usuário). Com **331 instâncias**
+salvas hoje (`GET /admin/instances`, contagem real), a fila inteira
+leva `(331-1) × 15s ≈ 82min` pra processar por completo — mais que o
+"~54min com 218 instâncias" já registrado na Parte EH (crescimento de
+volume desde então). Confirmado em produção: 37 sessões `offline` +
+13 `connecting` de 114 em memória no momento da checagem (não é
+isolado às 2 instâncias do usuário — é o sistema inteiro passando pela
+mesma fila). As 2 instâncias do usuário já mostravam progresso real
+(`connecting`, não mais `offline`) na 2ª checagem.
+
+**Decisão**: não fazer mais nenhum deploy enquanto a fila não
+normalizar (evita reiniciar o relógio de escalonamento de novo, o que
+prolongaria ainda mais a espera) — aguardar a reconexão completar
+sozinha, reverificando periodicamente, em vez de qualquer ação manual
+(usuário optou por não usar o botão "Tentar reconectar" por instância,
+disponível se quisesse pular a fila).
+
+**Risco levantado, não resolvido nesta parte** (candidato a item novo
+de dívida técnica, §5): a cada deploy, TODAS as instâncias do sistema
+passam por essa janela de reconexão longa — com o volume só crescendo,
+o tempo de recuperação de um deploy cresce junto (já passou de ~35min
+→ ~54min → ~82min em menos de 1 mês). Nenhuma mudança de código feita
+aqui; só investigação e decisão de esperar.
+
+### Parte FB — Corrige causa raiz real do "outline azul" nos pills do Chat: comentário CSS fechado com `-->` (HTML) em vez de `*/` (2026-08-27)
+
+Usuário reportou de novo (print real, produção) o mesmo visual de
+"outline azul" nos botões Pendentes/Grupos que a Parte EZ tinha
+tentado corrigir (achando que era vazamento de `flex-wrap`). A Parte
+EZ resolveu o vazamento de verdade, mas **não era a causa do
+outline** — o outline continuou depois daquele fix, só que ninguém
+tinha investigado a fundo ainda.
+
+**Causa raiz real, um erro meu na própria Parte EZ**: o comentário
+explicativo que adicionei acima de `.archive-filter-standalone`
+(linha ~460) foi fechado com `-->` (sintaxe de comentário **HTML**)
+em vez de `*/` (sintaxe de comentário **CSS**) — dentro de um bloco
+`<style>`, `-->` não significa nada pro parser CSS, então o
+comentário `/* ... */` nunca fechava de verdade. Resultado: as 3
+regras seguintes (`.archive-filter-standalone{}`, `.active`, `:hover`)
+ficaram silenciosamente **comentadas/inativas** desde aquele commit —
+os botões caíam inteiros no estilo padrão do navegador (`border: 2px
+outset ButtonBorder`, sem `background`/`border-radius` customizados),
+o que na paleta escura do app parecia visualmente "um contorno
+estranho" (não era outline de foco, nunca foi sobre `:focus`).
+
+**Como foi descoberto** (vale registrar o processo, útil pra próxima
+vez que algo assim "some silenciosamente"): teste visual com
+Playwright mostrou o bug persistindo mesmo depois de neutralizar
+`:focus`/`:focus-visible` explicitamente — o que não fazia sentido se
+fosse mesmo sobre foco. Inspeção via `getComputedStyle` real (não só
+screenshot) revelou `matchesFocusVisible: false` e `outline: none`
+mas ainda assim `border: 2px outset black` **mesmo em repouso, sem
+qualquer clique** — ou seja, nunca foi sobre foco, era a classe
+inteira não aplicando. `document.styleSheets[].cssRules[].selectorText`
+confirmou que `.archive-filter-standalone` simplesmente não estava
+entre as regras que batiam no elemento. Só aí a inspeção byte-a-byte
+do CSS bruto (`css.indexOf('.archive-filter-standalone{')`, olhando
+os 200 caracteres anteriores) expôs o `-->` literal.
+
+**Correção**: `-->` trocado por `*/` na linha certa — as 3 regras
+voltam a funcionar (confirmado via `getComputedStyle`: `border: 1px
+solid rgb(52,41,26)` = `var(--border)` da paleta, não mais o preto
+nativo). Reforço complementar, mantido: `button{ outline:none; }` +
+`button:focus-visible{ box-shadow: ...var(--gold-dim)... }` genérico
+pra TODO `<button>` do app (não só os 2 pills) — outros botões (`.btn`,
+`.icon-btn`, `.archive-filter`) tinham o mesmo problema de outline
+nativo de navegador em `:focus-visible`, só nunca reportado por
+serem menos usados via Tab. `:focus-visible` (não `:focus`) preserva
+o comportamento nativo correto: indicador só aparece em navegação por
+teclado, nunca em clique de mouse — confirmado via
+`el.matches(':focus-visible')` nos dois cenários.
+
+**Validação**: `getComputedStyle` real via Playwright (não só leitura
+de CSS) confirmando border/background/padding/border-radius corretos
+em repouso; balanceamento de `/* */` recontado em todo o `<style>`
+real do arquivo (46/46); sintaxe JS revalidada (não afetada, mudança
+foi só CSS).
+
