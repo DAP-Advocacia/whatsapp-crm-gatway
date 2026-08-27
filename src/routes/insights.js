@@ -3,6 +3,7 @@ const store = require('../store');
 const insightsStore = require('../insightsStore');
 const commercialConfig = require('../commercialConfig');
 const { requireSession } = require('../authz');
+const { isSuperAdmin } = require('../adminAuth');
 
 /**
  * Copiloto Comercial — insights de IA em tempo real (ver
@@ -136,6 +137,12 @@ function createInsightsRouter({ sessions, broadcast }) {
   // PUT /commercial-config  { session, enabled?, playbook?, topics? }
   router.put('/commercial-config', requireSession((req) => req.body?.session), async (req, res) => {
     const { session, ...patch } = req.body || {};
+    // Piloto restrito: só super admin pode LIGAR o Copiloto Comercial
+    // numa instância — mesma régua do Agente de IA (ver src/routes/agent.js
+    // PUT /config). Editar playbook/tópicos ou desligar continua liberado.
+    if (patch.enabled === true && !isSuperAdmin(req.ownerId)) {
+      return res.status(403).json({ error: 'ativar o Copiloto Comercial está restrito a administradores no momento' });
+    }
     try {
       const config = await commercialConfig.upsert(session, patch);
       res.json({ ok: true, config });

@@ -700,6 +700,14 @@ lado com a conversa aberta, acessada pela sidebar como as demais páginas.
   reabre a conversa de qualquer um deles ao clicar. Resolve o caso de um grupo
   recém-criado "sumir" da lista principal até receber a primeira mensagem: com
   esse botão dá pra reabrir e mandar mensagem a qualquer momento.
+- **Filtro "Grupos"** (Parte EY, 2026-08-27) — diferente do botão acima
+  (que abre um modal separado): um pill ao lado de "Pendentes", mesmo
+  padrão (independente de Ativas/Arquivadas, combina com qualquer um
+  dos dois). Filtra a lista principal pra mostrar só as conversas cujo
+  telefone está registrado em `wa_groups` (grupos que o próprio app
+  conhece/criou — não qualquer JID de grupo do WhatsApp em geral).
+  Reaproveita `GET /api/whatsapp/groups` (mesma rota do item acima),
+  agrupando todas as instâncias do filtro atual numa única chamada.
 - **Detalhes do contato — estatísticas e grupos em comum**: o painel de
   contato (acima) também mostra a contagem de mensagens trocadas na conversa
   aberta (total, recebidas, enviadas — direto de `state.messages`, sem rota
@@ -1489,7 +1497,13 @@ texto difícil de ler.
   "Agente ativo nesta instância" — **nasce desligado** (`active =
   false`) pra toda instância nova; nenhum negócio é criado nem resposta
   automática é enviada até o usuário ativar manualmente. Não existe
-  ativação em massa nem herança entre instâncias.
+  ativação em massa nem herança entre instâncias. **Piloto restrito**
+  (Parte EY, 2026-08-27): só um `ownerId` em `SUPER_ADMIN_OWNER_IDS`
+  consegue de fato LIGAR o toggle (`PUT /config` com `active:true`
+  devolve `403` pra qualquer outro dono) — desligar ou editar mensagem
+  de sistema/base de conhecimento continua liberado normalmente. Vale
+  também pro Copiloto Comercial (§14.9). Mesma régua já usada em
+  `/admin.html`, sem tabela/config nova.
 - **Comportamento quando ativo**: a IA responde automaticamente à
   **1ª mensagem** de um número nunca visto naquela instância — função é
   triagem inicial, não a conversa inteira. Nunca fala primeiro (a
@@ -1525,7 +1539,14 @@ texto difícil de ler.
   Idempotente (não cria um segundo grupo pro mesmo negócio). **Só** pros
   cards criados pelo Agente de IA — card de LP/Campanha sem o agente
   ativo continua sem grupo automático (a criação manual pela aba DapZap
-  segue existindo pra esses).
+  segue existindo pra esses). **Rastro visível** (Parte EY,
+  2026-08-27): a criação avisa em 2 lugares — comentário na timeline
+  do NEGÓCIO no Bitrix (`logStatusToTimeline`, mesmo mecanismo de
+  `crm.timeline.comment.add` já usado pra registrar mensagens/status de
+  entrega) e uma **nota interna** (nunca visível ao cliente) na
+  conversa do lead no Chat, rotulada "Nota interna · Agente de IA".
+  Ambos best-effort/fire-and-forget — falha em qualquer um dos dois não
+  desfaz o grupo já criado.
 - **Mensagem de sistema**: texto livre por instância, complementa (não
   substitui) uma persona padrão embutida — em branco, a IA usa só a
   persona padrão.
@@ -1651,7 +1672,10 @@ sozinha; aqui a IA só **sugere** pro atendente humano durante uma
 conversa em andamento, no setor comercial (venda de precatórios). Só
 instâncias marcadas **"comercial"** (toggle novo, painel `#commercialPanel`
 em `agente-ia.html`, fora do wizard de 4 etapas — mesmo precedente do
-Playground, §14.7) recebem insights; nasce sempre desligado.
+Playground, §14.7) recebem insights; nasce sempre desligado. **Piloto
+restrito** (Parte EY, 2026-08-27): mesma régua do §14.7 — só super
+admin consegue de fato LIGAR (`PUT /commercial-config` com
+`enabled:true` devolve `403` pra qualquer outro dono).
 
 - **Gatilho**: a cada mensagem `in` recebida (`src/server.js::onMessage`),
   fire-and-forget, sem atrasar broadcast/timeline/notificação/Agente de
@@ -2018,7 +2042,7 @@ POST/PUT) — `requireSession` confere que a instância pertence ao
 | Rota | Método | Uso |
 |---|---|---|
 | `config?session=` | GET | `{ sessionId, active, systemMessage, knowledgeText, updatedAt }` — config atual do agente daquela instância. Instância sem linha em `agent_config` devolve `active:false` e os demais campos `null` (nunca 404). |
-| `config` | PUT | Body `{ session, active?, systemMessage?, knowledgeText? }`. Upsert dinâmico — só os campos presentes no body são alterados (mesmo padrão de `PUT /api/settings`); `active:false` explícito é tratado como valor real, não como "campo ausente". Nasce `active:false` na 1ª vez que a instância recebe qualquer config. |
+| `config` | PUT | Body `{ session, active?, systemMessage?, knowledgeText? }`. Upsert dinâmico — só os campos presentes no body são alterados (mesmo padrão de `PUT /api/settings`); `active:false` explícito é tratado como valor real, não como "campo ausente". Nasce `active:false` na 1ª vez que a instância recebe qualquer config. **403** se `active:true` e o `ownerId` não estiver em `SUPER_ADMIN_OWNER_IDS` (piloto restrito, Parte EY — `active:false` e demais campos continuam liberados pra qualquer dono). |
 | `knowledge/upload` | POST | Body `{ session, fileName, fileType, dataBase64 }` (`fileType` é `pdf`/`docx`/`txt`/`md`; `dataBase64` sem o prefixo `data:...;base64,`, mesmo padrão de `/send-media`). Processa em segundo plano (extrai texto → chunка → embeddings → grava) e devolve `{ docId, status, chunkCount }` já com o resultado — não é assíncrono do ponto de vista do client, a resposta só volta depois de pronto (ou com `status:'error'`). |
 | `knowledge?session=` | GET | `{ docs:[{id, fileName, fileType, status, errorMessage, createdAt}] }` — mais recente primeiro. |
 | `knowledge/:docId?session=` | DELETE | Remove o documento (chunks em cascata) e o arquivo original do Storage. 404 se o documento não existir ou não for dessa instância. |
@@ -2132,7 +2156,7 @@ gerado + config, nunca disparam uma geração nova sob demanda.
 | `/:id/feedback` | POST | Body `{ session, phone, feedback: 'useful'\|'not_useful' }`. Confirma posse antes de agir. |
 | `/:id/send` | POST | Body `{ session, phone }`. Envia `insight.body` como mensagem de WhatsApp DE VERDADE ao cliente (`gateway.sendMessage` + persiste + broadcast `type:'message'`), depois marca `status='sent'`. Idempotente — insight já `sent` responde 409, não reenvia. Confirma posse antes de agir. |
 | `/commercial-config?session=` | GET | Config do copiloto pra instância (`{ enabled, playbook, topics }`). |
-| `/commercial-config` | PUT | Body `{ session, enabled?, playbook?, topics? }` — patch parcial, mesmo padrão de `agent_config`. |
+| `/commercial-config` | PUT | Body `{ session, enabled?, playbook?, topics? }` — patch parcial, mesmo padrão de `agent_config`. **403** se `enabled:true` e o `ownerId` não estiver em `SUPER_ADMIN_OWNER_IDS` (piloto restrito, Parte EY — mesma régua de `PUT /api/agent/config`). |
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 

@@ -9,6 +9,7 @@ const leadForms = require('./leadForms');
 const media = require('./media');
 const mediaRecognition = require('./mediaRecognition');
 const { getEmployeeInfo } = require('./bitrixHierarchy');
+const { logStatusToTimeline } = require('./bitrix');
 
 /**
  * Orquestração central do Agente de IA — chamado de dentro de
@@ -222,6 +223,29 @@ async function createCardGroupForNewLead({ sessionId, ownerId, phone, dealId, or
   const group = await gateway.createGroup(name, participants);
   await store.createGroupRecord(group.id, sessionId, group.name, group.participantCount, { source: 'card', dealId: String(dealId) });
   console.log(`[agent-dispatch] grupo do card criado (${sessionId}/${phone}) → ${group.id} "${group.name}" (${group.participantCount} participantes)`);
+
+  // Avisa no feed/timeline do card que o grupo foi criado — antes disso
+  // a criação era silenciosa no Bitrix (só log de servidor + a linha em
+  // wa_groups). Best-effort/fire-and-forget: falha aqui nunca desfaz o
+  // grupo já criado nem propaga erro pro chamador.
+  logStatusToTimeline(dealId, `Grupo de WhatsApp criado automaticamente ("${group.name}", ${group.participantCount} participantes).`)
+    .catch((err) => console.error(`[agent-dispatch] falha ao registrar timeline do grupo (${sessionId}/${phone}):`, err.message));
+
+  // Nota interna na CONVERSA DO LEAD (sessionId/phone — não a conversa do
+  // grupo recém-criado, que tem um JID diferente) avisando que o grupo
+  // foi criado — mesma peça de infraestrutura já usada pelo botão "Nota
+  // interna" do Chat (nunca visível ao cliente). author_owner_id é o
+  // DONO da instância (obrigatório NOT NULL, sem "usuário de sistema" no
+  // schema — decisão confirmada com o usuário) — o rótulo visual
+  // ("Agente de IA") é quem deixa claro que foi automático, não a pessoa
+  // dona da conta. Best-effort: falha aqui não desfaz nada já feito.
+  store.addInternalNote(sessionId, phone, {
+    text: `Grupo de WhatsApp criado automaticamente ("${group.name}", ${group.participantCount} participantes).`,
+    authorOwnerId: ownerId,
+    authorName: 'Agente de IA',
+  })
+    .then((note) => { if (_broadcast) _broadcast(sessionId, phone, { type: 'internal-note', note }); })
+    .catch((err) => console.error(`[agent-dispatch] falha ao registrar nota interna do grupo (${sessionId}/${phone}):`, err.message));
 }
 
 // Celular do Bitrix costuma vir SEM o código do país (DDD + número,

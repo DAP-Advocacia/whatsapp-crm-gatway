@@ -1,5 +1,6 @@
 const express = require('express');
 const { requireSession } = require('../authz');
+const { isSuperAdmin } = require('../adminAuth');
 const agentConfigStore = require('../agentConfig');
 const knowledgeDocs = require('../knowledgeDocs');
 const store = require('../store');
@@ -41,6 +42,13 @@ function createAgentRouter() {
     if ('active' in (req.body || {})) patch.active = active;
     if ('systemMessage' in (req.body || {})) patch.systemMessage = systemMessage;
     if ('knowledgeText' in (req.body || {})) patch.knowledgeText = knowledgeText;
+    // Piloto restrito: só super admin pode LIGAR o Agente de IA numa
+    // instância (nem toda instância deve criar negócio/responder lead
+    // sozinha ainda). Editar texto ou desligar (active:false) continua
+    // liberado pra qualquer dono da instância — só o "ligar" é bloqueado.
+    if (patch.active === true && !isSuperAdmin(req.ownerId)) {
+      return res.status(403).json({ error: 'ativar o Agente de IA está restrito a administradores no momento' });
+    }
     try {
       res.json(await agentConfigStore.upsert(session, patch));
     } catch (err) {

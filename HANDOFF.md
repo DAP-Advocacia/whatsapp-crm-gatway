@@ -10361,3 +10361,80 @@ validação prática): testar o Copiloto Comercial e o grupo automático
 do Agente de IA (Parte EV) com WhatsApp real; liberar `whisper-1` na
 OpenAI (Parte EU).
 
+### Parte EY — Grupo automático: rastro visível (timeline + nota interna) + aba "Grupos" no Chat + piloto restrito a super admin (2026-08-27)
+
+Testando o grupo automático (Parte EV), 3 lacunas identificadas: a
+criação era silenciosa (nada no card do Bitrix nem na conversa do
+lead), grupos ficavam misturados na lista normal do Chat sem visão
+dedicada, e nem o Agente de IA nem o Copiloto Comercial eram
+restritos por usuário (qualquer instância podia ligar o respectivo
+toggle) — usuário pediu rodar em modo piloto, só a própria conta.
+
+**Rastro da criação do grupo (2 canais, mesmo evento)**:
+`agentDispatch.js::createCardGroupForNewLead`, logo após
+`store.createGroupRecord`, dispara 2 chamadas best-effort/fire-and-
+forget em paralelo (nenhuma delas desfaz o grupo já criado se falhar):
+1. `logStatusToTimeline(dealId, ...)` (`src/bitrix.js`, já existente —
+   usada em 5 pontos do app, aqui pela 1ª vez nesse fluxo) — comentário
+   `[WhatsApp] Grupo de WhatsApp criado automaticamente (...)` na
+   timeline do NEGÓCIO no Bitrix. Testado contra deal real (5614772):
+   confirmado via `crm.timeline.comment.list` que o comentário aparece
+   de verdade, não só que a chamada "não lançou".
+2. `store.addInternalNote(sessionId, phone, {...})` + broadcast
+   `type: 'internal-note'` — mesma peça de infraestrutura do botão
+   manual "Nota interna" do Chat (nunca visível ao cliente), na
+   CONVERSA DO LEAD (não a conversa do grupo em si, que tem JID
+   diferente). `author_owner_id` (obrigatório, `NOT NULL`, sem
+   "usuário de sistema" no schema) é o DONO da instância — decisão
+   confirmada com o usuário; rótulo visual é `authorName: 'Agente de
+   IA'` (campo livre, controla só a exibição — `Nota interna · Agente
+   de IA`), deixando claro que foi automático sem precisar de owner
+   fictício. Testado ponta a ponta: `store.addInternalNote` direto
+   contra o banco + `GET /api/internal-notes` real confirmando o
+   formato exato que o Chat consome.
+
+**Piloto restrito a super admin** — `PUT /api/agent/config` e `PUT
+/api/insights/commercial-config`: `isSuperAdmin(ownerId)`
+(`src/adminAuth.js`, já existente) checado só quando o patch tenta
+`active:true`/`enabled:true` — decisão confirmada: desligar ou editar
+texto/playbook continua liberado pra qualquer dono de instância, só
+"ligar" é bloqueado (`403`). Frontend (`agente-ia.html`): erro do
+`403` já caía no `catch`/`showToast` genérico existente (mensagem
+específica do backend aparece automaticamente), só faltava reverter o
+toggle visual pro último valor de fato salvo (senão ficava mostrando
+"ligado" mesmo com o save recusado) — corrigido nos 2 handlers
+(`saveConfigBtn`, `commercialSaveBtn`).
+
+Testado via HTTP real com 2 tokens (`issueAppToken` direto, sem passar
+pelo OAuth do Bitrix) contra uma instância de teste isolada, dono
+fictício: usuário comum tenta ligar → `403` + toggle revertido +
+mensagem certa no toast (confirmado nos 2 toggles); usuário comum
+desliga ou edita só texto → `200` normal; super admin liga → `200`
+normal (sem regressão). Achado no processo: 1ª rodada de testes deu
+resultado errado porque um processo `node src/server.js` anterior
+ficou preso na porta 3333 (`EADDRINUSE`, mantido vivo pelo handler
+`uncaughtException`/`unhandledRejection` do próprio `server.js`) —
+todas as requisições foram pro código ANTIGO até eu matar o processo
+certo via `Stop-Process` (PowerShell — `pkill` do Git Bash não atinge
+PID nativo do Windows de forma confiável) e subir de novo rastreado
+pelo harness.
+
+**Aba "Grupos" no Chat** — `public/chat.html`: botão independente
+(`.archive-filter-standalone`, mesmo padrão do já existente
+"Pendentes" — combina com Ativas/Arquivadas/Pendentes ao mesmo tempo,
+não é mutuamente exclusivo). "Grupo" = registrado em `wa_groups`
+(decisão confirmada: não qualquer JID `@g.us`, só os que o próprio app
+conhece/criou) — `state.groupIds` (novo `Set`) populado por
+`loadGroupIds()`, reaproveitando a mesma rota `GET /groups` já usada
+pelo modal "Grupos do WhatsApp", chamada em `onFilterChange` (mesmo
+ciclo de vida de `loadConversations`, cobre boot inicial E troca de
+instância). Testado via HTTP real: `GET /groups` devolve o grupo real
+já existente na instância de super admin, formato `{id, name,
+participantCount}` bate 1:1 com o que `state.groupIds` consome.
+
+**Investigação prévia confirmou** (antes de codar): nem a criação
+automática nem a manual (`src/routes/cardGroup.js`) postavam timeline
+antes desta parte; não existe campo "é grupo" em `conversations` nem
+na API do Chat — `wa_groups` (`id` = JID) é a única fonte confiável,
+sem FK com `conversations`.
+

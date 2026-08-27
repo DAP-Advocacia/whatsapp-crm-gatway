@@ -1281,7 +1281,14 @@
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'falha ao salvar');
+      if (!res.ok) {
+        // 403 de "ligar restrito a admin" (ver src/routes/agent.js) —
+        // reverte o toggle visualmente pro estado que de fato ficou salvo
+        // no servidor (currentConfig, já lido no boot/troca de instância),
+        // senão o botão fica mostrando "ligado" mesmo com o save recusado.
+        if (res.status === 403) setToggle(currentConfig.active);
+        throw new Error(data.error || 'falha ao salvar');
+      }
       currentConfig = data;
       if (window.showToast) window.showToast('Configuração salva.', 'success');
     } catch (err) {
@@ -1332,6 +1339,7 @@
   const commercialAddTopicBtn = document.getElementById('commercialAddTopicBtn');
   const commercialSaveBtn = document.getElementById('commercialSaveBtn');
   let commercialTopics = [];
+  let commercialEnabledSaved = false; // último valor de fato salvo no servidor — usado pra reverter o toggle visual num 403
 
   function setCommercialToggle(enabled) {
     commercialToggle.classList.toggle('on', !!enabled);
@@ -1373,6 +1381,7 @@
     if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar configuração do copiloto comercial');
     const { config } = await res.json();
     setCommercialToggle(config.enabled);
+    commercialEnabledSaved = !!config.enabled;
     commercialPlaybookInput.value = config.playbook || '';
     commercialTopics = Array.isArray(config.topics) ? [...config.topics] : [];
     renderCommercialTopics();
@@ -1391,7 +1400,15 @@
           topics: commercialTopics,
         }),
       });
-      if (!res.ok) throw new Error((await res.json()).error || 'falha ao salvar');
+      if (!res.ok) {
+        const data = await res.json();
+        // 403 de "ligar restrito a admin" (ver src/routes/insights.js) —
+        // reverte o toggle visualmente pro último valor de fato salvo,
+        // mesmo tratamento do toggle do Agente de IA acima.
+        if (res.status === 403) setCommercialToggle(commercialEnabledSaved);
+        throw new Error(data.error || 'falha ao salvar');
+      }
+      commercialEnabledSaved = commercialToggle.classList.contains('on');
       if (window.showToast) window.showToast('Copiloto comercial salvo.', 'success');
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');

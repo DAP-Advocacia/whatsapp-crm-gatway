@@ -1273,6 +1273,12 @@
              parte do grupo mutuamente exclusivo acima — combina com qualquer
              um dos dois, ver pendingFilterBtn.addEventListener abaixo). -->
         <button type="button" id="pendingFilterBtn" class="archive-filter-standalone" title="Mostrar só conversas com mensagem não lida">Pendentes</button>
+        <!-- Também independente — mostra só conversas cujo phone está
+             registrado em wa_groups (ver groupsFilterBtn.addEventListener
+             abaixo). Grupo pode estar arquivado ou não, então este filtro
+             é ortogonal a Ativas/Arquivadas, não substitui a lista de
+             GET /groups do modal "Grupos do WhatsApp" acima. -->
+        <button type="button" id="groupsFilterBtn" class="archive-filter-standalone" title="Mostrar só grupos de WhatsApp">Grupos</button>
         <span class="conv-pane-head-actions">
           <button class="icon-btn" id="viewGroupsBtn" title="Grupos do WhatsApp" type="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
@@ -2336,6 +2342,7 @@
   const tagFilterSelect = document.getElementById('tagFilterSelect');
   const assigneeFilterEl = document.getElementById('assigneeFilter');
   const pendingFilterBtn = document.getElementById('pendingFilterBtn');
+  const groupsFilterBtn = document.getElementById('groupsFilterBtn');
   const convList = document.getElementById('convList');
   const convView = document.getElementById('convView');
   const contactPanel = document.getElementById('contactPanel');
@@ -2349,6 +2356,8 @@
     tagFilter: '',
     assigneeFilter: '', // '' = todos; caso contrário, ownerId de quem está atendendo
     pendingFilter: false, // true = só conversas com unreadCount > 0 — independente de Ativas/Arquivadas
+    groupsFilter: false, // true = só conversas cujo phone está em groupIds — independente de Ativas/Arquivadas
+    groupIds: new Set(), // phones (JID) registrados em wa_groups desta instância — populado por loadGroups()
     search: '',
     archivedView: false, // false = "Ativas", true = "Arquivadas"
     active: null,       // { sessionId, phone, contactName, dealId, tags }
@@ -2489,6 +2498,27 @@
     loadTags();
     updateChatTabsVisibility();
     await loadConversations();
+    loadGroupIds(); // fire-and-forget — aba "Grupos" já funciona sem esperar, mesmo padrão de loadTags acima
+  }
+
+  // Popula state.groupIds com os phones (JID) de todos os grupos
+  // registrados em wa_groups pras instâncias atualmente selecionadas —
+  // mesma rota GET /groups já usada pelo modal "Grupos do WhatsApp"
+  // (viewGroupsBtn), só que agrupando TODAS as sessões do filtro atual
+  // (state.sessionIds), não uma sessão só por vez como o modal faz.
+  // Best-effort: falha aqui só deixa a aba "Grupos" sem resultado, nunca
+  // quebra o resto da tela.
+  async function loadGroupIds() {
+    if (!state.sessionIds.length) { state.groupIds = new Set(); return; }
+    try {
+      const res = await apiFetch(`${API_BASE}/groups?session=${encodeURIComponent(state.sessionIds.join(','))}`);
+      if (!res.ok) throw new Error('falha ao carregar grupos');
+      const data = await res.json();
+      state.groupIds = new Set((data.groups || []).map((g) => g.id));
+      if (state.groupsFilter) renderConvList(); // reflete na hora se o filtro já estava ligado
+    } catch (err) {
+      console.error('Erro ao carregar ids de grupo:', err);
+    }
   }
 
   // =========================================================
@@ -2646,6 +2676,14 @@
   pendingFilterBtn.addEventListener('click', () => {
     state.pendingFilter = !state.pendingFilter;
     pendingFilterBtn.classList.toggle('active', state.pendingFilter);
+    renderConvList();
+  });
+
+  // Mesmo padrão do Pendentes acima — client-side, sobre state.groupIds
+  // (já carregado por loadGroupIds, ver boot/troca de instância abaixo).
+  groupsFilterBtn.addEventListener('click', () => {
+    state.groupsFilter = !state.groupsFilter;
+    groupsFilterBtn.classList.toggle('active', state.groupsFilter);
     renderConvList();
   });
 
@@ -2925,6 +2963,15 @@
     return (conv.unreadCount || 0) > 0;
   }
 
+  // Mesmo padrão independente do Pendentes acima — "grupo" aqui significa
+  // registrado em wa_groups (state.groupIds, populado por loadGroupIds),
+  // não qualquer JID terminado em @g.us — decisão confirmada com o
+  // usuário: só grupos que o próprio app conhece/criou.
+  function passesGroupsFilter(conv) {
+    if (!state.groupsFilter) return true;
+    return state.groupIds.has(conv.phone);
+  }
+
   // Reconstrói os botões do filtro de atendente a partir de quem já está
   // atendendo alguma conversa da lista atual (não é uma lista fixa de
   // usuários — só aparece quem tem pelo menos 1 conversa atribuída).
@@ -2960,7 +3007,7 @@
   }
 
   function renderConvList() {
-    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c));
+    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c) && passesGroupsFilter(c));
     if (!list.length) {
       convList.innerHTML = `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
       return;
