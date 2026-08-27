@@ -8,6 +8,7 @@ const agentRetryQueue = require('./agentRetryQueue');
 const leadForms = require('./leadForms');
 const media = require('./media');
 const mediaRecognition = require('./mediaRecognition');
+const { getEmployeeInfo } = require('./bitrixHierarchy');
 
 /**
  * Orquestração central do Agente de IA — chamado de dentro de
@@ -88,6 +89,17 @@ async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageTex
       if (origin.submissionId && (dealId || contactId)) {
         await leadForms.setSubmissionBitrixIds(origin.submissionId, { dealId, contactId });
       }
+      // Grupo de WhatsApp automático pro card criado pelo Agente de IA —
+      // aninhado aqui porque depende do `dealId` (o grupo é gravado com
+      // source='card' + deal_id, mesma marca que a criação manual do
+      // card usa). Best-effort próprio: qualquer falha aqui (dono sem
+      // celular no Bitrix, instância que caiu entre a mensagem e agora,
+      // groupCreate recusado) é logada e ignorada — nunca afeta o card
+      // já criado nem a resposta da IA.
+      if (dealId) {
+        await createCardGroupForNewLead({ sessionId, ownerId, phone, dealId, origin })
+          .catch((err) => console.error(`[agent-dispatch] falha ao criar grupo do card (${sessionId}/${phone}):`, err.message));
+      }
     })
     .catch((err) => console.error(`[agent-dispatch] falha ao criar negócio no Bitrix (${sessionId}/${phone}):`, err.message));
 
@@ -160,6 +172,65 @@ async function recognizeMedia({ sessionId, phone, waMessageId, mediaUrl, mediaTy
     .catch((err) => console.error(`[agent-dispatch] falha ao persistir transcrição (${sessionId}/${phone}/${waMessageId}):`, err.message));
 
   return text;
+}
+
+// Cria automaticamente um grupo de WhatsApp pro card que o Agente de IA
+// acabou de abrir (só neste fluxo — o card criado por LP/Campanha sem
+// Agente de IA ativo continua sem grupo automático; a criação manual
+// pela aba do card segue existindo em src/routes/cardGroup.js).
+//
+// Participantes: o CLIENTE (o telefone do próprio lead) + o DONO da
+// instância (celular cadastrado no Bitrix, `PERSONAL_MOBILE`, resolvido
+// pelo user id embutido no ownerId — `member_id_userId`). Sem o campo
+// "Verificação" e sem "quem clicou" da versão manual: aqui ninguém
+// clica, e o card recém-criado normalmente ainda não tem o campo de
+// verificação preenchido.
+//
+// Marca o grupo com source='card' + deal_id — a MESMA marca da criação
+// manual —, então herda de graça: (1) o bypass que faz mensagem
+// recebida de grupo ser processada/salva em vez de descartada
+// (src/whatsapp.js::_processIncomingMessage), (2) o switch Cliente/Grupo
+// na aba do card. Idempotente: se já existe grupo de card pra este
+// negócio (retry, corrida de 2 mensagens), não cria outro.
+async function createCardGroupForNewLead({ sessionId, ownerId, phone, dealId, origin }) {
+  const existing = await store.getCardGroupForDeal([sessionId], String(dealId));
+  if (existing) return;
+
+  if (!_sessions) {
+    throw new Error('agentDispatch não configurado — chame configure({sessions, broadcast}) no boot');
+  }
+  const gateway = _sessions.get(sessionId); // lança se a sessão não existe
+  if (gateway.getStatus() !== 'online') {
+    throw new Error('instância não está online — grupo do card não criado');
+  }
+
+  // Dono: user id numérico é o último segmento de `member_id_userId`.
+  const ownerBitrixUserId = String(ownerId || '').split('_').pop() || null;
+  const ownerInfo = ownerBitrixUserId ? await getEmployeeInfo(ownerBitrixUserId).catch(() => null) : null;
+  const ownerPhone = normalizeBrazilPhone(ownerInfo?.phone);
+
+  // Dedupe: telefone do lead nunca deveria bater com o do dono, mas
+  // Set garante que um número não entre 2x se isso acontecer. `phone`
+  // do lead já vem com código de país (é derivado do JID do WhatsApp),
+  // mas passa pelo mesmo normalizador por segurança.
+  const participants = [...new Set([normalizeBrazilPhone(phone), ownerPhone].filter(Boolean))];
+  if (!participants.length) {
+    throw new Error('nenhum telefone de participante resolvido (lead + dono)');
+  }
+
+  const name = origin.kind === 'lp' ? `LP: ${origin.label}` : 'Campanha';
+  const group = await gateway.createGroup(name, participants);
+  await store.createGroupRecord(group.id, sessionId, group.name, group.participantCount, { source: 'card', dealId: String(dealId) });
+  console.log(`[agent-dispatch] grupo do card criado (${sessionId}/${phone}) → ${group.id} "${group.name}" (${group.participantCount} participantes)`);
+}
+
+// Celular do Bitrix costuma vir SEM o código do país (DDD + número,
+// 10-11 dígitos) — mesmo critério de src/routes/cardGroup.js e
+// src/routes/suggestions.js.
+function normalizeBrazilPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length <= 11 ? `55${digits}` : digits;
 }
 
 // Gera a resposta do agente e tenta enviar; se a instância estiver

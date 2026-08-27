@@ -3,7 +3,13 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-26 — Partes EJ a EU: entrega do
+> aberto). Última atualização: sessão de 2026-08-27 — Parte EV: quando o Agente de
+> IA cria um card de lead novo, agora também **cria automaticamente um grupo de
+> WhatsApp** (cliente + dono da instância), reaproveitando toda a mecânica do grupo
+> de card manual (`source='card'` + `deal_id`, bypass de descarte de mensagem de
+> grupo, switch Cliente/Grupo). Só pros cards do Agente de IA, sem opção de
+> desligar. **Pendente de teste com WhatsApp real em produção.** Antes disso,
+> sessão de 2026-08-26 — Partes EJ a EU: entrega do
 > **Agente de IA** (a maior feature desde a migração pra VPS). Um agente que faz a
 > **triagem inicial** de leads novos — responde automaticamente a primeira mensagem
 > de um número nunca visto (vindo de LP ou campanha), cria o negócio no pipeline de
@@ -286,6 +292,10 @@
   Bitrix. Reconhecimento de mídia por IA (imagem/vídeo em produção;
   áudio pendente de liberação do `whisper-1` na OpenAI) — ver §2,
   partes EJ a EU
+- [x] **Grupo de WhatsApp automático pro card do Agente de IA**: ao criar
+  o card de um lead novo, cria também um grupo (cliente + dono da
+  instância), com a mesma mecânica do grupo de card manual — ver §2,
+  parte EV (pendente de teste com WhatsApp real)
 
 Não há bloqueador conhecido em aberto no momento. Ver §5 para dívidas técnicas não
 bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro
@@ -10113,4 +10123,58 @@ imagem/vídeo (já validados) e todo o Playground, deixando o código de
   `knowledgeTextInput`) confirmadas declaradas ANTES do bloco, mesmo
   escopo de `<script>` — evita repetir o bug de escopo já visto nesta
   sessão (Parte EN).
+
+### Parte EV — Grupo de WhatsApp criado automaticamente pro card do Agente de IA (2026-08-27)
+
+Pedido do usuário: quando o Agente de IA cria um card de lead novo, já
+criar também um grupo de WhatsApp automaticamente (antes disso, o grupo
+só nascia por clique manual na aba "DapZap" do card — `POST /api/card-group`,
+`src/routes/cardGroup.js`). Três decisões confirmadas com o usuário:
+**só** pros cards criados a partir do Agente de IA (não todo card de
+LP/Campanha); vale pra **todos** esses cards (sem opção de desligar por
+instância); participantes = **cliente + dono da instância** (sem o campo
+"Verificação" nem "quem clicou" da versão manual — no fluxo automático
+ninguém clica, e o card recém-criado normalmente ainda não tem o campo
+de verificação preenchido).
+
+**`src/agentDispatch.js`** — nova `createCardGroupForNewLead({ sessionId,
+ownerId, phone, dealId, origin })`, chamada de dentro do `.then()` da
+criação do card em `handleNewLeadMessage` (aninhada ali porque depende
+do `dealId` — o grupo é gravado com `source='card'` + `deal_id`). É
+best-effort próprio: qualquer falha (dono sem celular no Bitrix,
+instância que caiu entre a mensagem e a criação, `groupCreate` recusado)
+é logada e ignorada, nunca afeta o card já criado nem a resposta da IA.
+
+- **Dono**: user id numérico = último segmento do `ownerId`
+  (`member_id_userId`); telefone via `getEmployeeInfo` (`src/bitrixHierarchy.js`,
+  `PERSONAL_MOBILE`) — a MESMA função que a versão manual do card já usa.
+  Se o dono não tiver celular cadastrado no Bitrix, o grupo é criado só
+  com o cliente (não falha).
+- **Normalização de telefone**: `normalizeBrazilPhone` (mesmo critério de
+  `src/routes/cardGroup.js`/`src/routes/suggestions.js` — DDD+número sem
+  código de país ganha `55` na frente).
+- **Reaproveitamento total**: `gateway.createGroup(name, phones)` +
+  `store.createGroupRecord(..., { source: 'card', dealId })` — exatamente
+  o que a rota manual faz. A marca `source='card'` + `deal_id` liga de
+  graça: (1) o bypass que faz mensagem recebida de grupo ser
+  processada/salva em vez de descartada (`src/whatsapp.js::_processIncomingMessage`),
+  (2) o switch Cliente/Grupo na aba do card.
+- **Nome do grupo** = mesmo título do card (`LP: <nome do formulário>` ou
+  `Campanha`).
+- **Idempotente**: checa `store.getCardGroupForDeal([sessionId], dealId)`
+  antes de criar — se já existe grupo de card pra esse negócio (retry,
+  corrida de 2 mensagens do mesmo lead), não cria um segundo.
+
+**Validação** — teste de lógica isolado (harness que extrai o corpo REAL
+da função do módulo via regex e executa com `store`/`_sessions`/
+`getEmployeeInfo` injetados — se o código mudar, o teste roda o novo),
+13 asserções, todas passando: caminho feliz LP e Campanha (nome,
+participantes na ordem [lead, dono], `createGroupRecord` com
+`source='card'`/`dealId` string), idempotência, instância offline
+(lança, `createGroup` não chamado), sessão inexistente (propaga),
+dono sem celular (grupo só com o lead), `getEmployeeInfo` rejeitando
+(`.catch(()=>null)`, grupo só com o lead), nenhum telefone resolvido
+(lança antes de `createGroup`). `node -c` ok. Sem teste com WhatsApp
+real ainda — pendente de validação em produção (criar um lead novo de
+teste numa instância com o Agente de IA ativo e conferir o grupo).
 

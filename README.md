@@ -1512,6 +1512,20 @@ texto difícil de ler.
   resposta da IA ao lead — a tag aparece na lista de conversas do Chat
   em tempo real (WebSocket `type: 'tags-updated'`), sem precisar de
   reload manual.
+- **Grupo de WhatsApp automático** (Parte EV): junto com o card, cria
+  também um grupo de WhatsApp reunindo o **cliente** (o próprio lead) e
+  o **dono da instância** (celular cadastrado no Bitrix, `PERSONAL_MOBILE`).
+  Nome do grupo = mesmo título do card ("LP: `<nome>`" ou "Campanha").
+  O grupo é gravado com `source='card'` + `deal_id` (mesma marca da
+  criação manual pela aba DapZap, §15.7) — herda o bypass que faz
+  mensagem recebida de grupo ser salva em vez de descartada, e o switch
+  Cliente/Grupo no card. Best-effort: se o dono não tiver celular no
+  Bitrix, o grupo é criado só com o cliente; se a instância estiver
+  offline no momento, o grupo simplesmente não é criado (o card fica).
+  Idempotente (não cria um segundo grupo pro mesmo negócio). **Só** pros
+  cards criados pelo Agente de IA — card de LP/Campanha sem o agente
+  ativo continua sem grupo automático (a criação manual pela aba DapZap
+  segue existindo pra esses).
 - **Mensagem de sistema**: texto livre por instância, complementa (não
   substitui) uma persona padrão embutida — em branco, a IA usa só a
   persona padrão.
