@@ -3,7 +3,47 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-07-17 — Parte BY: os DOIS bancos
+> aberto). Última atualização: sessão de 2026-08-26 — Partes EJ a EU: entrega do
+> **Agente de IA** (a maior feature desde a migração pra VPS). Um agente que faz a
+> **triagem inicial** de leads novos — responde automaticamente a primeira mensagem
+> de um número nunca visto (vindo de LP ou campanha), cria o negócio no pipeline de
+> produção do Bitrix (categoria **628**) já com tag de origem, e para sozinho assim
+> que um humano assume. Nasce SEMPRE desligado por instância. Config por instância
+> num wizard de 4 etapas: mensagem de sistema + base de conhecimento (texto livre +
+> upload de PDF/DOCX/TXT/MD com busca semântica via pgvector) + aprendizado few-shot
+> por exemplos de conversa reais (aprovados manualmente, anonimizados automaticamente)
+> + playground de teste (`POST /api/agent/test-reply`, isolado 100% de produção).
+> Reconhece conteúdo real de áudio/imagem/vídeo na primeira mensagem — imagem e vídeo
+> validados em produção (Vision via `gpt-4o-mini`); **ABERTO: transcrição de áudio
+> (Whisper) com o código pronto mas bloqueada** — o projeto da `OPENAI_API_KEY` atual
+> não tem acesso ao modelo `whisper-1` (confirmado por `GET /v1/models`), precisa ser
+> liberado em platform.openai.com → Model access (ação externa). Telas novas:
+> `agente-ia.html` e `agent-examples.html`. Módulos backend novos: `src/agent.js`,
+> `src/agentDispatch.js`, `src/mediaRecognition.js`, `src/routes/agent.js` e o schema
+> pgvector (6 tabelas `agent_*`). 2 achados corrigidos no teste E2E real (Parte EK):
+> categoria 628 faltando no `.env` de produção (usuário corrigiu no EasyPanel) + tag
+> de origem aplicada pelo backend sem broadcast WebSocket (corrigido com evento
+> `tags-updated`) — **ABERTO: auditar outros pontos onde o backend cria/altera tag
+> sem broadcast; só o caminho do Agente de IA foi corrigido**.
+> `public/apresentacao.html` atualizada com tudo isso (2026-08-27).
+>
+> Antes disso, sessão de 2026-07-27 a 2026-08-03 — Partes BZ/CA/CE: **corte final
+> pro Supabase da empresa** feito (o `.env` de produção passou a apontar pro banco
+> novo — Parte BZ); **migração pra VPS própria** com domínio fixo + HTTPS via
+> EasyPanel, saindo do ngrok de vez (Parte CA); reconexão em massa de sessões no
+> boot passou a ser **escalonada** (uma instância por vez, não todas de uma vez —
+> Parte CE, mitiga mas não elimina quedas de sessão em deploy, ver §5). Diversas
+> sessões entre 2026-08-03 e 2026-08-25 (Partes CF a EI) com melhorias de Chat
+> (notas internas, resumo de IA estruturado no card do Bitrix, filtro Pendentes,
+> exportar conversa), Admin (quem está online, gestão de usuários, Kanban de
+> sugestões), alerta de instância caída com histórico/push, publicar no Feed do
+> Bitrix, e correções de "flash" de paleta pessoal — ver a seção 2 pelas partes.
+>
+> ---
+>
+> **Contexto histórico (2026-07, pré-migração) — mantido pra rastreabilidade:**
+>
+> Parte BY (2026-07-17): os DOIS bancos
 > (antigo e novo) foram **zerados** a pedido do usuário — sem conversas, mensagens,
 > contatos, campanhas, notificações, mídia nem instâncias/pareamentos de WhatsApp
 > (força reescanear QR em todo número), mantendo só configuração de produto (Sites/LPs,
@@ -235,10 +275,24 @@
   ("Landing Page" + "Métricas LP" recolhível) — ver §2, parte BQ
 - [x] **Campanha em tela cheia**, preview ao vivo maior mostrando mídia
   real e miniatura de link do YouTube — ver §2, parte BR
+- [x] **Migração pra VPS própria** (domínio fixo + HTTPS via EasyPanel,
+  sem ngrok) e **corte final pro Supabase da empresa** — ver §2, partes
+  BZ e CA
+- [x] **Agente de IA** (`agente-ia.html` + `agent-examples.html`):
+  triagem automática da 1ª mensagem de lead novo, nasce desligado por
+  instância, wizard de 4 etapas, base de conhecimento (texto + upload
+  PDF/DOCX/TXT/MD com busca semântica pgvector), few-shot por exemplos
+  anonimizados, playground de teste, cria negócio na categoria 628 do
+  Bitrix. Reconhecimento de mídia por IA (imagem/vídeo em produção;
+  áudio pendente de liberação do `whisper-1` na OpenAI) — ver §2,
+  partes EJ a EU
 
 Não há bloqueador conhecido em aberto no momento. Ver §5 para dívidas técnicas não
-bloqueantes que ainda restam (domínio fixo em vez de ngrok, persistir
-`AUTH_FOLDER`, etc.).
+bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro
+Bitrix no fluxo normal, backup das credenciais de sessão fora do disco, etc.).
+Pendências pontuais herdadas: liberar o modelo `whisper-1` na OpenAI (transcrição
+de áudio do Agente de IA) e auditar broadcast de `tags-updated` fora do caminho do
+Agente de IA (ver Parte EK).
 
 ---
 
