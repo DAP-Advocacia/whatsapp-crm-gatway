@@ -10438,3 +10438,27 @@ antes desta parte; não existe campo "é grupo" em `conversations` nem
 na API do Chat — `wa_groups` (`id` = JID) é a única fonte confiável,
 sem FK com `conversations`.
 
+**Achado colateral — `.env` local com `PUBLIC_URL` de ngrok abandonado**:
+ao confirmar propagação real do deploy (regra padrão desta sessão —
+verificar resultado, não só que o push teve sucesso), o `curl` contra
+`maker-impaired-obliged.ngrok-free.dev` (valor de `PUBLIC_URL` no
+`.env` LOCAL) devolveu `502 ERR_NGROK_8012` ("agente ngrok não
+conseguiu conectar em localhost:3333") — não era o servidor de
+produção caído, era um túnel **abandonado desde a Parte CA**
+(2026-07-27/29, "migração pra VPS própria... saindo do ngrok de vez"),
+esquecido neste `.env` local por quase um mês. Nunca afetou produção
+de verdade (a VPS tem sua própria env var, independente deste
+arquivo), mas fez as confirmações de "deploy propagou" desta sessão
+(inclusive em partes anteriores, Parte EU/EX) baterem contra um alvo
+morto sem eu perceber, já que `curl` contra ngrok devolve `502` (erro
+genérico de gateway) e não algo mais óbvio tipo falha de DNS.
+`PUBLIC_URL` corrigido no `.env` local pra `https://whatsapp.bmdholding.com.br`
+(domínio real, confirmado ativo e respondendo por `curl` direto — ver
+`DEPLOY.md` pra qualquer dúvida operacional da VPS). Confirmado nesse
+mesmo teste: o domínio real está no ar mas **defasado** — tem o
+Copiloto Comercial (Parte EW) mas ainda não o código desta própria
+Parte EY (aba Grupos) no momento da checagem; segundo a Parte CA, o
+deploy do EasyPanel pode não disparar automático a cada push (só um
+clique manual, ou o webhook configurado depois pode falhar
+pontualmente) — reverificação pendente.
+
