@@ -23,6 +23,7 @@ const { publishFeedPost, recordFeedPost, listFeedPosts } = require('../bitrixFee
 const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
 const actionLog = require('../actionLog');
+const webpush = require('../webpush');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
 // metadados de uma página raramente mudam num intervalo curto, e evita
@@ -651,6 +652,41 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ notifications: await store.listLatestUnreadNotifications(req.query.owner, 5) });
     } catch (err) {
       console.error('[notifications:latest-unread] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Web Push (Service Worker) — ver src/webpush.js. Diferente das rotas
+  // acima (que leem o histórico já persistido), estas gerenciam a
+  // INSCRIÇÃO em si. Nunca usam req.query.owner/req.body.owner — sempre
+  // req.ownerId (já verificado por requireAuth), pra ninguém se inscrever
+  // no lugar de outro dono.
+  // ---------------------------------------------------------------
+  router.get('/notifications/push-public-key', (req, res) => {
+    res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || null });
+  });
+
+  router.post('/notifications/push-subscribe', async (req, res) => {
+    const { endpoint, keys } = req.body?.subscription || {};
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: 'subscription inválida' });
+    }
+    try {
+      await webpush.saveSubscription(req.ownerId, { endpoint, p256dh: keys.p256dh, auth: keys.auth });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[notifications:push-subscribe] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  router.post('/notifications/push-unsubscribe', async (req, res) => {
+    try {
+      if (req.body?.endpoint) await webpush.removeSubscription(req.body.endpoint);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[notifications:push-unsubscribe] erro:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

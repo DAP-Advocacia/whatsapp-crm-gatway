@@ -54,6 +54,7 @@ pode rodar de novo a qualquer momento sem duplicar nada):
 | `conversations` / `messages` | Histórico de mensagens por `(sessionId, phone)`, dedupe por `wa_message_id`. |
 | `instances` | Registro de instâncias de WhatsApp por dono (`id`, `owner_id`, `label`). |
 | `instance_connection_events` / `instance_metrics_daily` | Alerta de instância caída (§14) — histórico de quedas/retomadas (uma linha por evento) e série diária de métricas (conversas/contatos/grupos). `instance_id` é sempre o `session_id` cru, nunca FK — sobrevive à remoção da instância. |
+| `push_subscriptions` | Web Push (§14, Parte FC) — inscrições por `owner_id` (não por instância), múltiplas por dono (vários navegadores/aparelhos). `endpoint` único globalmente, entradas expiradas (404/410 do provedor) são limpas automaticamente. |
 | `feed_posts` | Histórico LOCAL de posts publicados no Feed do Bitrix24 (§14.5) — nunca é a fonte de verdade, só registro pra não duplicar anúncio. |
 | `contacts` / `contact_lists` / `contact_list_members` | Contatos próprios e listas personalizadas, por **dono** (não por instância — se uma instância cai e o usuário conecta outra, os mesmos contatos/listas continuam aparecendo) — usados na Campanha. |
 | `message_templates` | Modelos de mensagem reutilizáveis (corpo com `{{nome}}`/`{{telefone}}`). |
@@ -1206,20 +1207,32 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
     quedas/retomadas (mais recente primeiro, com duração e motivo) + uma
     tabela da série diária de métricas (conversas, contatos, grupos) —
     `GET /instances/:id/health?owner=`.
-  - **Push**: quando uma queda escala pra "precisa de atenção" (nunca
-    numa queda temporária isolada — inundaria o usuário), o dono e todos
-    os delegados recebem uma notificação na Central de Notificações
-    (§15) e, se a permissão do navegador já tiver sido concedida antes
-    (mesma Web Notification API de `notifications.html`/`chat.html`),
-    também um alerta do sistema — sem garantia de entrega dentro do
-    iframe do Bitrix, por isso a Central continua sendo o registro
-    confiável.
+  - **Alerta em 4 canais** (Parte FC, 2026-08-27): quando uma queda
+    escala pra "precisa de atenção" (nunca numa queda temporária isolada
+    — inundaria o usuário), o dono e todos os delegados são notificados
+    por `src/alertDispatcher.js` — 4 canais **independentes/best-effort**
+    (falha em 1 nunca bloqueia os outros): (1) **in-app**, na Central de
+    Notificações (§15), sempre funciona; (2) **Web Push** (Service
+    Worker, `public/sw.js` + `src/webpush.js`) — diferente da
+    notificação nativa simples de antes, funciona mesmo com **todas as
+    abas do sistema fechadas** (precisa ter clicado "Ativar notificações
+    do sistema" — ícone ao lado do sino, em todas as 17 telas com
+    sidebar — pelo menos uma vez); (3) **WhatsApp de sistema**
+    (`src/whatsappAlert.js`) — manda uma mensagem pro celular do
+    destinatário usando **outra instância do mesmo dono** que ainda
+    esteja online (se só houver 1 instância, ou nenhuma outra estiver
+    online, este canal simplesmente não dispara); (4) **e-mail**
+    (`src/email.js`/`src/emailAlert.js`, via Resend) — destinatário
+    resolvido do campo `EMAIL` do cadastro Bitrix. Canais 2-4 dependem
+    de configuração opcional (`VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY`,
+    `RESEND_API_KEY`, `BITRIX_HR_WEBHOOK_URL`) — sem elas, degradam
+    silenciosamente e o canal in-app continua funcionando normalmente.
   - Backend: `instance_connection_events` (uma linha por queda) +
     `instance_metrics_daily` (snapshot diário, job de 1h em
     `src/server.js`) — ver `src/instanceHealthStore.js`. Detecção
     reaproveita 100% o que já existia (`needsAttention`/`loggedOut`/
     `lastDisconnectReason`, ver acima) — só passou a ser persistida e
-    conectada a notificação, nada novo do lado da conexão em si.
+    conectada ao dispatcher de alerta, nada novo do lado da conexão em si.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
@@ -1998,6 +2011,9 @@ revelar que o recurso existe).
 | `notifications?owner=` | GET | Lista o histórico de notificações do dono, mais recentes primeiro, limit 500 — usado pela Central de Notificações (§15). |
 | `notifications/unread-count?owner=` | GET | `{ count }` — usado pelo badge do sino nas páginas. |
 | `notifications/latest-unread?owner=` | GET | `{ notifications: [{id,title,body,target,createdAt}] }` — só as 5 mais recentes NÃO lidas, usado pelo toast em tempo real (`checkNewNotifications`, ver §15, HANDOFF Parte DG). Deliberadamente pequeno, não é o histórico completo. |
+| `notifications/push-public-key` | GET | `{ publicKey }` — chave pública VAPID (`.env`, `VAPID_PUBLIC_KEY`), pro frontend montar `PushManager.subscribe({applicationServerKey:...})`. `null` se não configurada. |
+| `notifications/push-subscribe` | POST | Body `{ subscription: {endpoint, keys:{p256dh, auth}} }` — salva a inscrição de Web Push (`push_subscriptions`, ver §14, Parte FC). `owner_id` é sempre `req.ownerId` do token, nunca do body. |
+| `notifications/push-unsubscribe` | POST | Body `{ endpoint }`. Remove a inscrição. |
 | `notifications/read-all` | POST | Body `{ owner }`. Marca todas as notificações do dono como lidas. |
 | `notifications/:id/read` | POST | Body `{ read }`. Marca uma notificação como lida/não lida — posse conferida pelo próprio registro no banco (`requireResourceOwner`), não por um `owner` que o client mande. |
 | `media/:filename` | GET | Redireciona (302) pra uma signed URL de curta duração do bucket privado `media` (§7). Qualquer usuário autenticado deste portal pode pedir qualquer arquivo — não é restrito por dono da conversa. |

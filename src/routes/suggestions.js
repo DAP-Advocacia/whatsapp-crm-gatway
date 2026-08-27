@@ -4,20 +4,10 @@ const store = require('../store');
 const instancesStore = require('../instances');
 const { requireSuperAdmin } = require('../adminAuth');
 const { bitrixUserIdFromOwnerId } = require('../auth');
-const { getEmployeePhone } = require('../bitrixHierarchy');
+const { getEmployeePhone, normalizeBrazilPhone } = require('../bitrixHierarchy');
 
 const MAX_TEXT_LENGTH = 2000;
 const MAX_RESPONSE_LENGTH = 2000;
-
-// Celular do Bitrix costuma vir SEM o código do país (DDD + número, 10-11
-// dígitos) — mesmo critério já usado em public/admin.html/src/routes/leads.js
-// pra telefone de fonte externa: detecta por TAMANHO, nunca por já começar
-// com "55" (DDD 55 é Rio Grande do Sul, checar prefixo daria falso positivo).
-function normalizeBrazilPhone(raw) {
-  const digits = String(raw || '').replace(/\D/g, '');
-  if (!digits) return null;
-  return digits.length <= 11 ? `55${digits}` : digits;
-}
 
 // Best-effort, chamado dentro de POST /:id/release (usuário pediu, além
 // da notificação já existente dentro do app, uma mensagem de WhatsApp de

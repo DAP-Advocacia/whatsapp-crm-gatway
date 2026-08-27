@@ -1092,8 +1092,22 @@
     }
   });
 
-  // Link "Ativar notificações do sistema" — mesma lógica que já existia no
-  // dropdown antigo do sino (agora removido), só que centralizada aqui.
+  // Web Push (Service Worker) — clicar registra o SW real e cria a
+  // subscription, diferente de antes (só pedia a permissão, sem nunca de
+  // fato notificar — ver HANDOFF Parte FC). Funciona mesmo com TODAS as
+  // abas fechadas depois de ativado, diferente do toast/sino (que exige
+  // aba aberta e visível). Convertida da spec Web Push (VAPID key em
+  // base64url → Uint8Array) — snippet padrão da própria spec, não é nada
+  // específico deste projeto.
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+
   function updateNativeNotifButton() {
     const btn = document.getElementById('enableNativeNotifBtn');
     if (!btn) return;
@@ -1102,11 +1116,35 @@
   updateNativeNotifButton();
   const enableNativeNotifBtn = document.getElementById('enableNativeNotifBtn');
   if (enableNativeNotifBtn) {
-    enableNativeNotifBtn.addEventListener('click', () => {
-      if (!('Notification' in window)) return;
+    enableNativeNotifBtn.addEventListener('click', async () => {
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
       try {
-        Notification.requestPermission().then(updateNativeNotifButton).catch(() => {});
-      } catch { /* iframe pode bloquear a chamada inteira — segue só com toast/sino */ }
+        const perm = await Notification.requestPermission();
+        updateNativeNotifButton();
+        if (perm !== 'granted') return;
+
+        const keyRes = await apiFetch(`${API_BASE}/notifications/push-public-key`);
+        const { publicKey } = await keyRes.json();
+        if (!publicKey) {
+          if (window.showToast) window.showToast('Notificações do sistema ainda não configuradas neste servidor.', 'error');
+          return;
+        }
+
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+        await apiFetch(`${API_BASE}/notifications/push-subscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+        if (window.showToast) window.showToast('Notificações do sistema ativadas.', 'success');
+      } catch (err) {
+        if (window.showToast) window.showToast('Falha ao ativar notificações do sistema.', 'error');
+        console.error('[push] falha ao ativar:', err.message);
+      }
     });
   }
 

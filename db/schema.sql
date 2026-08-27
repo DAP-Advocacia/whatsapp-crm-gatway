@@ -1208,3 +1208,26 @@ create table if not exists conversation_insights (
 );
 create index if not exists idx_conversation_insights_conv
   on conversation_insights (conversation_id, created_at);
+
+-- ================================================================
+-- Web Push (Service Worker) — inscrições por DONO do Bitrix (não por
+-- instância/sessão de WhatsApp: um push notifica o USUÁRIO, independente
+-- de qual instância caiu). Um owner pode ter múltiplas subscriptions
+-- (várias abas/navegadores/dispositivos já deram permissão) — todas
+-- recebem. `endpoint` é o identificador único de verdade (dado pelo
+-- próprio navegador via PushManager.subscribe) — unique sozinho, não
+-- unique(owner_id, endpoint), porque já é globalmente único por definição
+-- da Push API. `p256dh`/`auth` são as chaves de criptografia exigidas
+-- pela lib `web-push`. Usado por src/webpush.js, chamado a partir de
+-- src/alertDispatcher.js quando uma instância precisa de atenção
+-- (ver HANDOFF Parte FC).
+-- ================================================================
+create table if not exists push_subscriptions (
+  id bigserial primary key,
+  owner_id text not null,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_push_subscriptions_owner on push_subscriptions (owner_id);

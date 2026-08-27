@@ -10594,3 +10594,89 @@ em repouso; balanceamento de `/* */` recontado em todo o `<style>`
 real do arquivo (46/46); sintaxe JS revalidada (não afetada, mudança
 foi só CSS).
 
+### Parte FC — Alerta de instância caída ganha 3 canais reais: Web Push, WhatsApp de sistema, e-mail (2026-08-27)
+
+Ao investigar por que o usuário não viu o alerta de "instância precisa
+de atenção" quando suas 2 instâncias caíram (Parte FA), confirmou-se
+que a notificação já era criada no banco (`store.addNotification`),
+mas só virava toast se alguma aba do sistema estivesse aberta E
+visível naquele instante — sem push nativo, WhatsApp ou e-mail. Pedido
+do usuário: os 3 canais juntos, funcionando mesmo com todas as abas
+fechadas. Passou por modo de planejamento formal: 2 agentes Explore
+mapearam a infraestrutura existente (zero Web Push, zero e-mail, 1
+precedente parcial de WhatsApp de sistema em `suggestions.js`) + 1
+agente Plan desenhou a arquitetura, revisada e refinada com 2 rodadas
+de `AskUserQuestion`.
+
+**Dispatcher central** (`src/alertDispatcher.js`, novo) — substitui a
+chamada direta a `store.addNotification` dentro de
+`handleStatusForHealth` (`src/server.js`): agora dispara os 4 canais
+(in-app + Web Push + WhatsApp de sistema + e-mail) por destinatário,
+`Promise.allSettled` duplo (por destinatário E por canal) garantindo
+que falha em 1 nunca bloqueia os outros 3 (decisão de produto
+confirmada). Testado com o **código real** de `handleStatusForHealth`
+extraído de `server.js` (não uma reimplementação) contra banco real:
+1ª transição pra `attention` dispara o dispatcher com os dados certos;
+retry na mesma janela não duplica (proteção `lastHealthState`
+preservada); voltar a `online` fecha o evento sem alerta nenhum.
+
+**Web Push** (`src/webpush.js` + `public/sw.js`, ambos novos) — zero
+infraestrutura existia antes (nenhum Service Worker, VAPID, lib
+`web-push`). Chaves VAPID geradas e configuradas; tabela nova
+`push_subscriptions` (por `owner_id`, não por instância — testada
+contra o banco real, incluindo o tratamento de erro 404/410 que limpa
+subscriptions expiradas automaticamente). 3 rotas novas em
+`src/routes/whatsapp.js` (`push-public-key`, `push-subscribe`,
+`push-unsubscribe`) — testadas via HTTP real: `owner_id` sempre vem do
+token (`req.ownerId`), nunca do body. Botão "Ativar notificações do
+sistema" — antes só existia em `notifications.html` e só chamava
+`Notification.requestPermission()` sem nunca de fato notificar — ganha
+lógica real (registra o SW, cria a subscription, salva no backend) e
+passa a existir como ícone ao lado do sino em **todas as 17 telas com
+sidebar** (decisão confirmada com o usuário), reaproveitando o botão
+de texto já existente em `notifications.html` sem duplicar controles
+na mesma tela. Testado com harness real (bloco `<script>` extraído de
+`dashboard.html` + DOM/Notification/serviceWorker/PushManager
+mockados): fluxo completo de ativação (SW registrado, `subscribe`
+chamado com os parâmetros certos, `applicationServerKey` convertida
+corretamente) e o caminho de permissão negada (aborta antes de
+qualquer chamada de rede).
+
+**WhatsApp de sistema** (`src/whatsappAlert.js`, novo) — diferente do
+precedente `sendReleaseWhatsAppMessage` (`suggestions.js`, usa a
+instância de quem executa a ação), aqui busca **outra instância do
+MESMO dono** ainda online (excluindo a que acabou de cair) — se só
+houver 1 instância, desiste em silêncio. `normalizeBrazilPhone` movida
+de `suggestions.js` pra `bitrixHierarchy.js` (compartilhada, sem
+duplicar). Testado o caminho negativo real (sem telefone resolvido —
+`BITRIX_HR_WEBHOOK_URL` não configurada localmente — desiste sem
+lançar, sem sequer chamar `sessions`).
+
+**E-mail** (`src/email.js` + `src/emailAlert.js`, novos) — provedor
+recomendado: **Resend** (API HTTP simples via `fetch` cru, mesmo
+estilo de `src/openai.js`/`src/bitrix.js`, sem SDK novo). Destinatário
+resolvido do campo `EMAIL` do cadastro Bitrix — `getEmployeeInfo`
+(`bitrixHierarchy.js`) ganhou esse campo (mudança aditiva, confirmada
+segura pros 2 chamadores existentes que só desestruturam `.name`/
+`.phone`). Testado `email.js` sem `RESEND_API_KEY` (degrada
+silenciosamente, sem lançar) — **ABERTO: envio real não testado**, o
+usuário optou por não criar a conta Resend nesta sessão; código pronto,
+só falta a chave.
+
+**Validação de dado real confirmada**: campo `EMAIL` do Bitrix
+verificado via webhook de CRM (`user.get?ID=403`) — devolveu
+`matheus.azevedo@blindagemfinanceira.com.br`, mesmo valor visto no
+print original que motivou o pedido.
+
+**Documentação**: `.env`/`.env.example` ganharam `VAPID_PUBLIC_KEY`/
+`VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` e `RESEND_API_KEY`/`EMAIL_FROM`,
+seguindo o padrão de comentário já usado nas outras integrações
+opcionais (degrada graciosamente sem a variável).
+
+**Pendências abertas**: testar envio real de e-mail (falta conta
+Resend); testar canal WhatsApp de sistema com `BITRIX_HR_WEBHOOK_URL`
+configurada e 2 instâncias reais do mesmo dono; confirmar em produção
+real que `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` também estão
+configuradas lá (mesmo par gerado localmente — gerar de novo
+invalidaria subscriptions já salvas).
+

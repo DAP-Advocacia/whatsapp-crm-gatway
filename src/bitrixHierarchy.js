@@ -259,13 +259,14 @@ async function getEmployeePhone(bitrixUserId) {
   return users[0].PERSONAL_MOBILE || null;
 }
 
-// Nome + celular de UMA pessoa, por ID numérico do Bitrix — usado pela
-// feature "Criar grupo" do card (ver src/routes/cardGroup.js), que precisa
-// exibir nome de cada participante resolvido (Responsável, Verificação,
-// quem clicou), não só o telefone (diferente de getEmployeePhone acima,
-// que só serve o fluxo de notificação de sugestão, sem exibir nome em
-// nenhuma tela). `null` se o usuário não existir/HR indisponível —
-// best-effort, quem chama trata como "não resolvido".
+// Nome + celular + e-mail de UMA pessoa, por ID numérico do Bitrix — usado
+// pela feature "Criar grupo" do card (ver src/routes/cardGroup.js), pelo
+// grupo automático do Agente de IA (src/agentDispatch.js) e pelo alerta de
+// e-mail de instância caída (src/emailAlert.js). `email` foi adicionado
+// depois (mudança aditiva, os 2 chamadores anteriores só desestruturam
+// .name/.phone e ignoram campos extras — seguro). `null` se o usuário não
+// existir/HR indisponível — best-effort, quem chama trata como "não
+// resolvido".
 async function getEmployeeInfo(bitrixUserId) {
   const users = await callBitrixHR('user.get', { ID: bitrixUserId });
   if (!users || !users.length) return null;
@@ -273,7 +274,20 @@ async function getEmployeeInfo(bitrixUserId) {
   return {
     name: [u.NAME, u.SECOND_NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
     phone: u.PERSONAL_MOBILE || null,
+    email: u.EMAIL || null,
   };
+}
+
+// Celular do Bitrix costuma vir SEM o código do país (DDD + número, 10-11
+// dígitos) — mesmo critério já usado em public/admin.html/src/routes/leads.js
+// pra telefone de fonte externa: detecta por TAMANHO, nunca por já começar
+// com "55" (DDD 55 é Rio Grande do Sul, checar prefixo daria falso
+// positivo). Movida de src/routes/suggestions.js pra cá (Parte FC) pra ser
+// compartilhada com src/whatsappAlert.js sem duplicar.
+function normalizeBrazilPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (!digits) return null;
+  return digits.length <= 11 ? `55${digits}` : digits;
 }
 
 module.exports = {
@@ -283,4 +297,5 @@ module.exports = {
   listEmployees,
   getEmployeePhone,
   getEmployeeInfo,
+  normalizeBrazilPhone,
 };

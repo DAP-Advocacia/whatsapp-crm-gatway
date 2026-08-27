@@ -50,6 +50,7 @@ const instanceHealthStore = require('./instanceHealthStore');
 const agentDispatch = require('./agentDispatch');
 const agentRetryWorker = require('./agentRetryWorker');
 const insightGenerator = require('./insightGenerator');
+const alertDispatcher = require('./alertDispatcher');
 
 const PORT = process.env.PORT || 3333;
 const AUTH_FOLDER = process.env.AUTH_FOLDER || './auth_session';
@@ -405,12 +406,18 @@ async function handleStatusForHealth(sessionId, status) {
       const body = gateway.loggedOut
         ? 'A sessão foi encerrada pelo celular — escaneie o QR de novo pra reconectar.'
         : 'A conexão parou de tentar reconectar sozinha — tente reconectar manualmente, ou troque de número se persistir.';
-      await Promise.all(recipients.map((recipientOwnerId) => store.addNotification({
-        ownerId: recipientOwnerId,
+      // Dispara os 4 canais (in-app + Web Push + WhatsApp de sistema +
+      // e-mail, ver src/alertDispatcher.js) — cada um best-effort/
+      // independente (Parte FC), pra notificar mesmo com todas as abas
+      // do sistema fechadas, não só quando alguém está olhando a tela.
+      await alertDispatcher.notifyAttention({
+        recipients,
         title: `Instância "${label}" precisa de atenção`,
         body,
         target: { page: '/instances.html', sessionId },
-      })));
+        waSourceSessionId: sessionId,
+        sessions,
+      });
     }
   } catch (err) {
     console.error(`[whatsapp:${sessionId}] falha ao processar histórico de status:`, err.message);

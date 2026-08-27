@@ -290,7 +290,18 @@
   html.sidebar-collapsed .nav-group > .nav-item{ padding-right:10px; }
   html.sidebar-collapsed .nav-subitems{ display:flex !important; }
 
-  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; }
+  .sidebar-bottom{ height: var(--footer-h); box-sizing:border-box; display:flex; align-items:center; border-top:1px solid var(--border); padding:0 10px; flex-shrink:0; gap:4px; }
+  /* Botão pequeno "Ativar notificações do sistema" (Web Push) — ao lado
+     do sino, em TODAS as telas com sidebar (ver HANDOFF Parte FC). Só
+     ícone (tooltip explica), escondido quando a permissão já foi
+     decidida ou o navegador não suporta. */
+  #enableNativeNotifIconBtn{
+    background:none; border:none; padding:8px; border-radius:8px; cursor:pointer;
+    color:var(--text-faint); display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  #enableNativeNotifIconBtn:hover{ background:var(--surface-2); color:var(--gold); }
+  #enableNativeNotifIconBtn svg{ width:18px; height:18px; }
   .bell-btn{ position:relative; }
   .notif-dot{
     position:absolute; top:6px; left:24px; min-width:15px; height:15px; padding:0 3px;
@@ -719,6 +730,9 @@
       <span class="nav-label">Notificações</span>
       <span class="notif-dot" id="notifDot" hidden></span>
     </a>
+    <button type="button" id="enableNativeNotifIconBtn" title="Ativar notificações do sistema" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M18 5v4"/><path d="M16 7h4"/></svg>
+    </button>
   </div>
 </aside>
 
@@ -1079,6 +1093,55 @@
       }
     }
     return res;
+  }
+
+  // Web Push (Service Worker) — ícone ao lado do sino, em TODAS as telas
+  // com sidebar (ver HANDOFF Parte FC). Funciona mesmo com todas as abas
+  // fechadas depois de ativado, diferente do toast/sino (que exige aba
+  // aberta e visível). urlBase64ToUint8Array é o snippet padrão da spec
+  // Web Push (VAPID key em base64url → Uint8Array), não é específico
+  // deste projeto.
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const rawData = atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+    return outputArray;
+  }
+  function updateNativeNotifIconBtn() {
+    const btn = document.getElementById('enableNativeNotifIconBtn');
+    if (!btn) return;
+    btn.hidden = !('Notification' in window) || Notification.permission !== 'default';
+  }
+  updateNativeNotifIconBtn();
+  const enableNativeNotifIconBtn = document.getElementById('enableNativeNotifIconBtn');
+  if (enableNativeNotifIconBtn) {
+    enableNativeNotifIconBtn.addEventListener('click', async () => {
+      if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      try {
+        const perm = await Notification.requestPermission();
+        updateNativeNotifIconBtn();
+        if (perm !== 'granted') return;
+        const keyRes = await apiFetch(`${API_BASE}/whatsapp/notifications/push-public-key`);
+        const { publicKey } = await keyRes.json();
+        if (!publicKey) {
+          if (window.showToast) window.showToast('Notificações do sistema ainda não configuradas neste servidor.', 'error');
+          return;
+        }
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(publicKey) });
+        await apiFetch(`${API_BASE}/whatsapp/notifications/push-subscribe`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+        if (window.showToast) window.showToast('Notificações do sistema ativadas.', 'success');
+      } catch (err) {
+        if (window.showToast) window.showToast('Falha ao ativar notificações do sistema.', 'error');
+        console.error('[push] falha ao ativar:', err.message);
+      }
+    });
   }
   // Sinal de "app aberto agora" pro painel admin (ver POST
   // /presence/heartbeat, src/routes/whatsapp.js) — idempotente: pode ser
