@@ -48,7 +48,7 @@ isto é intencional e documentado no próprio código (ver Parte EW do
 |---|---|---|---|
 | Dourado | `--gold` / `--gold-dim` | **Nota interna humana** — algo que um atendente escreveu para outro atendente ver, nunca visível ao cliente | `.bubble-note` (bolha de nota no feed do Chat), marca d'água de "mensagem própria" (`--bubble-mine`), destaque geral da marca |
 | Verde / vermelho | `--green` / `--red` | **Métrica positiva/negativa** — sucesso vs. falha, entregue vs. erro | Status de envio, KPIs de dashboard, badges de resultado |
-| Azulado (`#78aadc`) | sem variável CSS própria ainda — hardcoded | **Sugestão de IA para o atendente** (Copiloto Comercial) — 3ª categoria semântica, deliberadamente distinta das outras duas | `.bubble-insight` (bolha de insight no feed do Chat), painel lateral de insights agrupados por tópico |
+| Azulado (`#78aadc`) | `--insight` / `--insight-rgb` | **Sugestão de IA para o atendente** (Copiloto Comercial) — 3ª categoria semântica, deliberadamente distinta das outras duas | `.bubble-insight` (bolha de insight no feed do Chat), painel lateral de insights agrupados por tópico |
 
 ### Por que existe uma 3ª cor (azulada, adicionada em 2026-08-27)
 
@@ -64,24 +64,25 @@ token existente servia para essa 3ª categoria** — cor nova era a escolha
 certa, não um desvio do design system.
 
 ```css
-/* public/chat.html — bolha de insight do Copiloto Comercial */
+/* public/chat.html — :root */
+--insight: #78aadc;
+--insight-rgb: 120,170,220;
+
+/* bolha de insight do Copiloto Comercial */
 .bubble-insight{
-  background: rgba(120,170,220,.08);
-  border: 1px solid rgba(120,170,220,.25);
-  border-left: 3px solid rgba(120,170,220,.6);
+  background: rgba(var(--insight-rgb),.08);
+  border: 1px solid rgba(var(--insight-rgb),.25);
+  border-left: 3px solid rgba(var(--insight-rgb),.6);
 }
 .bubble-insight-head svg,
 .bubble-insight-topic,
-.contact-insight-topic-label{ color:#78aadc; }
+.contact-insight-topic-label{ color:var(--insight); }
 ```
 
-**Pendência de consistência conhecida**: essa cor ainda é um valor
-hardcoded (`#78aadc` / `120,170,220`) espalhado em vários seletores, não
-uma variável `--insight`/`--insight-rgb` no `:root` como as outras
-cores semânticas. Baixo risco, escopo claro — considerar extrair para
-variável CSS na próxima vez que o arquivo for tocado, para ficar
+Extraída para variável no `:root` em 2026-08-27 (mesmo dia da feature),
 consistente com o resto da paleta (`--gold-rgb`, `--green-rgb`,
-`--red-rgb`).
+`--red-rgb`) — a pendência de consistência que existia logo após a
+primeira versão já foi resolvida.
 
 ## 3. Tipografia
 

@@ -134,6 +134,13 @@
     --green-rgb: 76,175,110;
     --red: #d9685f;
     --red-rgb: 217,104,95;
+    /* Copiloto Comercial (insights de IA, 2026-08-27) — tom azulado
+       PRÓPRIO, deliberadamente distinto de --gold (já significa "nota
+       interna humana") e --green/--red (já significam positivo/negativo
+       de métrica). Nenhum token existente serve pra essa 3ª categoria
+       semântica. Ver docs/design-system.md. */
+    --insight: #78aadc;
+    --insight-rgb: 120,170,220;
     --radius: 14px;
     --bubble-mine: var(--gold);
     --bubble-mine-text: #1a1408;
@@ -1037,41 +1044,41 @@
      PRÓPRIA (nunca âmbar — âmbar já significa "nota humana" no resto do
      app). Borda-esquerda colorida por confiança, mesmo princípio de
      .insight-card em public/dashboard.html (borda por tone), adaptado
-     pra um tom neutro/azulado que não conflita com --green/--red já
-     usados noutro sentido (positivo/negativo de métrica) nem com
-     --gold (nota humana). */
+     pra um tom neutro/azulado (--insight/--insight-rgb, ver :root) que
+     não conflita com --green/--red já usados noutro sentido (positivo/
+     negativo de métrica) nem com --gold (nota humana). */
   .bubble-insight{
-    width: 100%; background: rgba(120,170,220,.08); border: 1px solid rgba(120,170,220,.25);
-    border-left: 3px solid rgba(120,170,220,.6); border-radius: 10px; padding: 8px 12px;
+    width: 100%; background: rgba(var(--insight-rgb),.08); border: 1px solid rgba(var(--insight-rgb),.25);
+    border-left: 3px solid rgba(var(--insight-rgb),.6); border-radius: 10px; padding: 8px 12px;
     font-size: 13px; color: var(--text);
   }
   .bubble-insight--low{ border-left-color: var(--text-faint); }
   .bubble-insight--sent{ opacity:.7; }
   .bubble-insight-head{ display:flex; align-items:center; gap:6px; margin-bottom:4px; flex-wrap:wrap; }
-  .bubble-insight-head svg{ width:14px; height:14px; color:#78aadc; flex-shrink:0; }
+  .bubble-insight-head svg{ width:14px; height:14px; color:var(--insight); flex-shrink:0; }
   .bubble-insight-topic{
     font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
-    color:#78aadc; background:rgba(120,170,220,.15); border-radius:5px; padding:2px 6px;
+    color:var(--insight); background:rgba(var(--insight-rgb),.15); border-radius:5px; padding:2px 6px;
   }
   .bubble-insight-title{ font-size:12.5px; font-weight:600; color:var(--text); }
   .bubble-insight-text{ white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
   .bubble-insight-actions{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .insight-action-btn{
-    background:rgba(120,170,220,.12); border:1px solid rgba(120,170,220,.3); color:var(--text-muted);
+    background:rgba(var(--insight-rgb),.12); border:1px solid rgba(var(--insight-rgb),.3); color:var(--text-muted);
     border-radius:6px; cursor:pointer; font-size:11px; padding:3px 8px; font-family:inherit;
   }
-  .insight-action-btn:hover{ color:var(--text); border-color:rgba(120,170,220,.5); }
+  .insight-action-btn:hover{ color:var(--text); border-color:rgba(var(--insight-rgb),.5); }
   .insight-action-btn:disabled{ opacity:.4; cursor:not-allowed; }
-  .insight-action-btn--active{ background:rgba(120,170,220,.3); color:var(--text); }
+  .insight-action-btn--active{ background:rgba(var(--insight-rgb),.3); color:var(--text); }
   .insight-sent-tag{ font-size:11px; color:var(--text-faint); }
 
   /* Painel lateral — seção "Insights de IA" agrupada por tópico
      (renderInsightsSection), mesmo padrão visual compacto de
      .contact-summary já existente. */
   .contact-insights{ display:flex; flex-direction:column; gap:10px; }
-  .contact-insight-topic-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:#78aadc; }
+  .contact-insight-topic-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--insight); }
   .contact-insight-mini{
-    background: rgba(120,170,220,.08); border: 1px solid rgba(120,170,220,.2); border-radius: 8px;
+    background: rgba(var(--insight-rgb),.08); border: 1px solid rgba(var(--insight-rgb),.2); border-radius: 8px;
     padding: 7px 10px; font-size: 12px; color: var(--text-muted); margin-top:4px;
   }
   .contact-insight-mini-title{ font-weight:600; color:var(--text); margin-bottom:2px; }
