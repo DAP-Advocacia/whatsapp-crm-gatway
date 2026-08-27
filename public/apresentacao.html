@@ -552,7 +552,7 @@
         <div class="eyebrow">01 · Sumário executivo</div>
         <h2 class="section-title">Um canal que virou dado.</h2>
         <p class="lede">Construímos um gateway próprio que conecta números de WhatsApp diretamente aos negócios do Bitrix24. O que era uma conversa perdida no celular de cada vendedor passou a ser: histórico vinculado ao negócio, disparo de campanhas com controle e rastreio, agendamento de envios, segmentação de contatos, painéis de métricas, uma central de notificações com histórico próprio e um agente de IA que atende automaticamente o primeiro contato de um lead novo — tudo dentro do CRM que a equipe já usa todo dia.</p>
-        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com dezoito telas e dezessete módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead e triagem de leads por IA. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
+        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com dezoito telas e dezoito módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead, triagem de leads por IA e sugestões em tempo real pro time comercial. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
       </div>
     </section>
 
@@ -584,7 +584,7 @@
     <section class="section wide" id="solucao">
       <div class="section-inner reveal">
         <div class="eyebrow">03 · A solução</div>
-        <h2 class="section-title">Dezessete módulos, um só lugar de trabalho.</h2>
+        <h2 class="section-title">Dezoito módulos, um só lugar de trabalho.</h2>
         <p class="lede">Tudo acessível de dentro do Bitrix24, sem precisar aprender uma ferramenta nova.</p>
         <div class="grid">
           <div class="card">
@@ -689,6 +689,12 @@
             <p>Um agente que faz a <b>triagem inicial</b> de leads novos: responde automaticamente o primeiro contato de um número nunca visto (por landing page ou campanha), cria o negócio no pipeline de produção do Bitrix já com a tag de origem, e para sozinho assim que um humano assume a conversa. Nunca fala primeiro, nunca entra em conversa de cliente antigo e <b>nasce desligado em cada número</b> — só liga por um botão na tela. Configurável por instância em um assistente de 4 etapas: mensagem de sistema própria, base de conhecimento (texto livre + upload de PDF/DOCX/TXT/Markdown com busca semântica), aprendizado por exemplos de conversas reais (aprovados manualmente e anonimizados automaticamente antes de virarem referência) e um <b>playground</b> para testar a configuração antes de salvar. Reconhece o conteúdo real de áudio, imagem e vídeo na primeira mensagem — não responde a um "[imagem]" genérico. Ao criar o negócio, também <b>abre automaticamente um grupo de WhatsApp</b> reunindo o cliente e o dono do número, para o time acompanhar o atendimento sem sair do WhatsApp.</p>
             <div class="card-tag">Inteligência Artificial</div>
           </div>
+          <div class="card">
+            <div class="card-num">18</div>
+            <h3>Copiloto Comercial</h3>
+            <p>Diferente do Agente de IA acima — aqui a IA nunca fala com o cliente, só <b>sugere pro atendente humano</b> em tempo real, durante um atendimento em andamento. Pensado pro time comercial: identifica situações recorrentes na conversa (ex: cliente diz que tem um documento pra enviar, ou que o valor oferecido é menor que o esperado) e gera um insight pronto para usar, classificado por tópico — aparece direto no Chat, junto da conversa, e agrupado num painel lateral. O atendente decide o que fazer: copiar o texto, enviar direto ao cliente (sempre com uma confirmação antes), marcar como útil ou dispensar. Configurável por número: regras do próprio negócio (texto livre) e os tópicos que a IA deve reconhecer. <b>Nasce desligado em cada número</b>, mesmo padrão do Agente de IA.</p>
+            <div class="card-tag">Inteligência Artificial</div>
+          </div>
         </div>
       </div>
     </section>
@@ -769,7 +775,7 @@
         <p class="lede">Fatos de arquitetura — não projeções. Tudo abaixo já está implementado e em uso interno.</p>
         <div class="fact-strip">
           <div class="fact"><div class="fact-num">18</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões, FAQ, onboarding, administração, apresentação, aparência, agente de IA e exemplos de conversa</div></div>
-          <div class="fact"><div class="fact-num">42</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de instância, delegação de acesso, posts do Feed, configuração e base de conhecimento vetorial do Agente de IA…)</div></div>
+          <div class="fact"><div class="fact-num">45</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de instância, delegação de acesso, posts do Feed, configuração e base de conhecimento vetorial do Agente de IA, insights do Copiloto Comercial…)</div></div>
           <div class="fact"><div class="fact-num">3</div><div class="fact-label">Tipos de mídia que o Agente de IA reconhece na primeira mensagem de um lead — imagem e vídeo já em produção, áudio com o código pronto (pendente de liberação de modelo, ver seção 07)</div></div>
           <div class="fact"><div class="fact-num">1</div><div class="fact-label">Ponto único de trabalho — nenhuma equipe precisa sair do Bitrix24</div></div>
           <div class="fact"><div class="fact-num">0</div><div class="fact-label">Custo de licença por número de WhatsApp conectado</div></div>
@@ -824,6 +830,14 @@
             </div>
           </div>
           <div class="risk">
+            <div class="risk-flag low"></div>
+            <div>
+              <h3>Copiloto Comercial ainda sem teste com WhatsApp real</h3>
+              <p>A geração de insights e o envio ao cliente foram validados por testes automatizados de lógica (regras de negócio, permissões de acesso), mas ainda não foram testados numa conversa real de WhatsApp. Recomenda-se um teste guiado com uma instância comercial antes de habilitar o recurso em produção para o time.</p>
+              <div class="risk-severity">Severidade baixa · pendente de validação em produção</div>
+            </div>
+          </div>
+          <div class="risk">
             <div class="risk-flag med"></div>
             <div>
               <h3>Margem de CPU para o crescimento planejado</h3>
@@ -855,6 +869,10 @@
           <div class="road">
             <div class="road-when">Curto prazo</div>
             <div><h3>Upload direto de vídeo nas LPs</h3><p>O vídeo de fundo do hero hoje depende de um link público direto — serviços que exigem login, como o Bitrix Disk, não funcionam na página pública. Permitir upload do próprio arquivo (ou suportar mais hosts de vídeo) fecha essa lacuna.</p></div>
+          </div>
+          <div class="road">
+            <div class="road-when">Curto/médio prazo</div>
+            <div><h3>Tela de Follow-ups, Agenda e Relatórios personalizados</h3><p>Três extensões planejadas pro Copiloto Comercial: uma tela pra criar e acompanhar lembretes de retorno a um lead; uma aba de Agenda integrada ao calendário do Bitrix e/ou Google para marcar reuniões direto do atendimento; e relatórios sob medida, entregues por e-mail, WhatsApp ou outro canal, num horário agendado.</p></div>
           </div>
           <div class="road">
             <div class="road-when">Médio prazo</div>

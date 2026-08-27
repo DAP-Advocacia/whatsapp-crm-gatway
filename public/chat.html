@@ -1031,6 +1031,50 @@
   .rev-item:last-child{ border-bottom:none; }
   .rev-text{ font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
   .rev-time{ font-size:10px; color:var(--text-faint); margin-top:3px; }
+
+  /* Bolha de insight de IA (Copiloto Comercial) — mesma faixa horizontal
+     de largura total da nota interna (.note-row acima), mas paleta
+     PRÓPRIA (nunca âmbar — âmbar já significa "nota humana" no resto do
+     app). Borda-esquerda colorida por confiança, mesmo princípio de
+     .insight-card em public/dashboard.html (borda por tone), adaptado
+     pra um tom neutro/azulado que não conflita com --green/--red já
+     usados noutro sentido (positivo/negativo de métrica) nem com
+     --gold (nota humana). */
+  .bubble-insight{
+    width: 100%; background: rgba(120,170,220,.08); border: 1px solid rgba(120,170,220,.25);
+    border-left: 3px solid rgba(120,170,220,.6); border-radius: 10px; padding: 8px 12px;
+    font-size: 13px; color: var(--text);
+  }
+  .bubble-insight--low{ border-left-color: var(--text-faint); }
+  .bubble-insight--sent{ opacity:.7; }
+  .bubble-insight-head{ display:flex; align-items:center; gap:6px; margin-bottom:4px; flex-wrap:wrap; }
+  .bubble-insight-head svg{ width:14px; height:14px; color:#78aadc; flex-shrink:0; }
+  .bubble-insight-topic{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+    color:#78aadc; background:rgba(120,170,220,.15); border-radius:5px; padding:2px 6px;
+  }
+  .bubble-insight-title{ font-size:12.5px; font-weight:600; color:var(--text); }
+  .bubble-insight-text{ white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
+  .bubble-insight-actions{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .insight-action-btn{
+    background:rgba(120,170,220,.12); border:1px solid rgba(120,170,220,.3); color:var(--text-muted);
+    border-radius:6px; cursor:pointer; font-size:11px; padding:3px 8px; font-family:inherit;
+  }
+  .insight-action-btn:hover{ color:var(--text); border-color:rgba(120,170,220,.5); }
+  .insight-action-btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .insight-action-btn--active{ background:rgba(120,170,220,.3); color:var(--text); }
+  .insight-sent-tag{ font-size:11px; color:var(--text-faint); }
+
+  /* Painel lateral — seção "Insights de IA" agrupada por tópico
+     (renderInsightsSection), mesmo padrão visual compacto de
+     .contact-summary já existente. */
+  .contact-insights{ display:flex; flex-direction:column; gap:10px; }
+  .contact-insight-topic-label{ font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:#78aadc; }
+  .contact-insight-mini{
+    background: rgba(120,170,220,.08); border: 1px solid rgba(120,170,220,.2); border-radius: 8px;
+    padding: 7px 10px; font-size: 12px; color: var(--text-muted); margin-top:4px;
+  }
+  .contact-insight-mini-title{ font-weight:600; color:var(--text); margin-bottom:2px; }
 </style>
 </head>
 <body>
@@ -1469,6 +1513,8 @@
   // Rotas do Agente de IA (routes/agent.js) — botão "Marcar como
   // exemplo" no painel de detalhes, mesmo padrão de public/agente-ia.html.
   const AGENT_API_BASE = window.location.origin + '/api/agent';
+  // Rotas do Copiloto Comercial / insights de IA (routes/insights.js).
+  const INSIGHTS_API_BASE = window.location.origin + '/api/insights';
   const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
   let appToken = null;
@@ -1835,6 +1881,7 @@
         ${renderContactPanelLabels()}
         ${renderCommonGroupsSection()}
         ${renderDocumentsSection()}
+        ${renderInsightsSection()}
         ${renderSummarySection()}
       </div>
       <div class="contact-panel-footer">
@@ -1853,6 +1900,44 @@
     const markExampleBtn = document.getElementById('markAsExampleBtn');
     if (markExampleBtn) markExampleBtn.addEventListener('click', markAsExample);
     hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
+  }
+
+  // Insights de IA ativos (Copiloto Comercial), agrupados por tópico —
+  // espelho compacto da bolha no feed (ver combined/_kind==='insight'
+  // em renderMessages), pro atendente ver de relance sem rolar a
+  // conversa toda. Some por completo em instância sem o copiloto ativo
+  // (state.insights sempre vem [] nesse caso, ver loadInsights) — não
+  // mostra seção vazia à toa.
+  function renderInsightsSection() {
+    const active = state.insights.filter((i) => i.status !== 'dismissed');
+    if (!active.length) return '';
+
+    const byTopic = new Map();
+    active.forEach((i) => {
+      if (!byTopic.has(i.topic)) byTopic.set(i.topic, []);
+      byTopic.get(i.topic).push(i);
+    });
+
+    const groupsHtml = [...byTopic.entries()].map(([topic, items]) => `
+      <div>
+        <div class="contact-insight-topic-label">${escapeHtml(topic)}</div>
+        ${items.map((i) => `
+          <div class="contact-insight-mini">
+            <div class="contact-insight-mini-title">${escapeHtml(i.title)}</div>
+            <div>${escapeHtml(i.body)}</div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+
+    return `
+      <div class="contact-summary">
+        <div class="contact-summary-head">
+          <span class="contact-summary-label">Insights de IA</span>
+        </div>
+        <div class="contact-insights">${groupsHtml}</div>
+      </div>
+    `;
   }
 
   // Resumo da conversa via IA — painel de detalhes. `aiSummary` vem
@@ -2066,6 +2151,26 @@
     }
   }
 
+  // Insights de IA ativos da conversa aberta (Copiloto Comercial, ver
+  // src/insightGenerator.js) — mesmo padrão exato de loadInternalNotes
+  // acima, inclusive a guarda contra corrida de troca de conversa. Em
+  // instância sem o copiloto ativo, a lista vem sempre vazia (nunca é
+  // um erro — GET funciona igual, só não há linha nenhuma).
+  async function loadInsights() {
+    const activeRef = state.active;
+    try {
+      const res = await apiFetch(`${INSIGHTS_API_BASE}?session=${encodeURIComponent(activeRef.sessionId)}&phone=${encodeURIComponent(activeRef.phone)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (state.active !== activeRef) return; // trocou de conversa enquanto buscava
+      state.insights = data.insights || [];
+      renderMessages();
+      renderContactPanel();
+    } catch (err) {
+      console.error('[insights] falha ao carregar insights:', err.message);
+    }
+  }
+
   async function loadCommonGroups(a) {
     if (!a.phone || a.phone.includes('@')) return []; // é um grupo, não um contato — não se aplica
     try {
@@ -2248,6 +2353,13 @@
     // igual `messages` — NÃO zerado em closeConversation (mesma
     // convenção pré-existente de `messages`, que só zera no próximo open).
     internalNotes: [],
+    // Insights de IA (Copiloto Comercial) da conversa ABERTA — mesmo
+    // padrão de internalNotes acima (nunca mesclado dentro de `messages`,
+    // merge visual só na renderização). Só populado em instâncias com o
+    // copiloto ativo (ver src/insightGenerator.js) — em instâncias sem
+    // isso, fica sempre []. Resetado em openConversation, igual
+    // internalNotes.
+    insights: [],
     connectionStatus: 'unknown',
     peerPresence: null,  // null | 'composing' | 'recording' — do CONTATO, ao vivo
     peerPresenceTimer: null,
@@ -3194,6 +3306,7 @@
     };
     state.messages = [];
     state.internalNotes = [];
+    state.insights = [];
     state.connectionStatus = 'unknown';
     state.peerPresence = null;
     state.replyingTo = null;
@@ -3211,6 +3324,7 @@
     fetchStatus();
     loadContactPanel();
     loadInternalNotes();
+    loadInsights();
     markConversationRead(conv);
   }
 
@@ -3448,9 +3562,12 @@
     // Merge visual — nota interna NUNCA é gravada dentro de state.messages
     // (ver comentário em state.internalNotes); esta lista combinada é só
     // uma variável local de renderização, ordenada por timestamp real.
+    // Insight DISPENSADO some do feed (mas continua no banco/histórico via
+    // API, só não polui mais a conversa aberta) — 'active' e 'sent' ficam.
     const combined = [
       ...state.messages.map((m) => ({ ...m, _kind: 'message' })),
       ...state.internalNotes.map((n) => ({ ...n, _kind: 'note' })),
+      ...state.insights.filter((i) => i.status !== 'dismissed').map((i) => ({ ...i, _kind: 'insight' })),
     ].sort((x, y) => new Date(x.createdAt) - new Date(y.createdAt));
 
     let html = '';
@@ -3509,6 +3626,32 @@
               <div class="bubble-note-time">
                 ${formatTime(msg.createdAt)}${wasEdited ? ` · <button type="button" class="note-edited-tag" data-show-revisions-id="${msg.id}">editada</button>` : ''}${isDone ? ' · concluída' : ''}
               </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      if (msg._kind === 'insight') {
+        const isSent = msg.status === 'sent';
+        html += `
+          <div class="note-row">
+            <div class="bubble-insight bubble-insight--${msg.confidence || 'medium'}${isSent ? ' bubble-insight--sent' : ''}">
+              <div class="bubble-insight-head">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 2.4 1.2 4.1 2.5 5.3.7.6 1 1.4 1 2.2V18h7v-1.5c0-.8.3-1.6 1-2.2C17.8 13.1 19 11.4 19 9a7 7 0 0 0-7-7Z"/><path d="M9 21h6"/><path d="M10 18v0M14 18v0"/></svg>
+                <span class="bubble-insight-topic">${escapeHtml(msg.topic)}</span>
+                <span class="bubble-insight-title">${escapeHtml(msg.title)}</span>
+              </div>
+              <div class="bubble-insight-text">${escapeHtml(msg.body)}</div>
+              <div class="bubble-insight-actions">
+                <button type="button" class="insight-action-btn" data-copy-insight-id="${msg.id}" title="Copiar texto">Copiar</button>
+                ${!isSent ? `<button type="button" class="insight-action-btn" data-send-insight-id="${msg.id}" title="Enviar direto ao cliente">Enviar ao cliente</button>` : '<span class="insight-sent-tag">Enviado ao cliente</span>'}
+                <button type="button" class="insight-action-btn${msg.feedback === 'useful' ? ' insight-action-btn--active' : ''}" data-feedback-insight-id="${msg.id}" data-feedback-value="useful" title="Marcar como útil">👍 Útil</button>
+                <button type="button" class="insight-action-btn${msg.feedback === 'not_useful' ? ' insight-action-btn--active' : ''}" data-feedback-insight-id="${msg.id}" data-feedback-value="not_useful" title="Marcar como não útil">👎 Não útil</button>
+                <button type="button" class="insight-action-btn" data-dismiss-insight-id="${msg.id}" title="Dispensar">Dispensar</button>
+                <button type="button" class="insight-action-btn" disabled title="Em breve">Virar follow-up</button>
+              </div>
+              <div class="bubble-note-time">${formatTime(msg.createdAt)}</div>
             </div>
           </div>
         `;
@@ -3731,6 +3874,27 @@
       if (revBtn) {
         showNoteRevisions(revBtn.getAttribute('data-show-revisions-id'));
       }
+
+      // ---------- Insight de IA (Copiloto Comercial) ----------
+      const copyInsightBtn = e.target.closest('[data-copy-insight-id]');
+      if (copyInsightBtn) {
+        copyInsightText(copyInsightBtn.getAttribute('data-copy-insight-id'));
+        return;
+      }
+      const sendInsightBtn = e.target.closest('[data-send-insight-id]');
+      if (sendInsightBtn) {
+        sendInsightToClient(sendInsightBtn.getAttribute('data-send-insight-id'));
+        return;
+      }
+      const feedbackInsightBtn = e.target.closest('[data-feedback-insight-id]');
+      if (feedbackInsightBtn) {
+        setInsightFeedback(feedbackInsightBtn.getAttribute('data-feedback-insight-id'), feedbackInsightBtn.getAttribute('data-feedback-value'));
+        return;
+      }
+      const dismissInsightBtn = e.target.closest('[data-dismiss-insight-id]');
+      if (dismissInsightBtn) {
+        dismissInsight(dismissInsightBtn.getAttribute('data-dismiss-insight-id'));
+      }
     });
   }
 
@@ -3806,6 +3970,100 @@
   document.getElementById('noteRevisionsCancel').addEventListener('click', () => {
     document.getElementById('noteRevisionsModal').classList.remove('open');
   });
+
+  // ---------------------------------------------------------
+  // Insight de IA (Copiloto Comercial) — GET/POST em /api/insights
+  // (src/routes/insights.js). Nenhuma ação aqui altera state.messages
+  // (o insight nunca é uma mensagem real) — só state.insights.
+  // ---------------------------------------------------------
+  function findInsightIndex(insightId) {
+    return state.insights.findIndex((i) => i.id === insightId || String(i.id) === String(insightId));
+  }
+
+  async function copyInsightText(insightId) {
+    const idx = findInsightIndex(insightId);
+    if (idx === -1) return;
+    try {
+      await navigator.clipboard.writeText(state.insights[idx].body);
+      if (window.showToast) window.showToast('Texto copiado', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast('Não foi possível copiar', 'error');
+    }
+  }
+
+  // Envio de verdade ao cliente — sempre exige confirmação explícita
+  // (nunca automático), mesmo padrão de window.confirmDialog já usado
+  // no resto do app pra ações que mandam mensagem de verdade.
+  async function sendInsightToClient(insightId) {
+    const idx = findInsightIndex(insightId);
+    if (idx === -1) return;
+    const insight = state.insights[idx];
+    const ok = await window.confirmDialog(`Enviar este texto ao cliente agora?\n\n"${insight.body}"`);
+    if (!ok) return;
+
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${INSIGHTS_API_BASE}/${insightId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao enviar');
+      state.insights[idx] = data.insight;
+      renderMessages();
+      renderContactPanel();
+      if (window.showToast) window.showToast('Enviado ao cliente', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  async function setInsightFeedback(insightId, feedback) {
+    const idx = findInsightIndex(insightId);
+    if (idx === -1) return;
+    const a = state.active;
+    // otimista — feedback é baixo risco (não envia nada ao cliente),
+    // mesmo padrão de reactToMessage abaixo.
+    const previous = state.insights[idx].feedback;
+    state.insights[idx].feedback = state.insights[idx].feedback === feedback ? null : feedback;
+    renderMessages();
+    try {
+      const res = await apiFetch(`${INSIGHTS_API_BASE}/${insightId}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, feedback: state.insights[idx].feedback || feedback }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao registrar feedback');
+      state.insights[idx] = data.insight;
+      renderMessages();
+    } catch (err) {
+      state.insights[idx].feedback = previous;
+      renderMessages();
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  async function dismissInsight(insightId) {
+    const idx = findInsightIndex(insightId);
+    if (idx === -1) return;
+    const a = state.active;
+    try {
+      const res = await apiFetch(`${INSIGHTS_API_BASE}/${insightId}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Falha ao dispensar');
+      state.insights[idx] = data.insight;
+      renderMessages();
+      renderContactPanel();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
 
   async function reactToMessage(msgId, fromMe, emoji) {
     const a = state.active;
@@ -4525,6 +4783,27 @@
       if (payload.type === 'internal-note-updated' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
         const idx = state.internalNotes.findIndex((n) => n.id === payload.note.id);
         if (idx !== -1) { state.internalNotes[idx] = payload.note; renderMessages(); }
+      }
+
+      // Insight de IA novo (Copiloto Comercial, ver src/insightGenerator.js)
+      // — gerado pelo servidor em background, sem ação de nenhuma aba.
+      // Mesma guarda dupla sessionId+phone das notas internas acima.
+      if (payload.type === 'ai-insight' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+        const alreadyShown = state.insights.some((i) => i.id === payload.insight.id);
+        if (!alreadyShown) {
+          state.insights.push(payload.insight);
+          renderMessages();
+          renderContactPanel();
+          showToast(`Novo insight: ${payload.insight.title}`, 'info');
+        }
+      }
+
+      // Insight dispensado / com feedback / enviado ao cliente em OUTRA
+      // aba — mesmo type pros 3 casos (backend manda 'ai-insight-updated'
+      // de POST /:id/dismiss, /:id/feedback e /:id/send).
+      if (payload.type === 'ai-insight-updated' && state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+        const idx = state.insights.findIndex((i) => i.id === payload.insight.id);
+        if (idx !== -1) { state.insights[idx] = payload.insight; renderMessages(); renderContactPanel(); }
       }
     };
 

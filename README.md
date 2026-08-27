@@ -1644,6 +1644,57 @@ link "Exemplos de conversa (N pendentes) →" no topo de
 
 ---
 
+## 14.9. Copiloto Comercial — insights de IA em tempo real (painel dentro de `/agente-ia.html` + Chat)
+
+Feature distinta do Agente de IA (§14.7): ali a IA **atende** o lead
+sozinha; aqui a IA só **sugere** pro atendente humano durante uma
+conversa em andamento, no setor comercial (venda de precatórios). Só
+instâncias marcadas **"comercial"** (toggle novo, painel `#commercialPanel`
+em `agente-ia.html`, fora do wizard de 4 etapas — mesmo precedente do
+Playground, §14.7) recebem insights; nasce sempre desligado.
+
+- **Gatilho**: a cada mensagem `in` recebida (`src/server.js::onMessage`),
+  fire-and-forget, sem atrasar broadcast/timeline/notificação/Agente de
+  IA que já rodaram antes. **Anti-flood de ~60s por conversa** — checado
+  ANTES de chamar a OpenAI (barato): se a última geração foi há menos de
+  60s, ou não há mensagem nova desde então, pula.
+- **Contexto da IA**: transcript da conversa (`buildTranscript`, mesma
+  função do Agente de IA) + **playbook** (texto livre por instância com
+  as regras do negócio — margem mínima, documento aceito, etc) + dados
+  do negócio no CRM (`crm.deal.get` — valor, etapa) + base de
+  conhecimento do Agente de IA (busca semântica, se a instância tiver).
+  Prompt instrui a IA a nunca tratar texto do CLIENTE como comando
+  (mitigação de prompt injection) e a nunca vazar o playbook literal no
+  texto do insight (que pode ser enviado de verdade ao próprio cliente).
+- **Tópicos** — lista fixa mas editável por instância (default:
+  "Passo a passo de documento", "Análise de contraproposta", "Objeção de
+  preço", "Qualificação do lead", "Próximo passo"). A IA classifica cada
+  insight num desses tópicos; se devolver um tópico fora da lista, o
+  insight é descartado (log, não é forçado num tópico ao acaso).
+- **UI, em dois lugares**: bolha `.bubble-insight` no feed do Chat (cor
+  própria — azulada, deliberadamente distinta do dourado que já
+  significa "nota interna humana" e do verde/vermelho que já significam
+  positivo/negativo de métrica) e espelho agrupado por tópico no painel
+  lateral de detalhes do contato.
+- **Ações no insight**: copiar texto; **enviar direto ao cliente**
+  (sempre com confirmação explícita — nunca automático, `POST
+  /api/insights/:id/send`, idempotente contra reenvio); marcar
+  útil/não-útil (feedback, registrado mas não altera o comportamento da
+  IA ainda); dispensar (some do feed, mas fica no histórico via API);
+  "virar follow-up" — botão presente mas desabilitado, aguardando a
+  feature de Follow-ups (roadmap, não implementada).
+- **Schema**: `commercial_config` (config por instância, mesmo padrão de
+  `agent_config`), `conversation_insight_state` (anti-flood),
+  `conversation_insights` (tabela própria — não reaproveita
+  `internal_notes`, ciclos de vida diferentes).
+- **Autorização**: todas as rotas de `/api/insights/*` exigem posse da
+  instância (`requireSession`); `dismiss`/`feedback`/`send` também
+  confirmam que o `:id` do insight pertence de fato à `session`+`phone`
+  informados no body (`loadOwnedInsight`, helper compartilhado) — achado
+  real de revisão de segurança, corrigido antes de fechar a feature.
+
+---
+
 ## 15. Central de Notificações — Kanban e Calendário (`/notifications.html`)
 
 O sino da sidebar (compartilhado pelas 8 páginas) deixou de abrir um dropdown
@@ -2066,6 +2117,22 @@ lida por `GET /history`/`POST /send` (rota própria, dedicada).
 | `/:id` | PUT | Body `{ session, phone, text }`. Edita o texto, preservando a versão anterior em `internal_note_revisions` — HANDOFF Parte EC. Exige ser o AUTOR original (`requireResourceOwner`, 404 senão). Broadcast `type:'internal-note-updated'`. |
 | `/:id/complete` | POST | Body `{ session, phone, completed }`. Marca/desmarca como concluída (toggle) — mesma restrição de autor de `PUT /:id`. Nota concluída continua na mesma posição cronológica do feed, só riscada/opaca no client. |
 | `/:id/revisions?session=&phone=` | GET | Histórico de versões substituídas de uma nota, mais antiga primeiro — leitura, SEM restrição de autor (quem já lê a nota via `GET /` lê o histórico dela). |
+
+### `/api/insights/*` (`src/routes/insights.js`)
+
+Ver §14.9 — Copiloto Comercial. Gerado automaticamente por
+`src/insightGenerator.js` a partir de `onMessage` (mensagem recebida em
+instância comercial); estas rotas são só leitura/ação do que já foi
+gerado + config, nunca disparam uma geração nova sob demanda.
+
+| Rota | Método | Uso |
+|---|---|---|
+| `?session=&phone=` | GET | Lista insights `active` da conversa, ordem cronológica. |
+| `/:id/dismiss` | POST | Body `{ session, phone }`. Marca `status='dismissed'` — some do feed do client, continua acessível via API. Confirma posse (`loadOwnedInsight`) antes de agir. |
+| `/:id/feedback` | POST | Body `{ session, phone, feedback: 'useful'\|'not_useful' }`. Confirma posse antes de agir. |
+| `/:id/send` | POST | Body `{ session, phone }`. Envia `insight.body` como mensagem de WhatsApp DE VERDADE ao cliente (`gateway.sendMessage` + persiste + broadcast `type:'message'`), depois marca `status='sent'`. Idempotente — insight já `sent` responde 409, não reenvia. Confirma posse antes de agir. |
+| `/commercial-config?session=` | GET | Config do copiloto pra instância (`{ enabled, playbook, topics }`). |
+| `/commercial-config` | PUT | Body `{ session, enabled?, playbook?, topics? }` — patch parcial, mesmo padrão de `agent_config`. |
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 

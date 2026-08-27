@@ -35,6 +35,7 @@ const { createConversationAnalysisRouter } = require('./routes/conversationAnaly
 const { createCardGroupRouter } = require('./routes/cardGroup');
 const { createInternalNotesRouter } = require('./routes/internalNotes');
 const { createAgentRouter } = require('./routes/agent');
+const { createInsightsRouter } = require('./routes/insights');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -48,6 +49,7 @@ const instancesStore = require('./instances');
 const instanceHealthStore = require('./instanceHealthStore');
 const agentDispatch = require('./agentDispatch');
 const agentRetryWorker = require('./agentRetryWorker');
+const insightGenerator = require('./insightGenerator');
 
 const PORT = process.env.PORT || 3333;
 const AUTH_FOLDER = process.env.AUTH_FOLDER || './auth_session';
@@ -582,6 +584,18 @@ const sessions = new SessionManager({
             waMessageId: message.id,
           }).catch((err) => console.error('[agent] falha ao processar lead novo:', err.message));
         }
+
+        // Copiloto Comercial — insights de IA em tempo real, só em
+        // instâncias marcadas "comercial" (checado dentro de
+        // maybeGenerateInsight via commercialConfig; aqui não há gate
+        // de conversationExistedBefore — diferente do Agente de IA
+        // acima, o copiloto sugere em QUALQUER conversa comercial, não
+        // só lead novo). Best-effort, mesmo padrão do bloco acima.
+        if (!isGroupMsg) {
+          insightGenerator.maybeGenerateInsight({
+            sessionId, phone, dealId, messageId: message.id,
+          }).catch((err) => console.error('[insights] falha ao gerar insight:', err.message));
+        }
       }
     } catch (err) {
       console.error('[server] falha ao processar mensagem:', err.message);
@@ -909,6 +923,10 @@ app.use('/api/internal-notes', requireAuth, createInternalNotesRouter({ broadcas
 // mesmos objetos).
 agentDispatch.configure({ sessions, broadcast });
 app.use('/api/agent', requireAuth, createAgentRouter());
+// insightGenerator (Copiloto Comercial) — mesma injeção de broadcast que
+// agentDispatch acima, pra emitir `ai-insight` assim que gerado.
+insightGenerator.configure({ broadcast });
+app.use('/api/insights', requireAuth, createInsightsRouter({ sessions, broadcast }));
 
 // ---------------------------------------------------------------
 // Sobe HTTP + WebSocket no mesmo servidor/porta

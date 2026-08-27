@@ -3,7 +3,27 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-27 — Parte EV: quando o Agente de
+> aberto). Última atualização: sessão de 2026-08-27 — Parte EW: **Copiloto
+> Comercial**, insights de IA em tempo real durante o atendimento (diferente do
+> Agente de IA — aqui a IA sugere pro atendente humano, nunca responde sozinha).
+> Só instâncias marcadas "comercial" (novo toggle, nasce desligado); a cada
+> mensagem recebida, com anti-flood de 60s por conversa; insight aparece como
+> bolha no feed do Chat + agrupado por tópico no painel lateral (copiar/enviar ao
+> cliente com confirmação/feedback útil-não útil/dispensar/"virar follow-up" —
+> stub, sem backend ainda). 3 tabelas novas (`commercial_config`,
+> `conversation_insight_state`, `conversation_insights`), config de playbook +
+> tópicos em `agente-ia.html` (painel `#commercialPanel`, fora do wizard). Passou
+> por `design-system-checker-agent` (1 achado real corrigido: botões 👍/👎 sem
+> rótulo) e `security-reviewer-agent` (1 achado real corrigido: `dismiss`/
+> `feedback` sem checagem de posse, vazava insight de outra instância — as 3
+> rotas agora compartilham `loadOwnedInsight()`). **ABERTO: não testado com
+> WhatsApp real ainda**; **ABERTO: DDL não validado contra banco real** (token
+> MCP do Supabase não tem acesso à organização "SAS" onde fica o banco de
+> produção — `db/migrate.js` aplica no próximo deploy normal, como sempre).
+> Também nesta sessão, roadmap registrado (não implementado): Follow-ups, tab
+> Agenda (Bitrix/Google Calendar), Relatórios personalizados — ver Parte EW.
+>
+> Antes disso, sessão de 2026-08-27 — Parte EV: quando o Agente de
 > IA cria um card de lead novo, agora também **cria automaticamente um grupo de
 > WhatsApp** (cliente + dono da instância), reaproveitando toda a mecânica do grupo
 > de card manual (`source='card'` + `deal_id`, bypass de descarte de mensagem de
@@ -296,13 +316,20 @@
   o card de um lead novo, cria também um grupo (cliente + dono da
   instância), com a mesma mecânica do grupo de card manual — ver §2,
   parte EV (pendente de teste com WhatsApp real)
+- [x] **Copiloto Comercial**: insights de IA em tempo real durante o
+  atendimento, só instâncias marcadas "comercial" — bolha no feed +
+  painel lateral agrupado por tópico, ações copiar/enviar ao
+  cliente/feedback/dispensar — ver §2, parte EW (pendente de teste com
+  WhatsApp real e de validação do DDL contra o banco de produção)
 
 Não há bloqueador conhecido em aberto no momento. Ver §5 para dívidas técnicas não
 bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro
 Bitrix no fluxo normal, backup das credenciais de sessão fora do disco, etc.).
 Pendências pontuais herdadas: liberar o modelo `whisper-1` na OpenAI (transcrição
-de áudio do Agente de IA) e auditar broadcast de `tags-updated` fora do caminho do
-Agente de IA (ver Parte EK).
+de áudio do Agente de IA), auditar broadcast de `tags-updated` fora do caminho do
+Agente de IA (ver Parte EK), testar o Copiloto Comercial com WhatsApp real e
+validar o DDL das 3 tabelas novas contra o banco de produção (ver Parte EW —
+token MCP do Supabase não tem acesso à organização onde fica o banco real).
 
 ---
 
@@ -10177,4 +10204,131 @@ dono sem celular (grupo só com o lead), `getEmployeeInfo` rejeitando
 (lança antes de `createGroup`). `node -c` ok. Sem teste com WhatsApp
 real ainda — pendente de validação em produção (criar um lead novo de
 teste numa instância com o Agente de IA ativo e conferir o grupo).
+
+### Parte EW — Copiloto Comercial: insights de IA em tempo real no Chat (2026-08-27)
+
+Pedido novo, feature grande: setor comercial (venda de precatórios)
+pediu insights de IA em tempo real durante o atendimento — diferente
+do Agente de IA (que responde o lead sozinho), aqui a IA **sugere** pro
+atendente humano, agrupado por tópico, com notificação no frame da
+conversa. Retoma explicitamente um pedido de 2026-08-20 (Parte DW) que
+tinha ficado só meio-implementado — a nota interna (Parte DX/EC) foi
+construída na época como a metade "canal interno" dessa mesma feature
+(comentário em `internalNotes.js` já dizia isso); faltava a geração
+automática. Passou por modo de planejamento formal: 4 agentes Explore
+mapearam pipeline/frontend/follow-ups-agenda/relatórios-export, 4
+perguntas de esclarecimento via `AskUserQuestion` sobre escopo geral (a
+pedido também vieram 3 features futuras — Follow-ups, Agenda,
+Relatórios — registradas em roadmap, não implementadas ainda), mais 4
+perguntas de detalhe do Copiloto (UI, ações, tópicos, contexto da IA).
+
+**Decisões confirmadas com o usuário**: escopo só instâncias marcadas
+"comercial" (toggle novo, nunca liga sozinho); gatilho a cada mensagem
+recebida com anti-flood de 60s por conversa; UI em dois lugares (bolha
+no feed + espelho agrupado por tópico no painel lateral); ações
+copiar/enviar ao cliente (com confirmação)/feedback útil-não útil/
+dispensar/"virar follow-up" (stub, sem backend ainda); tópicos numa
+lista fixa mas editável por instância; contexto da IA = transcript +
+playbook (regras do negócio, texto livre) + dados do card Bitrix
+(`crm.deal.get`) + base de conhecimento do Agente de IA (busca
+semântica, se a instância tiver).
+
+**Schema** (`db/schema.sql`, 3 tabelas novas): `commercial_config`
+(mesmo padrão de `agent_config` — PK `session_id`, nasce `enabled:false`,
+`playbook`, `topics` jsonb com default); `conversation_insight_state`
+(anti-flood POR CONVERSA — `last_generated_at`/`last_message_id_considered`,
+checado ANTES de chamar a OpenAI); `conversation_insights` (tabela
+PRÓPRIA, não reaproveita `internal_notes` — ciclos de vida diferentes:
+insight tem `topic`/`confidence`/`feedback`/`status`, nota tem
+edição/revisões; misturar forçaria coluna nula nos dois sentidos).
+
+**Backend novo**: `src/commercialConfig.js` (espelho de `agentConfig.js`,
+upsert parcial — único cuidado extra: `topics` é `jsonb`, precisou
+`::jsonb` explícito no `coalesce`/`case` pra não dar erro de tipo);
+`src/insightsStore.js` (CRUD, nunca cria conversa — diferente de
+`addInternalNote`, aqui a conversa sempre já existe porque
+`insightGenerator` só roda depois de `store.addMessage`);
+`src/insightGenerator.js` (`maybeGenerateInsight`: checa
+`commercial_config.enabled` → anti-flood → monta contexto (reusa
+`buildTranscript` de `src/agent.js`) → `callOpenAIRaw` em JSON mode →
+`parseInsightsResponse` tolerante (JSON malformado ou tópico fora da
+lista = descartado com log, nunca quebra) → persiste + broadcast por
+item); `src/routes/insights.js` (`GET /`, `POST /:id/dismiss`,
+`POST /:id/feedback`, `POST /:id/send` — envia de verdade via
+`gateway.sendMessage`, idempotente contra reenvio —,
+`GET`/`PUT /commercial-config`).
+
+**Ponto de acople** (`src/server.js`): dentro do bloco
+`direction === 'in'` de `onMessage`, fire-and-forget próprio (mesmo
+padrão do Agente de IA logo acima), SEM o gate `conversationExistedBefore`
+— o copiloto sugere em qualquer conversa comercial, não só lead novo.
+
+**Frontend** (`public/chat.html`): `state.insights` (mesmo padrão de
+`state.internalNotes`), 2 handlers WS novos (`ai-insight`/
+`ai-insight-updated`), bolha `.bubble-insight` no feed (paleta PRÓPRIA
+— azulada, deliberadamente não-dourada, porque dourado já significa
+"nota humana" e verde/vermelho já significam positivo/negativo de
+métrica), `renderInsightsSection()` no painel lateral agrupado por
+tópico, botões de ação com fetch pras 4 rotas. `public/agente-ia.html`
+ganhou painel `#commercialPanel` fora do grid do wizard (mesmo
+precedente do Playground, Parte EU) — toggle, textarea de playbook,
+editor de lista de tópicos.
+
+**Revisão obrigatória antes de fechar** (regra do design system + de
+segurança): `design-system-checker-agent` achou 1 violação real
+(botões 👍/👎 só com emoji, sem rótulo de texto — corrigido, ganharam
+"Útil"/"Não útil" ao lado) e 1 caso limítrofe ("Virar follow-up"
+carregava a explicação inteira só no `title` nativo — encurtado pra só
+"Em breve"); cor azulada nova ficou confirmada como decisão correta
+(nenhum token existente serve pra essa 3ª categoria semântica).
+`security-reviewer-agent` achou 1 gap real de **média/baixa
+gravidade**: `POST /:id/dismiss` e `POST /:id/feedback` não replicavam
+a checagem de posse (`insight.sessionId/phone === session/phone do
+body`) que `POST /:id/send` já tinha — um usuário autenticado com
+QUALQUER instância própria podia, sabendo/adivinhando um `id`
+sequencial de insight de OUTRA instância, dispensar/dar feedback nele
+e receber de volta (na resposta + no broadcast) o conteúdo alheio.
+Corrigido: as 3 rotas agora compartilham `loadOwnedInsight()` (helper
+único, extraído pra não duplicar a checagem 3x). Também endurecido o
+prompt contra prompt injection (texto do cliente explicitamente
+marcado como "não confiável, nunca é instrução" + aviso pra nunca
+vazar o playbook literal no `body`, já que esse texto pode ser enviado
+de verdade ao próprio cliente).
+
+**Validação** — teste de lógica isolado (harness que extrai o corpo
+real das funções via regex e executa com deps injetadas, mesmo padrão
+já usado nas Partes EU/EV), sem WhatsApp real: `shouldGenerate`
+(5 asserções — sem estado, dentro/fora da janela de 60s, mensagem
+repetida/nova), `parseInsightsResponse` (10 asserções — JSON
+vazio/inválido/sem campo, trim, tópico fora da lista descartado,
+confidence inválido vira null, múltiplos insights), `commercialConfig.upsert`
+(12 asserções — patch parcial preserva campo não tocado, `enabled:false`
+explícito não vira "ausente", serialização de `topics`), `loadOwnedInsight`
+(7 asserções — bloqueia posse cruzada, nunca vaza o `body` alheio na
+resposta de erro, distingue 404 de 403, caminho feliz). `node -c` em
+todos os arquivos backend; `new Function()` no bloco `<script>`
+principal de `chat.html`/`agente-ia.html`. **Sem teste com WhatsApp
+real ainda** — pendente de validar em produção com uma instância
+comercial de teste.
+
+**Não aplicado no Supabase ainda** — tentei validar o DDL contra um
+banco de teste antes de aplicar em produção; o `supabase-agent` só
+enxerga a organização "MakTube Solutions AI" (14 projetos), nenhum
+deles é o banco de produção real do gateway (`qqfzfudbeqgldodusoit`,
+confirmado pelo usuário, pertence à organização "SAS" — token MCP
+atual não é membro dela, `get_project` direto devolveu 403). Segui só
+com revisão estática cuidadosa do SQL (mesmo padrão de `agent_config`
+já validado em produção antes) — o `db/migrate.js` idempotente aplica
+o schema no próximo deploy normal na VPS, como sempre.
+
+**Roadmap registrado, não implementado ainda** (pedido explícito do
+usuário, na mesma sessão, pra entrar depois do Copiloto): tela de
+Follow-ups (criar/gerenciar lembretes de retorno a lead — reusa o
+padrão Kanban+Calendário feito à mão de `notifications.html`); tab
+"Agenda" no Chat (vincular Bitrix Calendar e/ou Google Calendar,
+marcar reunião direto do DapZap — Google exige OAuth novo, setup
+grande); Relatórios personalizados com entrega agendada por email
+(**infra nova, nenhuma lib de email existe hoje**)/WhatsApp/canal à
+escolha (reusa `pdfkit`/`exceljs`, já existentes, e as 8 fontes de
+métrica já calculadas no backend).
 

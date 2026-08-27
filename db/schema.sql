@@ -1149,3 +1149,62 @@ create index if not exists idx_agent_examples_session on agent_examples (session
 -- razoável pra poucos milhares de linhas).
 create index if not exists idx_agent_examples_embedding
   on agent_examples using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+
+-- ============================================================
+-- Copiloto comercial — insights de IA em tempo real (ver HANDOFF,
+-- feature pedida em 2026-08-20/Parte DW, implementada 2026-08-27).
+-- Distinto do Agente de IA (agent_config/agent_*): o Agente de IA
+-- ATENDE o lead sozinho; o copiloto só SUGERE pro atendente humano
+-- durante uma conversa em andamento, em instâncias marcadas
+-- "comercial" (setor que vende precatórios).
+-- ============================================================
+
+-- Config por instância comercial — mesmo padrão exato de agent_config
+-- (PK session_id, nasce enabled=false). `playbook` é texto livre com
+-- as regras do negócio (ex: margem mínima aceitável, documento aceito,
+-- prazo nunca prometido abaixo de X) — entra no prompt da IA junto do
+-- transcript. `topics` é a lista fixa (mas editável) de tópicos que a
+-- IA usa pra classificar cada insight — ver src/insightGenerator.js.
+create table if not exists commercial_config (
+  session_id text primary key references instances(id) on delete cascade,
+  enabled boolean not null default false,
+  playbook text,
+  topics jsonb not null default '["Passo a passo de documento","Análise de contraproposta","Objeção de preço","Qualificação do lead","Próximo passo"]',
+  updated_at timestamptz not null default now()
+);
+
+-- Estado de anti-flood — POR CONVERSA, não por instância (cada
+-- conversa tem seu próprio ritmo de geração). Checado ANTES de chamar
+-- a OpenAI (barato): se `last_generated_at` foi há menos de ~60s, ou
+-- se `last_message_id_considered` já é a última mensagem da conversa,
+-- a geração é pulada. Ver src/insightGenerator.js::shouldGenerate.
+create table if not exists conversation_insight_state (
+  conversation_id bigint primary key references conversations(id) on delete cascade,
+  last_generated_at timestamptz,
+  last_message_id_considered text
+);
+
+-- Um insight gerado pela IA sobre uma conversa comercial em andamento.
+-- Tabela PRÓPRIA, não reaproveita internal_notes — ciclos de vida
+-- diferentes (insight tem topic/confidence/feedback/status que nota
+-- não tem; nota tem edição/revisões que insight não tem).
+-- `status`: 'active' (visível, ação pendente) → 'dismissed' (atendente
+-- descartou) ou 'sent' (texto foi enviado ao cliente via
+-- POST /api/insights/:id/send). `feedback`: sinal do atendente sobre
+-- a qualidade do insight, não afeta o comportamento da IA ainda (fica
+-- registrado pra eventual ajuste de prompt no futuro).
+create table if not exists conversation_insights (
+  id bigserial primary key,
+  conversation_id bigint not null references conversations(id) on delete cascade,
+  topic text not null,
+  title text not null,
+  body text not null,
+  confidence text check (confidence in ('high','medium','low')),
+  status text not null default 'active' check (status in ('active','dismissed','sent')),
+  feedback text check (feedback in ('useful','not_useful')),
+  tokens_used int,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_conversation_insights_conv
+  on conversation_insights (conversation_id, created_at);

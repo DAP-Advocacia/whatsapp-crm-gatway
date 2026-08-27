@@ -423,6 +423,19 @@
   }
   .knowledge-doc-remove:hover{ color: var(--red); }
 
+  /* Lista de tópicos do Copiloto Comercial — chips com botão de
+     remover, mesmo espírito do knowledge-doc-remove acima. */
+  .commercial-topics-list{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .commercial-topic-chip{
+    display: flex; align-items: center; gap: 6px; background: var(--surface-2);
+    border: 1px solid var(--border); border-radius: 100px; padding: 5px 6px 5px 12px; font-size: 12.5px;
+  }
+  .commercial-topic-remove{
+    background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px;
+    line-height: 1; padding: 2px 4px;
+  }
+  .commercial-topic-remove:hover{ color: var(--red); }
+
   .empty{ color: var(--text-faint); font-size: 12.5px; padding: 14px 4px; text-align:center; }
 
   .overlay{
@@ -743,6 +756,41 @@
     </div>
   </div>
 
+  <!-- Copiloto Comercial — painel PRÓPRIO, fora do grid de etapas do
+       wizard (mesmo precedente do Playground acima): é uma feature
+       distinta do Agente de IA (aqui a IA SUGERE pro atendente humano,
+       não atende sozinha), configurada por instância, reaproveitando o
+       #instanceSelect já no topo da tela. Ver src/commercialConfig.js /
+       src/insightGenerator.js / src/routes/insights.js. -->
+  <div class="panel" id="commercialPanel">
+    <h2 style="margin-bottom:2px;">Copiloto comercial</h2>
+    <p class="panel-hint">Insights de IA em tempo real pro atendente, durante uma conversa em andamento — diferente do Agente de IA acima (que responde sozinho), aqui a IA só sugere. Ativa por instância, começa desligado.</p>
+    <div class="wizard-field" style="margin-top:14px;">
+      <div class="toggle-row">
+        <span class="toggle-label"><b>Copiloto ativo nesta instância</b></span>
+        <div class="toggle-switch" id="commercialToggle" role="button" tabindex="0"><div class="knob"></div></div>
+      </div>
+      <p class="panel-hint" style="margin-bottom:0;">Desligado por padrão — enquanto estiver desligado, nenhum insight é gerado, mesmo com uma conversa em andamento.</p>
+    </div>
+    <div class="wizard-field" style="margin-top:14px;">
+      <h3>Regras do negócio (playbook)</h3>
+      <p class="panel-hint">Texto livre com as regras que a IA deve seguir ao sugerir — ex: margem mínima aceitável, documento aceito, prazo nunca prometido abaixo de X.</p>
+      <textarea id="commercialPlaybookInput" rows="6" placeholder="Ex: A margem mínima aceitável numa contraproposta é 15% sobre o valor de face do precatório. Documento aceito para análise inicial é cópia digitalizada da sentença..."></textarea>
+    </div>
+    <div class="wizard-field" style="margin-top:14px;">
+      <h3>Tópicos dos insights</h3>
+      <p class="panel-hint">A IA classifica cada sugestão num destes tópicos — edite a lista conforme o negócio.</p>
+      <div id="commercialTopicsList" class="commercial-topics-list"></div>
+      <div style="display:flex; gap:8px; margin-top:8px;">
+        <input type="text" id="commercialTopicInput" placeholder="Novo tópico...">
+        <button type="button" class="btn secondary" id="commercialAddTopicBtn">Adicionar</button>
+      </div>
+    </div>
+    <div style="margin-top:16px;">
+      <button type="button" class="btn" id="commercialSaveBtn">Salvar copiloto comercial</button>
+    </div>
+  </div>
+
   <div class="credit-row">
     <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
       <span class="dot"></span> Desenvolvido por Daniel Costa e Gabriel Alves
@@ -856,6 +904,7 @@
 (function () {
   const API_BASE = window.location.origin + '/api/whatsapp';
   const AGENT_API_BASE = window.location.origin + '/api/agent';
+  const INSIGHTS_API_BASE = window.location.origin + '/api/insights';
   const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
   let resolveBx24Ready;
@@ -1264,6 +1313,86 @@
       await loadConfigForInstance(currentSessionId);
       await loadKnowledgeDocs(currentSessionId);
       loadExamplesPendingCount(currentSessionId);
+      await loadCommercialConfigForInstance(currentSessionId);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  // ---------------- Copiloto Comercial ----------------
+  // Config independente do Agente de IA acima — mesmo padrão de
+  // load/setToggle/save, mas pra src/commercialConfig.js via
+  // GET/PUT /api/insights/commercial-config. Reaproveita o
+  // #instanceSelect já no topo da tela (a mesma instância selecionada
+  // no wizard é a config do copiloto exibida aqui).
+  const commercialToggle = document.getElementById('commercialToggle');
+  const commercialPlaybookInput = document.getElementById('commercialPlaybookInput');
+  const commercialTopicsList = document.getElementById('commercialTopicsList');
+  const commercialTopicInput = document.getElementById('commercialTopicInput');
+  const commercialAddTopicBtn = document.getElementById('commercialAddTopicBtn');
+  const commercialSaveBtn = document.getElementById('commercialSaveBtn');
+  let commercialTopics = [];
+
+  function setCommercialToggle(enabled) {
+    commercialToggle.classList.toggle('on', !!enabled);
+  }
+
+  function renderCommercialTopics() {
+    commercialTopicsList.innerHTML = commercialTopics.length
+      ? commercialTopics.map((t, i) => `
+          <span class="commercial-topic-chip">
+            ${escapeHtml(t)}
+            <button type="button" class="commercial-topic-remove" data-remove-topic-index="${i}" title="Remover tópico">×</button>
+          </span>
+        `).join('')
+      : '<p class="empty">Nenhum tópico configurado — a IA não vai conseguir classificar insights.</p>';
+    commercialTopicsList.querySelectorAll('[data-remove-topic-index]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        commercialTopics.splice(Number(btn.dataset.removeTopicIndex), 1);
+        renderCommercialTopics();
+      });
+    });
+  }
+
+  commercialAddTopicBtn.addEventListener('click', () => {
+    const value = commercialTopicInput.value.trim();
+    if (!value || commercialTopics.includes(value)) { commercialTopicInput.value = ''; return; }
+    commercialTopics.push(value);
+    commercialTopicInput.value = '';
+    renderCommercialTopics();
+  });
+  commercialTopicInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commercialAddTopicBtn.click(); } });
+
+  commercialToggle.addEventListener('click', () => setCommercialToggle(!commercialToggle.classList.contains('on')));
+  commercialToggle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); commercialToggle.click(); }
+  });
+
+  async function loadCommercialConfigForInstance(sessionId) {
+    const res = await apiFetch(`${INSIGHTS_API_BASE}/commercial-config?session=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar configuração do copiloto comercial');
+    const { config } = await res.json();
+    setCommercialToggle(config.enabled);
+    commercialPlaybookInput.value = config.playbook || '';
+    commercialTopics = Array.isArray(config.topics) ? [...config.topics] : [];
+    renderCommercialTopics();
+  }
+
+  commercialSaveBtn.addEventListener('click', async () => {
+    if (!currentSessionId) { if (window.showToast) window.showToast('Selecione uma instância primeiro.', 'error'); return; }
+    try {
+      const res = await apiFetch(`${INSIGHTS_API_BASE}/commercial-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: currentSessionId,
+          enabled: commercialToggle.classList.contains('on'),
+          playbook: commercialPlaybookInput.value.trim(),
+          topics: commercialTopics,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao salvar');
+      if (window.showToast) window.showToast('Copiloto comercial salvo.', 'success');
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }
@@ -1404,6 +1533,7 @@
       await loadConfigForInstance(currentSessionId);
       await loadKnowledgeDocs(currentSessionId);
       loadExamplesPendingCount(currentSessionId);
+      await loadCommercialConfigForInstance(currentSessionId);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
       console.error(err);
