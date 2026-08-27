@@ -17,9 +17,8 @@
 > rótulo) e `security-reviewer-agent` (1 achado real corrigido: `dismiss`/
 > `feedback` sem checagem de posse, vazava insight de outra instância — as 3
 > rotas agora compartilham `loadOwnedInsight()`). **ABERTO: não testado com
-> WhatsApp real ainda**; **ABERTO: DDL não validado contra banco real** (token
-> MCP do Supabase não tem acesso à organização "SAS" onde fica o banco de
-> produção — `db/migrate.js` aplica no próximo deploy normal, como sempre).
+> WhatsApp real ainda** (schema já aplicado em produção — Parte EX, 2026-08-27
+> — as 3 tabelas confirmadas existentes no banco real por consulta direta).
 > Também nesta sessão, roadmap registrado (não implementado): Follow-ups, tab
 > Agenda (Bitrix/Google Calendar), Relatórios personalizados — ver Parte EW.
 >
@@ -327,9 +326,9 @@ bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro
 Bitrix no fluxo normal, backup das credenciais de sessão fora do disco, etc.).
 Pendências pontuais herdadas: liberar o modelo `whisper-1` na OpenAI (transcrição
 de áudio do Agente de IA), auditar broadcast de `tags-updated` fora do caminho do
-Agente de IA (ver Parte EK), testar o Copiloto Comercial com WhatsApp real e
-validar o DDL das 3 tabelas novas contra o banco de produção (ver Parte EW —
-token MCP do Supabase não tem acesso à organização onde fica o banco real).
+Agente de IA (ver Parte EK), testar o Copiloto Comercial e o grupo automático do
+Agente de IA com WhatsApp real em produção (schema do Copiloto já aplicado no
+banco real — ver Parte EX).
 
 ---
 
@@ -10331,4 +10330,34 @@ grande); Relatórios personalizados com entrega agendada por email
 (**infra nova, nenhuma lib de email existe hoje**)/WhatsApp/canal à
 escolha (reusa `pdfkit`/`exceljs`, já existentes, e as 8 fontes de
 métrica já calculadas no backend).
+
+### Parte EX — Retomada de sessão: sincronização de remotes + schema do Copiloto Comercial aplicado em produção (2026-08-27)
+
+Sessão anterior (que entregou as Partes EV/EW) rodou noutra máquina e
+publicou só no remoto `personal` — o repositório local desta sessão e
+o `origin` (DAP-Advocacia, oficial) tinham ficado parados em `6c9bf25`
+(fim da Parte EU), 5 commits atrás. Detectado logo ao retomar (`git
+fetch` + `git log HEAD..personal/main`), antes de qualquer edição
+nova — trazido via `git merge personal/main --ff-only` (fast-forward
+limpo, sem conflito) e republicado em `origin` pra manter os 2 remotes
+sincronizados, como sempre.
+
+**Pendência crítica da Parte EW resolvida**: as 3 tabelas do Copiloto
+Comercial (`commercial_config`, `conversation_insight_state`,
+`conversation_insights`) ainda não existiam no banco de produção real
+— confirmado por consulta direta (`information_schema.tables`, lista
+vazia) antes de qualquer ação. Rodado `node db/migrate.js` (mesmo
+`DIRECT_URL` já usado nesta sessão em partes anteriores, schema
+idempotente via `create table if not exists`) — as 3 tabelas e suas
+colunas foram confirmadas existentes por uma NOVA consulta ao banco
+real logo em seguida (não só o "sucesso" do comando de migração).
+Também confirmado que o processo em produção já roda o código das
+Partes EV/EW (`GET /api/insights/commercial-config` devolve `401 não
+autenticado`, não `404` — a rota existe no processo real, só falta
+auth pra testar de fato).
+
+**Ainda em aberto, sem mudança nesta parte** (não é código, é
+validação prática): testar o Copiloto Comercial e o grupo automático
+do Agente de IA (Parte EV) com WhatsApp real; liberar `whisper-1` na
+OpenAI (Parte EU).
 
