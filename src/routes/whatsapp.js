@@ -1757,7 +1757,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
 
       const ownerIds = employees.map((e) => ownerIdFor(e.id));
       const sinceDate = new Date(Date.now() - ADMIN_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-      const [presenceRows, lastAccessMap, usage, blocked, activeDaysByOwner, usabilityByOwner, analysisGrants] = await Promise.all([
+      const [presenceRows, lastAccessMap, usage, blocked, activeDaysByOwner, usabilityByOwner, analysisGrants, allInstances] = await Promise.all([
         presence.listPresence(),
         pageSessions.getLastAccessByOwners(ownerIds),
         pageSessions.getUsageSince(sinceDate),
@@ -1772,11 +1772,25 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // reaproveita esta mesma tabela de Usuários pra conceder/revogar,
         // sem precisar de um fluxo de busca por nome separado.
         conversationAnalysisGrants.listGrants(),
+        // Instâncias de WhatsApp por dono (unificado aqui em vez de aba
+        // separada — decisão do usuário, 2026-08-28: "unifique as
+        // tabelas, tudo fica dentro da tabela usuários"). Órfã (sem
+        // instances.owner_id resolvível) fica de fora de propósito — não
+        // cabe numa linha de usuário; segue só visível via
+        // conversationAnalysisStore (Auditoria de Conversas).
+        instancesStore.listAll(),
       ]);
 
       const presenceByOwner = new Map(presenceRows.map((r) => [r.ownerId, r]));
       const blockedByOwner = new Map(blocked.map((b) => [b.ownerId, b]));
       const analysisGrantByOwner = new Set(analysisGrants.map((g) => g.ownerId));
+      const ownNumbers = getOwnNumbersBySession();
+      const instancesByOwner = new Map(); // ownerId -> [{ label, phone }]
+      for (const inst of allInstances) {
+        if (inst.isOrphan || !inst.ownerId) continue;
+        if (!instancesByOwner.has(inst.ownerId)) instancesByOwner.set(inst.ownerId, []);
+        instancesByOwner.get(inst.ownerId).push({ label: inst.label, phone: ownNumbers[inst.id] || null });
+      }
 
       const users = employees.map((e) => {
         const ownerId = ownerIdFor(e.id);
@@ -1805,6 +1819,10 @@ function createWhatsappRouter({ sessions, broadcast }) {
           isOnline,
           currentPage: presenceRow?.lastPage || null,
           lastAccess: lastAccessMap.get(ownerId) || null,
+          // Instâncias de WhatsApp deste dono (unificado da antiga aba
+          // "Instâncias" — ver instancesByOwner acima). [] pra quem nunca
+          // conectou nenhuma.
+          instances: instancesByOwner.get(ownerId) || [],
           totalSecondsLast30d: usage.totalByOwner.get(ownerId) || 0,
           favoritePage: favoritePage?.page || null,
           isBlocked: !!blockedRow,
@@ -1833,14 +1851,20 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // órfãs — mesma fonte já usada pela Auditoria de Conversas), com o
   // NÚMERO real de WhatsApp (getOwnNumbersBySession, mesma fonte de
   // GET /instances) e o NOME do dono resolvido via listEmployees() +
-  // ownerIdFor (mesmo padrão de GET /admin/users) — pra gestão
-  // cross-usuário sem precisar entrar em cada conta. hrConfigured:false
+  // ownerIdFor (mesmo padrão de GET /admin/users). hrConfigured:false
   // (200, não erro) se BITRIX_HR_WEBHOOK_URL não estiver configurada —
   // nesse caso ownerName fica null pra todo mundo (sem cadastro do
   // Bitrix pra cruzar), mas a lista de instâncias em si continua
   // completa. Instância órfã sempre com ownerName null (não há dono
   // pra resolver, ver instancesStore.listAll()). Restrito a super
   // admin.
+  //
+  // SEM USO na UI do Admin desde 2026-08-28 — a aba "Instâncias" foi
+  // unificada dentro da tabela "Usuários" (GET /admin/users ganhou o
+  // campo `instances` por dono, ver acima), decisão do usuário pra não
+  // ter dois lugares mostrando o mesmo cruzamento dono↔instância.
+  // Mantida (não removida) por compatibilidade — pode ter consumidor
+  // externo via token de API de longa duração (ver SECURITY.md).
   // ---------------------------------------------------------------
   router.get('/admin/instances', requireSuperAdmin, async (req, res) => {
     try {

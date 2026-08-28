@@ -1392,6 +1392,26 @@ acesso, tempo total (30d), página favorita e bloqueio.
   os mesmos `data-*`/delegação de evento em `#usersBody` de sempre,
   nenhum handler mudou. Só um menu aberto por vez; fecha ao clicar
   fora ou ao escolher uma ação.
+- **Instâncias WhatsApp** (coluna, unificada em 2026-08-28 — Parte FG,
+  decisão do usuário: "unifique as tabelas, tudo fica dentro da tabela
+  usuários"): a antiga aba separada "Instâncias" (Parte EQ) foi removida
+  — o mesmo dado (label + número real de cada instância daquele dono,
+  cruzado por ID do Bitrix) agora é uma coluna a mais nesta tabela
+  (`instancesCellHtml`, `public/admin.html`), listando todas as
+  instâncias de um dono (pode ter mais de uma) na mesma célula, ou
+  "nenhuma" em cinza pra quem nunca conectou. Vem pronto em `u.instances`
+  no próprio `GET /admin/users` (backend cruza com
+  `instancesStore.listAll()` uma vez, sem chamada extra) — instância
+  **órfã** (sem dono resolvível) fica de fora de propósito, não cabe
+  numa linha de usuário; continua visível só via Auditoria de Conversas.
+  `GET /admin/instances` continua existindo no backend (não removida),
+  só sem uso nesta tela — mantida por compatibilidade com eventual
+  consumidor externo via token de API.
+- **Baixar CSV**: abaixo do paginador, exporta exatamente as linhas
+  **visíveis** agora (respeita busca + os 5 filtros combinados) —
+  client-side puro (`exportUsersCsv`), sem rota nova, reaproveita
+  `usersRows` já carregado. BOM UTF-8 no início do arquivo (Excel do
+  Windows abre acento como lixo sem isso).
 - **Revogar/Reativar**: bloqueia/desbloqueia o `ownerId` de usar o app
   **inteiro** (tabela `blocked_owners`) — `POST
   /admin/users/:ownerId/block`|`unblock`. Verificado dentro de
@@ -1415,22 +1435,6 @@ acesso, tempo total (30d), página favorita e bloqueio.
   webhook `BITRIX_HR_WEBHOOK_URL` da hierarquia automática (§14). Sem a
   variável configurada, a lista fica vazia com um aviso explícito na
   tela (não um erro nem um vazio silencioso).
-
-### Instâncias — todas as do sistema, cross-usuário (restrito a super admin)
-
-Tabela única (`GET /admin/instances`) com **toda** instância de WhatsApp
-já cadastrada no gateway, de qualquer usuário — instância, número
-conectado, dono (nome resolvido pelo ID do Bitrix via `listEmployees`) e
-data de criação, incluindo órfãs (instância removida, mas com histórico
-de conversa mantido — ver `instancesStore.listAll()`). Objetivo: gestão
-cross-usuário sem precisar entrar em cada conta pra ver quem está
-conectado em quê. Busca client-side por número/nome/label (`#instancesSearch`).
-
-**Baixar CSV** (`exportInstancesCsv`, `public/admin.html`): exporta
-exatamente as linhas **visíveis** na hora (respeita a busca ativa) — sem
-rota nova no backend, os dados já vêm completos em `GET /admin/instances`
-e já estão em memória no client. BOM UTF-8 no início do arquivo (senão o
-Excel no Windows abre acento como lixo, problema conhecido de CSV puro).
 
 ### Publicar no Feed do Bitrix — restrito a super admin
 
@@ -2173,8 +2177,8 @@ revelar que o recurso existe).
 | `page-session/ping` | POST | Body `{ sessionId }`. Mantém a visita viva (`last_ping_at`) — chamado no mesmo ciclo de 30s do heartbeat. |
 | `page-session/close` | POST | Body `{ sessionId, token }`. **Fora de `requireAuth`** — montada em `src/server.js` antes do `app.use('/api/whatsapp', requireAuth, ...)` de propósito, porque `navigator.sendBeacon` (quem chama essa rota, no `pagehide` de cada página) não permite header `Authorization`; o `token` vai no body e é verificado direto com `verifyAppToken`. |
 | `admin/whoami` | GET | `{ isSuperAdmin }` — sem expor a lista de admins. Usado pra revelar/esconder o item "Admin" da sidebar. |
-| `admin/users` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Lista TODO o cadastro do Bitrix (`listEmployees`, mesmo sem nunca ter aberto o app) cruzado com presença/último acesso/tempo total 30d/página favorita/bloqueio — tabela principal do Admin (§14.5). |
-| `admin/instances` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. TODAS as instâncias do sistema (`instancesStore.listAll()`, inclusive órfãs) cruzado com `listEmployees` (nome do dono) e `getOwnNumbersBySession` (número real) — gestão cross-usuário, seção "Instâncias" do Admin (§14.5, Parte EQ). `hrConfigured:false` (200) se `BITRIX_HR_WEBHOOK_URL` não estiver configurada — `ownerName` fica `null` pra todo mundo, lista de instâncias continua completa. |
+| `admin/users` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Lista TODO o cadastro do Bitrix (`listEmployees`, mesmo sem nunca ter aberto o app) cruzado com presença/último acesso/tempo total 30d/página favorita/bloqueio/instâncias WhatsApp (`instances: [{label, phone}]`, unificado 2026-08-28) — tabela principal do Admin (§14.5). |
+| `admin/instances` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. TODAS as instâncias do sistema (`instancesStore.listAll()`, inclusive órfãs) cruzado com `listEmployees` (nome do dono) e `getOwnNumbersBySession` (número real). `hrConfigured:false` (200) se `BITRIX_HR_WEBHOOK_URL` não estiver configurada — `ownerName` fica `null` pra todo mundo, lista de instâncias continua completa. **Sem uso na UI do Admin desde 2026-08-28** (Parte FG) — o mesmo cruzamento virou coluna `instances` de `GET /admin/users` (§14.5); mantida por compatibilidade com eventual consumidor externo. |
 | `admin/users/:ownerId` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Histórico completo de `page_sessions` de uma pessoa, mais recente primeiro — botão "Detalhado". |
 | `admin/usage-metrics?days=` | GET | Restrito a `SUPER_ADMIN_OWNER_IDS`. Agregados globais (online agora, usuários ativos, tempo total do time, página mais acessada) + os 2 gráficos de barra — `days` padrão 30. |
 | `admin/users/:ownerId/block` | POST | Restrito a `SUPER_ADMIN_OWNER_IDS`. Body `{ reason? }`. Bloqueia o `ownerId` de usar o app inteiro (§14.5) — 400 se `ownerId === req.ownerId` (não dá pra se autobloquear). |

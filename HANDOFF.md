@@ -3,14 +3,52 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-28 — Parte FG: **Botão
-> "Baixar CSV" na aba Instâncias do Painel Admin** — a tela em si (todas as
-> instâncias do sistema, de qualquer usuário, número + dono pelo ID do
-> Bitrix, ver README §14.5) já existia da Parte EQ; faltava só exportar.
-> Client-side puro (`exportInstancesCsv`, `public/admin.html`), sem rota
-> nova — reaproveita `GET /admin/instances` já carregado em memória, exporta
-> exatamente as linhas visíveis (respeita a busca ativa), BOM UTF-8 pra
-> abrir certo no Excel do Windows.
+> aberto). Última atualização: sessão de 2026-08-28 — Parte FG: **aba
+> "Instâncias" do Painel Admin unificada dentro da tabela "Usuários"**,
+> a pedido explícito do usuário ("unifique as tabelas, tudo fica dentro
+> da tabela usuários"). Escopo evoluiu 3x na mesma sessão: (1) pedido
+> inicial era só um botão "Baixar CSV" na aba Instâncias já existente
+> (Parte EQ); (2) usuário reportou que a paginação "não estava pegando"
+> nessa aba — na real ela NUNCA tinha sido implementada ali (só a tabela
+> de Usuários tinha, desde a Parte de 2026-08-13); (3) em vez de
+> adicionar paginação duplicada, o usuário pediu a unificação de vez.
+> Resultado final: aba "Instâncias" removida do HTML/nav; `GET
+> /admin/users` (backend) ganhou o campo `instances: [{label, phone}]`
+> por dono (cruza `instancesStore.listAll()` + `getOwnNumbersBySession`
+> uma vez, sem chamada extra); tabela de Usuários ganhou coluna
+> "Instâncias WhatsApp" (várias linhas na mesma célula quando o dono tem
+> mais de uma) + botão "Baixar CSV" reaproveitando o filtro/busca já
+> existente (`usersFiltered()`, extraído de `renderUsers` pra não
+> duplicar os 6 critérios). Instância **órfã** (sem dono resolvível)
+> fica de fora de propósito — não cabe numa linha de usuário, decisão
+> confirmada com o usuário; continua visível só via Auditoria de
+> Conversas. `GET /admin/instances` (rota antiga) mantida no backend por
+> compatibilidade, sem uso na UI. Passou por `design-system-checker-agent`
+> 2x (achado real → correção → reconfirmação): (1) botão CSV solto abaixo
+> do paginador em vez de agrupado no rodapé — criado `.table-footer`/
+> `.table-footer-left` (mesmo padrão de `negocios-fechados-408`, contagem
+> + controle auxiliar à esquerda, paginação à direita, tudo num bloco
+> só); (2) CSS de largura de coluna (`nth-child`) desatualizado pra 8
+> colunas E genérico demais (afetava outras tabelas do arquivo por
+> engano) — escopado como `#usersTable th/td:nth-child(N)`; (3)
+> `vertical-align:middle` genérico quebrava altura de linha com célula
+> multi-instância — classe `.instances-cell{vertical-align:top}` isolada.
+>
+
+> **Bug real corrigido na mesma sessão, ANTES da unificação**: a
+> conversa fixa do Dapinho (Parte FF) nunca aparecia no Chat em
+> produção — reportado pelo usuário com print. Causa: as 4 chamadas
+> fetch novas em `public/chat.html` usavam `` `${API_BASE}/dapinho...` ``
+> — `API_BASE` é `/api/whatsapp` (usado por todo o resto do arquivo),
+> então batiam em `/api/whatsapp/dapinho...` (404) em vez de
+> `/api/dapinho...` (o router próprio, `src/routes/dapinho.js`). Sem
+> erro de sintaxe/crash — o item só nunca aparecia (fetch falhava, catch
+> silencioso). Fix: nova constante `DAPINHO_API_BASE`, mesmo padrão já
+> usado por `AGENT_API_BASE`/`INSIGHTS_API_BASE` (routers fora de
+> `/api/whatsapp`). Lição registrada em `licoes-tecnicas.md` (seção
+> Frontend/estado): ao criar router novo montado num prefixo próprio,
+> sempre criar a constante de base dedicada, nunca reaproveitar a de um
+> router vizinho por proximidade de código.
 >
 > Antes disso, sessão de 2026-08-27 — Parte FF: **Dapinho** —
 > assistente de IA conversacional POR DONO (não por instância/conversa, diferente

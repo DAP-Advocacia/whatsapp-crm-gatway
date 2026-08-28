@@ -409,6 +409,13 @@
     color:var(--text-faint); padding:0 10px 10px; border-bottom:1px solid var(--border);
   }
   .admin-table td{ padding:11px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+  /* Célula multi-linha (várias instâncias empilhadas, ver instancesCellHtml)
+     precisa de vertical-align:top — com :middle (regra acima) a célula
+     mais alta centraliza e "empurra" as outras colunas da MESMA linha pro
+     meio de uma altura maior que o normal, produzindo linhas com alturas
+     inconsistentes/"serrilhadas" ao rolar (achado do design-system-checker,
+     2026-08-28). */
+  #usersTable td.instances-cell{ vertical-align:top; padding-top:13px; }
   .admin-table tr:last-child td{ border-bottom:none; }
   .admin-table tr:hover td{ background: var(--surface-2); }
   /* Reaproveita os mesmos nomes/visual de .pager/.pager-info/.btn.secondary
@@ -420,20 +427,41 @@
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
   .pager{ display:flex; align-items:center; justify-content:center; gap:14px; padding-top:14px; margin-top:4px; border-top:1px solid var(--border); }
   .pager-info{ font-size:11.5px; color:var(--text-faint); white-space:nowrap; }
-  /* Larguras proporcionais explícitas — sem isto, com o #app mais largo
+  /* Contagem + controle auxiliar (ex: Baixar CSV) à esquerda, paginação à
+     direita, tudo no MESMO rodapé — mesmo padrão já usado em
+     negocios-fechados-408 (.table-footer/.table-footer-left, ver
+     CLAUDE.md "Rodapé de tabela"): nunca um botão de exportação/ação
+     solto abaixo do paginador, sempre agrupado nele. O `.pager` interno
+     (quando há mais de 1 página) NÃO herda seu próprio border-top/padding
+     aqui dentro — já ganha isso do .table-footer que o envolve; por isso
+     o `.pager` filho de `.table-footer` some essas bordas duplicadas. */
+  .table-footer{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:14px;
+    padding-top:14px; margin-top:4px; border-top:1px solid var(--border);
+  }
+  .table-footer-left{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .table-footer .pager{ padding-top:0; margin-top:0; border-top:none; }
+  /* Larguras proporcionais explícitas, escopadas em #usersTable (não
+     .admin-table genérico — compartilhada com #satisfactionRecentTable e
+     a tabela de detalhamento diário, que têm outra contagem/proporção de
+     colunas e não devem herdar isto). Sem isto, com o #app mais largo
      (1180px, ver acima), o navegador jogava o espaço extra quase todo pra
      coluna de ações (badges/tempo/texto curto do meio ficavam "flutuando"
      com folga enorme, ações ficavam longe do conteúdo) — usuário reportou
      com print (2026-08-12). Percentuais somam 100%; "Usuário" e "Conta"
      (nome+cargo, e-mail) recebem mais espaço por serem o conteúdo mais
-     longo, "Online"/ações ficam com o mínimo confortável. */
-  .admin-table th:nth-child(1), .admin-table td:nth-child(1){ width:24%; }
-  .admin-table th:nth-child(2), .admin-table td:nth-child(2){ width:22%; }
-  .admin-table th:nth-child(3), .admin-table td:nth-child(3){ width:9%; }
-  .admin-table th:nth-child(4), .admin-table td:nth-child(4){ width:13%; }
-  .admin-table th:nth-child(5), .admin-table td:nth-child(5){ width:12%; }
-  .admin-table th:nth-child(6), .admin-table td:nth-child(6){ width:12%; }
-  .admin-table th:nth-child(7), .admin-table td:nth-child(7){ width:8%; }
+     longo, "Online"/ações ficam com o mínimo confortável. Coluna
+     "Instâncias WhatsApp" (unificada 2026-08-28, Parte FG) inserida na
+     3ª posição — larguras das 8 colunas redistribuídas nessa mesma
+     mudança, não só acrescentada por cima da distribuição antiga de 7.*/
+  #usersTable th:nth-child(1), #usersTable td:nth-child(1){ width:20%; }
+  #usersTable th:nth-child(2), #usersTable td:nth-child(2){ width:18%; }
+  #usersTable th:nth-child(3), #usersTable td:nth-child(3){ width:16%; }
+  #usersTable th:nth-child(4), #usersTable td:nth-child(4){ width:9%; }
+  #usersTable th:nth-child(5), #usersTable td:nth-child(5){ width:11%; }
+  #usersTable th:nth-child(6), #usersTable td:nth-child(6){ width:10%; }
+  #usersTable th:nth-child(7), #usersTable td:nth-child(7){ width:9%; }
+  #usersTable th:nth-child(8), #usersTable td:nth-child(8){ width:7%; }
 
   .person-cell{ display:flex; align-items:center; gap:10px; }
   .avatar-thumb{
@@ -768,7 +796,6 @@
   <div class="view-switch" id="adminTabSwitch">
     <button type="button" data-admin-tab="visao-geral" class="active">Visão Geral</button>
     <button type="button" data-admin-tab="usuarios">Usuários</button>
-    <button type="button" data-admin-tab="instancias">Instâncias</button>
     <button type="button" data-admin-tab="feed">Feed</button>
     <button type="button" data-admin-tab="dapinho">Dapinho</button>
     <button type="button" data-admin-tab="sugestoes">Sugestões</button>
@@ -841,32 +868,13 @@
     <div id="usersActiveFilters" style="display:none; margin-bottom:12px; font-size:12px; color:var(--text-muted);"></div>
     <table class="admin-table" id="usersTable">
       <thead>
-        <tr><th>Usuário</th><th>Conta</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
+        <tr><th>Usuário</th><th>Conta</th><th>Instâncias WhatsApp</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
       </thead>
       <tbody id="usersBody">
-        <tr><td colspan="7" class="skeleton-row">Carregando…</td></tr>
+        <tr><td colspan="8" class="skeleton-row">Carregando…</td></tr>
       </tbody>
     </table>
     <div id="usersPager"></div>
-  </div>
-  </div>
-
-  <div id="adminTab-instancias" class="admin-tab-content" style="display:none">
-  <div class="panel">
-    <h2>Instâncias <span class="panel-count" id="instancesCount">—</span></h2>
-    <p class="panel-hint">Todas as instâncias de WhatsApp do sistema, de qualquer usuário — número conectado e quem está logado (pelo ID do Bitrix), pra gestão sem precisar entrar em cada conta.</p>
-    <div class="toolbar-row">
-      <input type="search" id="instancesSearch" placeholder="Buscar por número, nome ou label da instância…">
-      <button class="btn secondary" id="instancesExportBtn" type="button">Baixar CSV</button>
-    </div>
-    <table class="admin-table" id="instancesTable">
-      <thead>
-        <tr><th>Instância</th><th>Número</th><th>Dono (Bitrix)</th><th>Criada em</th></tr>
-      </thead>
-      <tbody id="instancesBody">
-        <tr><td colspan="4" class="skeleton-row">Carregando…</td></tr>
-      </tbody>
-    </table>
   </div>
   </div>
 
@@ -1422,84 +1430,40 @@
     return (document.getElementById('usersSearch')?.value || '').trim().toLowerCase();
   }
 
-  // TODAS as instâncias do sistema (GET /admin/instances) — número real +
-  // dono resolvido pelo ID do Bitrix, pra gestão cross-usuário sem precisar
-  // entrar em cada conta. Mesmo padrão de busca client-side de loadUsers.
-  let instancesAdminRows = [];
-
-  async function loadInstancesAdmin() {
-    try {
-      const res = await apiFetch(`${API_BASE}/admin/instances`);
-      if (!res.ok) throw new Error('falha ao carregar instâncias');
-      const data = await res.json();
-      instancesAdminRows = data.instances || [];
-      renderInstancesAdmin();
-    } catch (err) {
-      console.error('[admin] erro ao carregar instâncias:', err.message);
-      if (window.showToast) window.showToast(err.message, 'error');
-    }
-  }
-
-  function renderInstancesAdmin() {
-    const term = (document.getElementById('instancesSearch')?.value || '').trim().toLowerCase();
-    const filtered = term
-      ? instancesAdminRows.filter((i) =>
-          (i.phone || '').toLowerCase().includes(term) ||
-          (i.ownerName || '').toLowerCase().includes(term) ||
-          (i.label || '').toLowerCase().includes(term)
-        )
-      : instancesAdminRows;
-
-    document.getElementById('instancesCount').textContent = instancesAdminRows.length;
-    const body = document.getElementById('instancesBody');
-    if (!filtered.length) {
-      body.innerHTML = `<tr><td colspan="4" class="empty-state">${instancesAdminRows.length ? 'Nenhuma instância corresponde à busca.' : 'Nenhuma instância ainda.'}</td></tr>`;
-      return;
-    }
-    body.innerHTML = filtered.map((i) => `
-      <tr>
-        <td>${escapeHtml(i.label)}${i.isOrphan ? ' <span style="color:var(--text-faint);font-size:11px;" title="Instância já removida, mantida por ter histórico de conversa">(removida)</span>' : ''}</td>
-        <td>${i.phone ? escapeHtml(i.phone) : '<span style="color:var(--text-faint);">não pareada</span>'}</td>
-        <td>${i.ownerName ? escapeHtml(i.ownerName) : '<span style="color:var(--text-faint);">—</span>'}</td>
-        <td>${new Date(i.createdAt).toLocaleDateString('pt-BR')}</td>
-      </tr>
-    `).join('');
-  }
-
-  document.getElementById('instancesSearch')?.addEventListener('input', renderInstancesAdmin);
-
   // Baixar CSV — mesmo padrão de download client-side já usado no Chat
   // (Blob + link temporário, ver exportAsTxt em public/chat.html), sem
-  // rota nova no backend (os dados já vêm completos em GET /admin/instances,
-  // já carregados em memória). Exporta exatamente as linhas VISÍVEIS agora
-  // (respeita a busca ativa) — mesmo princípio de "o que é exportado é
-  // exatamente o que a pessoa está vendo" já usado no export de conversa.
+  // rota nova no backend (os dados já vêm completos em GET /admin/users,
+  // já carregados em memória em usersRows). Exporta exatamente as linhas
+  // VISÍVEIS agora (respeita busca + filtros ativos) — mesmo princípio de
+  // "o que é exportado é exatamente o que a pessoa está vendo" já usado
+  // no export de conversa.
   function csvEscape(value) {
     const str = String(value ?? '');
     return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
   }
 
-  function exportInstancesCsv() {
-    const term = (document.getElementById('instancesSearch')?.value || '').trim().toLowerCase();
-    const rows = term
-      ? instancesAdminRows.filter((i) =>
-          (i.phone || '').toLowerCase().includes(term) ||
-          (i.ownerName || '').toLowerCase().includes(term) ||
-          (i.label || '').toLowerCase().includes(term)
-        )
-      : instancesAdminRows;
+  function formatInstancesForCsv(instances) {
+    return (instances || []).map((i) => `${i.label}${i.phone ? ' — ' + i.phone : ''}`).join(' / ');
+  }
+
+  function exportUsersCsv() {
+    const rows = usersFiltered();
     if (!rows.length) {
-      if (window.showToast) window.showToast('Nenhuma instância pra exportar.', 'error');
+      if (window.showToast) window.showToast('Nenhum usuário pra exportar.', 'error');
       return;
     }
-    const header = ['Instância', 'Número', 'Dono (Bitrix)', 'Owner ID', 'Removida', 'Criada em'];
-    const lines = rows.map((i) => [
-      i.label,
-      i.phone || '',
-      i.ownerName || '',
-      i.ownerId || '',
-      i.isOrphan ? 'sim' : 'não',
-      new Date(i.createdAt).toLocaleString('pt-BR'),
+    const header = ['Nome', 'E-mail', 'Cargo', 'Owner ID', 'Online', 'Instâncias WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
+    const lines = rows.map((u) => [
+      u.name || '',
+      u.email || '',
+      u.workPosition || '',
+      u.ownerId || '',
+      u.isOnline ? 'sim' : 'não',
+      formatInstancesForCsv(u.instances),
+      u.lastAccess ? new Date(u.lastAccess).toLocaleString('pt-BR') : '',
+      Math.round((u.totalSecondsLast30d || 0) / 60),
+      u.favoritePage || '',
+      u.isBlocked ? 'sim' : 'não',
     ].map(csvEscape).join(';'));
     // BOM (﻿) — sem ele o Excel no Windows abre acento como lixo
     // (mesmo problema de sempre com UTF-8 puro em CSV nesse programa).
@@ -1508,12 +1472,14 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `instancias-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `usuarios-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   }
-
-  document.getElementById('instancesExportBtn')?.addEventListener('click', exportInstancesCsv);
+  // Listener do botão religado a cada renderUsers() (o botão vive dentro
+  // de #usersPager, recriado via innerHTML a cada render — ver final de
+  // renderUsers), não aqui: no boot, #usersExportBtn ainda não existe no
+  // DOM (só nasce depois da 1ª renderização do rodapé).
 
   // Preenche os dropdowns de "Página favorita" e "Cargo" com os valores
   // que de fato aparecem em usersRows (não uma lista fixa) — evita opção
@@ -1540,7 +1506,10 @@
     if (roles.includes(currentRole)) roleSelect.value = currentRole;
   }
 
-  function renderUsers() {
+  // Extraído de renderUsers pra ser reaproveitado por exportUsersCsv —
+  // exportar exatamente o que está filtrado na tela, sem duplicar os 6
+  // critérios em dois lugares (ver "Baixar CSV" abaixo).
+  function usersFiltered() {
     const term = usersSearchTerm();
     const statusFilter = document.getElementById('usersFilterStatus').value;
     const pageFilter = document.getElementById('usersFilterPage').value;
@@ -1548,7 +1517,7 @@
     const analysisFilter = document.getElementById('usersFilterAnalysis').value;
     const activityFilter = document.getElementById('usersFilterActivity').value;
 
-    const filtered = usersRows.filter((u) => {
+    return usersRows.filter((u) => {
       if (term) {
         const matchesTerm = (u.name || '').toLowerCase().includes(term)
           || (u.email || '').toLowerCase().includes(term)
@@ -1569,6 +1538,32 @@
       if (activityFilter === 'never' && u.lastAccess) return false;
       return true;
     });
+  }
+
+  // Unificado aqui (2026-08-28, decisão do usuário) — antes era uma aba
+  // separada "Instâncias" no Admin (GET /admin/instances), redundante com
+  // esta tabela (mesmo dado de dono via ID do Bitrix). `u.instances` já
+  // vem pronto de GET /admin/users (ver src/routes/whatsapp.js) — [] pra
+  // quem nunca conectou nenhuma.
+  function instancesCellHtml(instances) {
+    if (!instances || !instances.length) {
+      return '<span style="color:var(--text-faint);">nenhuma</span>';
+    }
+    return instances.map((i) => `
+      <div style="white-space:nowrap;">
+        <b>${escapeHtml(i.label)}</b>${i.phone ? ' — ' + escapeHtml(i.phone) : ' <span style="color:var(--text-faint);">(não pareada)</span>'}
+      </div>
+    `).join('');
+  }
+
+  function renderUsers() {
+    const term = usersSearchTerm();
+    const statusFilter = document.getElementById('usersFilterStatus').value;
+    const pageFilter = document.getElementById('usersFilterPage').value;
+    const roleFilter = document.getElementById('usersFilterRole').value;
+    const analysisFilter = document.getElementById('usersFilterAnalysis').value;
+    const activityFilter = document.getElementById('usersFilterActivity').value;
+    const filtered = usersFiltered();
 
     // Resumo visível de "o que está filtrando agora" — some por padrão,
     // só aparece com pelo menos 1 filtro/busca ativo. Sem isso, é fácil
@@ -1606,7 +1601,7 @@
       : `${filtered.length} de ${usersRows.length}`;
 
     if (!filtered.length) {
-      body.innerHTML = `<tr><td colspan="7" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="8" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
       pager.innerHTML = '';
       return;
     }
@@ -1653,6 +1648,7 @@
             </div>
           </td>
           <td>${escapeHtml(u.email || '—')}</td>
+          <td class="instances-cell">${instancesCellHtml(u.instances)}</td>
           <td>${onlineCell}</td>
           <td>${u.lastAccess ? timeAgo(new Date(u.lastAccess).getTime()) : '—'}</td>
           <td>${formatDuration(u.totalSecondsLast30d)}</td>
@@ -1674,18 +1670,32 @@
       `;
     }).join('');
 
-    pager.innerHTML = totalPages > 1 ? `
-      <div class="pager">
-        <button type="button" class="btn secondary" id="usersPagePrev" ${usersPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
-        <span class="pager-info">Página ${usersPage} de ${totalPages} (${filtered.length} usuário${filtered.length === 1 ? '' : 's'})</span>
-        <button type="button" class="btn secondary" id="usersPageNext" ${usersPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+    // Rodapé único (contagem + Baixar CSV à esquerda, paginação à
+    // direita quando houver mais de 1 página) — mesmo padrão de
+    // .table-footer/.table-footer-left já documentado no CLAUDE.md
+    // (negocios-fechados-408): controle auxiliar por-tabela nunca solto
+    // abaixo do paginador, sempre agrupado ao lado da contagem.
+    pager.innerHTML = `
+      <div class="table-footer">
+        <div class="table-footer-left">
+          <span class="pager-info">${filtered.length} usuário${filtered.length === 1 ? '' : 's'}</span>
+          <button type="button" class="btn secondary" id="usersExportBtn">Baixar CSV</button>
+        </div>
+        ${totalPages > 1 ? `
+          <div class="pager">
+            <button type="button" class="btn secondary" id="usersPagePrev" ${usersPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+            <span class="pager-info">Página ${usersPage} de ${totalPages}</span>
+            <button type="button" class="btn secondary" id="usersPageNext" ${usersPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+          </div>
+        ` : ''}
       </div>
-    ` : '';
+    `;
 
     const prevBtn = document.getElementById('usersPagePrev');
     const nextBtn = document.getElementById('usersPageNext');
     if (prevBtn) prevBtn.addEventListener('click', () => { usersPage--; renderUsers(); });
     if (nextBtn) nextBtn.addEventListener('click', () => { usersPage++; renderUsers(); });
+    document.getElementById('usersExportBtn')?.addEventListener('click', exportUsersCsv);
   }
 
   document.getElementById('usersSearch').addEventListener('input', () => { usersPage = 1; renderUsers(); });
@@ -2601,7 +2611,7 @@
       startPresenceHeartbeat();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
 
-      await Promise.all([loadUsageMetrics(), loadUsers(), loadInstancesAdmin(), loadSuggestions(), loadFeedPosts(), loadDapinhoBroadcasts()]);
+      await Promise.all([loadUsageMetrics(), loadUsers(), loadSuggestions(), loadFeedPosts(), loadDapinhoBroadcasts()]);
       setInterval(loadUsageMetrics, 30000);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
