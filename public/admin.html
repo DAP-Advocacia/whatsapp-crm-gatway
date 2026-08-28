@@ -353,6 +353,17 @@
     border:1px solid var(--border); border-radius:100px; padding:2px 9px;
   }
 
+  /* Abas do Painel Admin (2026-08-27) — mesmo componente .view-switch já
+     usado no toggle Kanban/Calendário de notifications.html, só com mais
+     opções. Reestrutura o que antes era uma sequência de .panel
+     empilhados numa única página em conteúdo separado por aba —
+     .admin-tab-content some via display:none, mesmo padrão exato do
+     toggle de notifications.html (nunca remove do DOM, só esconde). */
+  .view-switch{ display:flex; gap:2px; background:var(--surface-2); border:1px solid var(--border); border-radius:9px; padding:3px; flex-wrap:wrap; margin-bottom:22px; }
+  .view-switch button{ background:none; border:none; color:var(--text-muted); font-size:12.5px; padding:8px 16px; border-radius:7px; cursor:pointer; white-space:nowrap; }
+  .view-switch button.active{ background:var(--gold); color:#1a1408; font-weight:600; }
+  .view-switch button:not(.active):hover{ color:var(--gold); }
+
   /* ======================================================
      Tabela de presença / cadastro
      ====================================================== */
@@ -484,6 +495,14 @@
   .action-link.danger{ color:var(--red); }
   .action-link.danger:hover{ color:#e88b83; }
   .actions-cell{ display:flex; gap:10px; flex-wrap:wrap; }
+
+  /* Botão discreto tipo ícone (ex: "×" de remover pergunta na Pesquisa
+     de Satisfação) — mesma definição de public/chat.html:1053-1054,
+     achado real de revisão de design system: estava sendo usado aqui
+     sem a classe existir neste arquivo (renderizava com estilo cru do
+     navegador). */
+  .note-action-btn{ background:none; border:none; color:var(--gold-dim); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
+  .note-action-btn:hover{ opacity:1; }
 
   /* Menu de "3 pontos" na tabela de Usuários — substitui as 4 ações
      (Detalhado/Revogar/Auditoria/Ver conversas) expandidas por linha,
@@ -734,38 +753,50 @@
 
   <div id="hrWarning"></div>
 
-  <div class="metric-cards">
-    <div class="metric-card">
-      <div class="metric-label">Online agora</div>
-      <div class="metric-value online-dot" id="metricOnlineNow">—</div>
+  <div class="view-switch" id="adminTabSwitch">
+    <button type="button" data-admin-tab="visao-geral" class="active">Visão Geral</button>
+    <button type="button" data-admin-tab="usuarios">Usuários</button>
+    <button type="button" data-admin-tab="instancias">Instâncias</button>
+    <button type="button" data-admin-tab="feed">Feed</button>
+    <button type="button" data-admin-tab="sugestoes">Sugestões</button>
+    <button type="button" data-admin-tab="satisfacao">Pesquisa de Satisfação</button>
+  </div>
+
+  <div id="adminTab-visao-geral" class="admin-tab-content">
+    <div class="metric-cards">
+      <div class="metric-card">
+        <div class="metric-label">Online agora</div>
+        <div class="metric-value online-dot" id="metricOnlineNow">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Usuários ativos (30d)</div>
+        <div class="metric-value" id="metricActiveUsers">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Tempo total do time</div>
+        <div class="metric-value" id="metricTotalTime">—</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Página mais acessada</div>
+        <div class="metric-value" id="metricTopPage" style="font-size:16px;">—</div>
+      </div>
     </div>
-    <div class="metric-card">
-      <div class="metric-label">Usuários ativos (30d)</div>
-      <div class="metric-value" id="metricActiveUsers">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Tempo total do time</div>
-      <div class="metric-value" id="metricTotalTime">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Página mais acessada</div>
-      <div class="metric-value" id="metricTopPage" style="font-size:16px;">—</div>
+
+    <div class="bar-charts">
+      <div class="panel">
+        <h2>Páginas mais acessadas</h2>
+        <p class="panel-hint">Por número de visitas (entradas na aba).</p>
+        <div id="barVisits"><div class="skeleton-row">Carregando…</div></div>
+      </div>
+      <div class="panel">
+        <h2>Onde o time passa mais tempo</h2>
+        <p class="panel-hint">Por tempo total estimado de uso.</p>
+        <div id="barDuration"><div class="skeleton-row">Carregando…</div></div>
+      </div>
     </div>
   </div>
 
-  <div class="bar-charts">
-    <div class="panel">
-      <h2>Páginas mais acessadas</h2>
-      <p class="panel-hint">Por número de visitas (entradas na aba).</p>
-      <div id="barVisits"><div class="skeleton-row">Carregando…</div></div>
-    </div>
-    <div class="panel">
-      <h2>Onde o time passa mais tempo</h2>
-      <p class="panel-hint">Por tempo total estimado de uso.</p>
-      <div id="barDuration"><div class="skeleton-row">Carregando…</div></div>
-    </div>
-  </div>
-
+  <div id="adminTab-usuarios" class="admin-tab-content" style="display:none">
   <div class="panel">
     <h2>Usuários <span class="panel-count" id="usersCount">—</span></h2>
     <p class="panel-hint">Cadastro do Bitrix cruzado com uso real do app — inclusive quem nunca abriu nada ainda. "Revogar" bloqueia o acesso ao app inteiro, verificado na hora (não precisa esperar o token expirar).</p>
@@ -805,7 +836,9 @@
     </table>
     <div id="usersPager"></div>
   </div>
+  </div>
 
+  <div id="adminTab-instancias" class="admin-tab-content" style="display:none">
   <div class="panel">
     <h2>Instâncias <span class="panel-count" id="instancesCount">—</span></h2>
     <p class="panel-hint">Todas as instâncias de WhatsApp do sistema, de qualquer usuário — número conectado e quem está logado (pelo ID do Bitrix), pra gestão sem precisar entrar em cada conta.</p>
@@ -819,7 +852,9 @@
       </tbody>
     </table>
   </div>
+  </div>
 
+  <div id="adminTab-feed" class="admin-tab-content" style="display:none">
   <div class="panel">
     <h2>Publicar no Feed do Bitrix</h2>
     <p class="panel-hint">Anuncia uma novidade do sistema no Feed nativo do Bitrix ("Para todos os colaboradores"). Publicação é sempre manual — revise o texto com cuidado, edição/remoção depois só é possível direto no Bitrix.</p>
@@ -828,7 +863,9 @@
     <button class="btn" id="feedPostPublishBtn">Publicar no Feed</button>
     <div id="feedPostHistory" style="margin-top:16px;"></div>
   </div>
+  </div>
 
+  <div id="adminTab-sugestoes" class="admin-tab-content" style="display:none">
   <div class="panel">
     <h2>Sugestões <span class="panel-count" id="suggestionsCount">—</span></h2>
     <p class="panel-hint">Kanban de triagem — mover, responder (a resposta vai pra FAQ pública) e marcar como lançada.</p>
@@ -844,6 +881,55 @@
       <div class="kanban-col">
         <div class="kanban-col-title">Lançado</div>
         <div id="kanbanReleased"></div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+  <div id="adminTab-satisfacao" class="admin-tab-content" style="display:none">
+  <div class="panel">
+    <h2>Pesquisa de Satisfação</h2>
+    <p class="panel-hint">Métricas e gestão das pesquisas de satisfação do sistema — cliente final (link público) e atendente (formulário interno). Visível só pra você.</p>
+    <div style="display:flex; justify-content:flex-end; margin-bottom:14px;">
+      <button class="btn" id="satisfactionNewBtn">+ Nova pesquisa</button>
+    </div>
+    <div id="satisfactionList"><div class="skeleton-row">Carregando…</div></div>
+  </div>
+
+  <div class="panel" id="satisfactionDetailPanel" style="display:none">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+      <h2 id="satisfactionDetailTitle" style="margin:0;">—</h2>
+      <button class="action-link" id="satisfactionBackBtn">← Voltar pra lista</button>
+    </div>
+    <p class="panel-hint">Distribuição de notas e respostas recentes.</p>
+    <div class="metric-cards" id="satisfactionMetricCards"></div>
+    <div id="satisfactionChart" style="margin:18px 0;"></div>
+    <table class="admin-table" id="satisfactionRecentTable">
+      <thead><tr><th>Quando</th><th>Origem</th><th>Respostas</th></tr></thead>
+      <tbody id="satisfactionRecentBody"></tbody>
+    </table>
+  </div>
+  </div>
+
+  <!-- Modal de criar/editar pesquisa — perguntas fixas (até 5), reaproveita
+       o padrão .overlay/.modal já usado por #userDetailModal abaixo. -->
+  <div id="satisfactionEditModal" class="overlay">
+    <div class="modal" style="max-width:560px;">
+      <h2 id="satisfactionEditTitle" style="margin-bottom:4px;">Nova pesquisa</h2>
+      <p class="panel-hint" style="margin-bottom:16px;">Formulário com até 5 perguntas fixas — nota (1 a 5) ou texto livre.</p>
+      <label style="display:block; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Público</label>
+      <select id="satisfactionAudienceInput" style="width:100%; margin-bottom:14px;">
+        <option value="client">Cliente final (link público)</option>
+        <option value="internal">Atendente (formulário interno)</option>
+      </select>
+      <label style="display:block; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Título</label>
+      <input type="text" id="satisfactionTitleInput" placeholder="Ex: Como foi seu atendimento?" style="width:100%; margin-bottom:14px;">
+      <label style="display:block; font-size:12.5px; color:var(--text-muted); margin-bottom:6px;">Perguntas (até 5)</label>
+      <div id="satisfactionQuestionsList"></div>
+      <button type="button" class="btn secondary" id="satisfactionAddQuestionBtn" style="margin-top:8px;">+ Adicionar pergunta</button>
+      <div class="modal-actions" style="margin-top:20px;">
+        <button class="btn secondary" id="satisfactionEditCancelBtn">Cancelar</button>
+        <button class="btn" id="satisfactionEditSaveBtn">Salvar pesquisa</button>
       </div>
     </div>
   </div>
@@ -930,6 +1016,7 @@
 <script>
 (function () {
   const API_BASE = window.location.origin + '/api/whatsapp';
+  const SATISFACTION_API_BASE = window.location.origin + '/api/satisfaction';
 
   let resolveBx24Ready;
   const bx24Ready = new Promise((resolve) => { resolveBx24Ready = resolve; });
@@ -2066,6 +2153,269 @@
       }
     } catch {}
   }
+
+  // Estado da aba "Pesquisa de Satisfação" — declarado ANTES do listener
+  // de troca de aba abaixo (que referencia satisfactionLoadedOnce), só
+  // por legibilidade (funcionaria de qualquer jeito: são todas
+  // declarações síncronas no mesmo IIFE, resolvidas antes do 1º clique
+  // real do usuário).
+  let satisfactionLoadedOnce = false;
+  let satisfactionSurveysCache = [];
+  let editingSurveyId = null; // null = criando nova; string/number = editando existente
+  let editingQuestions = [];
+
+  // ---------------------------------------------------------------
+  // Abas do Painel Admin — mesmo padrão de .view-switch/data-view já
+  // usado no toggle Kanban/Calendário de notifications.html: alterna
+  // .active no botão clicado, alterna display:block/none nos
+  // .admin-tab-content correspondentes (nunca remove do DOM).
+  // ---------------------------------------------------------------
+  const adminTabSwitch = document.getElementById('adminTabSwitch');
+  adminTabSwitch.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.adminTab;
+      adminTabSwitch.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
+      document.querySelectorAll('.admin-tab-content').forEach((panel) => {
+        panel.style.display = panel.id === `adminTab-${tab}` ? 'block' : 'none';
+      });
+      // Lazy-load: a lista de pesquisas só é buscada na 1ª vez que a aba é
+      // aberta (mesmo espírito do resto da tela, que já carrega tudo no
+      // boot — mas satisfação é a única aba que não faz parte do
+      // Promise.all inicial, ver init()).
+      if (tab === 'satisfacao' && !satisfactionLoadedOnce) {
+        satisfactionLoadedOnce = true;
+        loadSatisfactionList();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // Pesquisa de Satisfação — CRUD (super admin) via /api/satisfaction.
+  // (estado declarado acima, junto do listener de troca de aba)
+  // ---------------------------------------------------------------
+
+  async function loadSatisfactionList() {
+    const el = document.getElementById('satisfactionList');
+    try {
+      const res = await apiFetch(`${SATISFACTION_API_BASE}/`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar pesquisas');
+      const data = await res.json();
+      satisfactionSurveysCache = data.surveys || [];
+      renderSatisfactionList();
+    } catch (err) {
+      el.innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  function renderSatisfactionList() {
+    const el = document.getElementById('satisfactionList');
+    if (!satisfactionSurveysCache.length) {
+      el.innerHTML = '<p class="empty">Nenhuma pesquisa criada ainda.</p>';
+      return;
+    }
+    el.innerHTML = satisfactionSurveysCache.map((s) => `
+      <div class="panel" style="margin-bottom:10px; padding:16px 18px; display:flex; align-items:center; justify-content:space-between; gap:14px;">
+        <div>
+          <div style="font-weight:600;">${escapeHtml(s.title)}</div>
+          <div class="panel-hint" style="margin:2px 0 0;">
+            ${s.audience === 'client' ? 'Cliente final (link público)' : 'Atendente (formulário interno)'}
+            · ${s.active ? 'Ativa' : 'Desativada'}
+            ${s.audience === 'client' ? ` · /pesquisa/${escapeHtml(s.slug)}` : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-shrink:0;">
+          <button class="btn secondary" data-survey-metrics="${s.id}">Métricas</button>
+          <button class="btn secondary" data-survey-edit="${s.id}">Editar</button>
+          <button class="action-link" data-survey-delete="${s.id}" style="color:var(--red);">Remover</button>
+        </div>
+      </div>
+    `).join('');
+
+    el.querySelectorAll('[data-survey-metrics]').forEach((btn) => {
+      btn.addEventListener('click', () => openSatisfactionMetrics(btn.dataset.surveyMetrics));
+    });
+    el.querySelectorAll('[data-survey-edit]').forEach((btn) => {
+      btn.addEventListener('click', () => openSatisfactionEditModal(btn.dataset.surveyEdit));
+    });
+    el.querySelectorAll('[data-survey-delete]').forEach((btn) => {
+      btn.addEventListener('click', () => deleteSatisfactionSurvey(btn.dataset.surveyDelete));
+    });
+  }
+
+  async function deleteSatisfactionSurvey(id) {
+    const confirmed = await window.confirmDialog('Remover esta pesquisa? Todas as respostas já recebidas também são apagadas. Esta ação não pode ser desfeita.');
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${SATISFACTION_API_BASE}/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao remover');
+      if (window.showToast) window.showToast('Pesquisa removida.', 'success');
+      loadSatisfactionList();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  // ---- Modal de criar/editar ----
+
+  function renderEditQuestions() {
+    const el = document.getElementById('satisfactionQuestionsList');
+    el.innerHTML = editingQuestions.map((q, i) => `
+      <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+        <input type="text" data-question-text="${i}" value="${escapeHtml(q.text)}" placeholder="Texto da pergunta" style="flex:1;">
+        <select data-question-type="${i}" style="width:110px;">
+          <option value="rating" ${q.type === 'rating' ? 'selected' : ''}>Nota (1-5)</option>
+          <option value="text" ${q.type === 'text' ? 'selected' : ''}>Texto livre</option>
+        </select>
+        <button type="button" class="note-action-btn" data-question-remove="${i}" title="Remover pergunta">×</button>
+      </div>
+    `).join('');
+    el.querySelectorAll('[data-question-text]').forEach((input) => {
+      input.addEventListener('input', () => { editingQuestions[Number(input.dataset.questionText)].text = input.value; });
+    });
+    el.querySelectorAll('[data-question-type]').forEach((select) => {
+      select.addEventListener('change', () => { editingQuestions[Number(select.dataset.questionType)].type = select.value; });
+    });
+    el.querySelectorAll('[data-question-remove]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        editingQuestions.splice(Number(btn.dataset.questionRemove), 1);
+        renderEditQuestions();
+      });
+    });
+    document.getElementById('satisfactionAddQuestionBtn').disabled = editingQuestions.length >= 5;
+  }
+
+  document.getElementById('satisfactionAddQuestionBtn').addEventListener('click', () => {
+    if (editingQuestions.length >= 5) return;
+    editingQuestions.push({ id: `q${Date.now().toString(36)}`, text: '', type: 'rating' });
+    renderEditQuestions();
+  });
+
+  function openSatisfactionEditModal(id) {
+    const modal = document.getElementById('satisfactionEditModal');
+    if (id) {
+      const survey = satisfactionSurveysCache.find((s) => String(s.id) === String(id));
+      if (!survey) return;
+      editingSurveyId = survey.id;
+      document.getElementById('satisfactionEditTitle').textContent = 'Editar pesquisa';
+      document.getElementById('satisfactionAudienceInput').value = survey.audience;
+      document.getElementById('satisfactionAudienceInput').disabled = true; // público não muda depois de criada (link já pode ter sido divulgado)
+      document.getElementById('satisfactionTitleInput').value = survey.title;
+      editingQuestions = survey.questions.map((q) => ({ ...q }));
+    } else {
+      editingSurveyId = null;
+      document.getElementById('satisfactionEditTitle').textContent = 'Nova pesquisa';
+      document.getElementById('satisfactionAudienceInput').value = 'client';
+      document.getElementById('satisfactionAudienceInput').disabled = false;
+      document.getElementById('satisfactionTitleInput').value = '';
+      editingQuestions = [{ id: 'q1', text: '', type: 'rating' }];
+    }
+    renderEditQuestions();
+    modal.classList.add('open');
+  }
+  document.getElementById('satisfactionNewBtn').addEventListener('click', () => openSatisfactionEditModal(null));
+  document.getElementById('satisfactionEditCancelBtn').addEventListener('click', () => {
+    document.getElementById('satisfactionEditModal').classList.remove('open');
+  });
+
+  document.getElementById('satisfactionEditSaveBtn').addEventListener('click', async () => {
+    const title = document.getElementById('satisfactionTitleInput').value.trim();
+    const audience = document.getElementById('satisfactionAudienceInput').value;
+    if (!title) { if (window.showToast) window.showToast('Escreva um título.', 'error'); return; }
+    if (!editingQuestions.length) { if (window.showToast) window.showToast('Adicione ao menos 1 pergunta.', 'error'); return; }
+    if (editingQuestions.some((q) => !q.text.trim())) { if (window.showToast) window.showToast('Nenhuma pergunta pode ficar vazia.', 'error'); return; }
+
+    try {
+      const body = { title, questions: editingQuestions };
+      let res;
+      if (editingSurveyId) {
+        res = await apiFetch(`${SATISFACTION_API_BASE}/${editingSurveyId}`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+      } else {
+        body.audience = audience;
+        res = await apiFetch(`${SATISFACTION_API_BASE}/`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+      }
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao salvar');
+      document.getElementById('satisfactionEditModal').classList.remove('open');
+      if (window.showToast) window.showToast('Pesquisa salva.', 'success');
+      loadSatisfactionList();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  // ---- Métricas de uma pesquisa ----
+
+  function renderRatingBars(distribution) {
+    // Mesmo espírito visual de barra proporcional já usado no bloco de
+    // "Páginas mais acessadas" (sem SVG, sem lib) — barra de largura
+    // proporcional ao total de cada nota.
+    const total = Object.values(distribution).reduce((a, b) => a + b, 0) || 1;
+    return [5, 4, 3, 2, 1].map((star) => {
+      const count = distribution[star] || 0;
+      const pct = Math.round((count / total) * 100);
+      return `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px; font-size:12.5px;">
+          <span style="width:38px; color:var(--text-muted);">${star} ★</span>
+          <div style="flex:1; background:var(--surface-2); border-radius:6px; overflow:hidden; height:16px;">
+            <div style="width:${pct}%; background:var(--gold); height:100%;"></div>
+          </div>
+          <span style="width:32px; text-align:right; color:var(--text-faint);">${count}</span>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function openSatisfactionMetrics(id) {
+    document.querySelectorAll('#adminTab-satisfacao > .panel').forEach((p) => { p.style.display = 'none'; });
+    const detailPanel = document.getElementById('satisfactionDetailPanel');
+    detailPanel.style.display = 'block';
+    detailPanel.querySelector('#satisfactionDetailTitle').textContent = 'Carregando…';
+
+    try {
+      const res = await apiFetch(`${SATISFACTION_API_BASE}/${id}/metrics`);
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar métricas');
+      const data = await res.json();
+
+      document.getElementById('satisfactionDetailTitle').textContent = data.survey.title;
+      document.getElementById('satisfactionMetricCards').innerHTML = `
+        <div class="metric-card"><div class="metric-label">Respostas</div><div class="metric-value">${data.totals.totalResponses}</div></div>
+        <div class="metric-card"><div class="metric-label">Nota média</div><div class="metric-value">${data.totals.averageRating ?? '—'}</div></div>
+      `;
+
+      const chartEl = document.getElementById('satisfactionChart');
+      const questionIds = Object.keys(data.distributionByQuestion);
+      if (!questionIds.length) {
+        chartEl.innerHTML = '<p class="empty">Sem pergunta de nota nesta pesquisa.</p>';
+      } else {
+        chartEl.innerHTML = questionIds.map((qId) => {
+          const question = data.survey.questions.find((q) => q.id === qId);
+          return `<div style="margin-bottom:18px;"><div class="panel-hint" style="margin-bottom:8px;">${escapeHtml(question?.text || qId)}</div>${renderRatingBars(data.distributionByQuestion[qId])}</div>`;
+        }).join('');
+      }
+
+      document.getElementById('satisfactionRecentBody').innerHTML = data.recent.length
+        ? data.recent.map((r) => `
+            <tr>
+              <td>${new Date(r.createdAt).toLocaleString('pt-BR')}</td>
+              <td>${r.respondentOwnerId ? 'Atendente' : (r.phone ? escapeHtml(r.phone) : 'Cliente')}</td>
+              <td>${Object.keys(r.answers || {}).length} pergunta(s) respondida(s)</td>
+            </tr>
+          `).join('')
+        : '<tr><td colspan="3" class="empty">Nenhuma resposta ainda.</td></tr>';
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  document.getElementById('satisfactionBackBtn').addEventListener('click', () => {
+    document.getElementById('satisfactionDetailPanel').style.display = 'none';
+    document.querySelectorAll('#adminTab-satisfacao > .panel').forEach((p) => {
+      if (p.id !== 'satisfactionDetailPanel') p.style.display = 'block';
+    });
+  });
 
   async function init() {
     try {

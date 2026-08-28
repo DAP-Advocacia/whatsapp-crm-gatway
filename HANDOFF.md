@@ -3,15 +3,24 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-27 — Parte FD: **grupo
+> aberto). Última atualização: sessão de 2026-08-27 — Parte FE: **Pesquisa de
+> Satisfação**, tab nova no Painel Admin (só super admin) — `admin.html`
+> reestruturado em ABAS DE VERDADE (era uma sequência de painéis empilhados;
+> agora Métricas/Usuários/Instâncias/Feed/Sugestões/Satisfação são abas,
+> componente reaproveitado do toggle Kanban/Calendário de `notifications.html`).
+> Pesquisa com até 5 perguntas fixas (nota 1-5 ou texto), dois públicos: cliente
+> final (link público de WhatsApp, envio manual via campanha) e atendente
+> (formulário interno em `suggestions.html`). Achado de segurança corrigido:
+> `answers` sem validação de shape/tamanho na rota pública — `sanitizeAnswers()`
+> nova, aceita só chaves reais da survey, rating 1-5, texto truncado em 2000
+> chars. Achado de design corrigido: botão "×" sem CSS definido no arquivo.
+>
+> Antes disso, mesma sessão — Parte FD: **grupo
 > automático do Agente de IA muda de gatilho** — disparava na criação do card,
 > agora dispara só quando o negócio **fecha** (etapa de "ganho" no Bitrix).
 > Precisou de um poller novo (`src/dealStagePoller.js`, ~20min) porque o Bitrix
 > não avisa o gateway de mudança de etapa (sem webhook de evento configurado).
 > Sem retroatividade — só negócio que fechar A PARTIR DE AGORA ganha o grupo.
-> Também em andamento na mesma sessão: **Pesquisa de Satisfação** (tab nova no
-> Painel Admin, só super admin, com abas de verdade substituindo os painéis
-> empilhados de antes) — ver Parte FE quando concluída.
 >
 > Antes disso, mesma sessão (retomada) — commits publicados por outra sessão
 > enquanto o usuário estava fora, sincronizados via fast-forward sem conflito
@@ -338,6 +347,15 @@
   painel lateral agrupado por tópico, ações copiar/enviar ao
   cliente/feedback/dispensar — ver §2, parte EW (pendente de teste com
   WhatsApp real e de validação do DDL contra o banco de produção)
+- [x] **Grupo automático muda de gatilho pro fechamento do negócio**:
+  poller novo (`src/dealStagePoller.js`, ~20min) detecta mudança de
+  etapa no Bitrix (sem webhook de evento, precisou ser construído do
+  zero) — ver §2, parte FD
+- [x] **Pesquisa de Satisfação**: tab nova no Painel Admin (só super
+  admin), `admin.html` reestruturado em abas de verdade. Até 5
+  perguntas fixas, dois públicos (cliente via link público/campanha,
+  atendente via formulário interno em `suggestions.html`) — ver §2,
+  parte FE (pendente de teste end-to-end real)
 
 Não há bloqueador conhecido em aberto no momento. Ver §5 para dívidas técnicas não
 bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro
@@ -10766,4 +10784,85 @@ features anteriores (sem acesso a produção a partir daqui).
 **Grupo manual** (`src/routes/cardGroup.js`, aba DapZap) não muda em
 nada — continua criável a qualquer momento por clique, sem relação com
 etapa de funil.
+
+### Parte FE — Pesquisa de Satisfação: tab nova no Painel Admin (2026-08-27)
+
+Pedido do usuário: uma tab nova no Painel Admin, visível só pra ele
+(super admin), com métricas de pesquisa de satisfação do sistema.
+Escopo confirmado nas perguntas de esclarecimento: **dois públicos**
+possíveis por pesquisa — cliente final (responde via link público de
+WhatsApp, sem login) e atendente/usuário interno (responde autenticado,
+dentro do sistema). Formulário com **até 5 perguntas fixas** (nota 1-5
+ou texto livre), não builder livre tipo `lead_forms`. Envio pro cliente
+é **manual** (campanha comum já existente, o texto contém o link).
+
+**Achado que mudou o escopo original**: o usuário pediu explicitamente
+"abas de verdade clicáveis" no Admin — hoje a tela é uma sequência de
+`.panel` empilhados, sem sistema de abas nenhum. Confirmado com o
+usuário: **TODAS** as seções existentes (Métricas, Usuários, Instâncias,
+Feed, Sugestões) também viraram abas, não só a nova — redesenho da
+estrutura da tela, não só mais um painel empilhado.
+
+**Schema**: `satisfaction_surveys` (`audience` check
+`'client'|'internal'`, `slug` único — só relevante pra `client`,
+`questions` jsonb array de até 5, `active`); `satisfaction_responses`
+(`session_id`/`phone` nullable — só preenchido quando é resposta de
+cliente vinculada a conversa; `respondent_owner_id` nullable — só
+preenchido quando é resposta de atendente); `campaigns.satisfaction_survey_id`
+(FK opcional, permite cruzar "quantos da campanha X responderam" no
+futuro, ainda não usado por nenhuma métrica).
+
+**Backend**: `src/satisfactionSurveys.js` (CRUD + `validateQuestions` —
+máx 5 perguntas, `type` em `rating`/`text`, ids únicos — + `computeMetrics`,
+mesmo padrão 3-partes de `campaignStore.js`/`leadForms.js`: totais +
+série diária + distribuição de nota por pergunta, calculada em memória).
+`src/routes/satisfaction.js` (`/api/satisfaction`, atrás de `requireAuth`)
+— CRUD/métricas com `requireSuperAdmin`; `GET /internal/active` e
+`POST /:id/respond` só `requireAuth` (qualquer autenticado responde a
+pesquisa interna). `src/routes/satisfactionPublic.js`
+(`/api/satisfaction-public`, SEM nenhuma autenticação, montada ANTES do
+`requireAuth` global) — `GET`/`POST /:slug`, mesmo padrão de
+`routes/leads.js`.
+
+**Frontend**: `public/admin.html` reestruturado em abas — componente
+`.view-switch`/`data-admin-tab` **reaproveitado fielmente** do toggle
+Kanban/Calendário já existente em `notifications.html` (não um
+componente novo), cada seção antiga virou `.admin-tab-content` com
+`display:none/block`. Aba nova "Pesquisa de Satisfação": lista + modal
+de criar/editar (até 5 perguntas, tipo rating/text) + painel de
+métricas com distribuição de nota em barra proporcional (sem lib, mesmo
+espírito visual do resto do projeto). `public/satisfaction-form.html`
+(novo) — SPA pública, mesma paleta exata de `lead-form.html`.
+`public/suggestions.html` ganhou um painel condicional (só aparece se
+houver pesquisa "internal" ativa) pro atendente responder.
+
+**Revisão obrigatória**: `design-system-checker-agent` achou 1 gap real
+— botão "×" de remover pergunta usava a classe `.note-action-btn`
+(copiada de `chat.html`) que não estava definida em `admin.html`,
+renderizando com estilo cru do navegador; corrigido, CSS copiado pro
+arquivo. `security-reviewer-agent` achou 4 pontos de baixa gravidade,
+nenhum crítico: (1) `POST /:id/respond` sem limite de reenvio pelo
+mesmo atendente — aceito, é pesquisa de satisfação, não votação; (2)
+slug previsível (herda o mesmo padrão de `leadForms`, não é regressão
+nova); (3) `session`/`phone` arbitrários na rota pública podem poluir
+métricas com dado falso — aceito, não afeta CRM/negócio real, só
+métrica cosmética; **(4) `answers` sem validação de shape/tamanho antes
+de gravar — corrigido**: nova `sanitizeAnswers()` em
+`satisfactionSurveys.js`, chamada dentro de `recordResponse`, aceita só
+chaves que batem com um `id` de pergunta real da survey, valida
+`rating` como inteiro 1-5 (descarta fora da faixa), trunca `text` em
+2000 caracteres — nunca lança, resposta com campo inválido é gravada
+sem esse campo, não rejeitada por inteiro.
+
+**Validação**: harness de extração de função via regex (mesmo padrão já
+usado nas features anteriores) — 13 asserções em `validateQuestions`/
+`slugify`, 6 em `renderRatingBars` (distribuição vazia não divide por
+zero, porcentagens corretas), 15 em `sanitizeAnswers` (chave fora do
+shape descartada, rating fora de 1-5 descartado, texto gigante
+truncado, objeto aninhado nunca quebra, `answers` null/array/string
+vira objeto vazio sem lançar). `node -c` em todo backend; `new Function()`
+nos blocos `<script>` de `admin.html`/`suggestions.html`/
+`satisfaction-form.html`. **Sem teste end-to-end real** (envio de
+WhatsApp com link, preenchimento do formulário) — mesma limitação de
+ambiente das features anteriores.
 

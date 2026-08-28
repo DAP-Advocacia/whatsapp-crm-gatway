@@ -1740,6 +1740,54 @@ admin consegue de fato LIGAR (`PUT /commercial-config` com
 
 ---
 
+## 14.10. Pesquisa de Satisfação (tab dentro de `/admin.html`, só super admin)
+
+Métricas e gestão de pesquisas de satisfação do sistema — visível só a
+super admin (`requireSuperAdmin`, mesma régua do resto do Painel Admin).
+Motivou uma reestruturação maior do `admin.html`: a tela deixou de ser
+uma sequência de painéis empilhados e virou um **sistema de abas de
+verdade** (Métricas/Usuários/Instâncias/Feed/Sugestões/Pesquisa de
+Satisfação), reaproveitando o componente `.view-switch`/`data-view` já
+usado no toggle Kanban/Calendário de `notifications.html` — nenhum
+componente novo inventado.
+
+- **Até 5 perguntas fixas** por pesquisa, cada uma tipo `rating` (nota
+  1-5) ou `text` (livre) — nunca um builder de formulário livre tipo
+  `lead_forms`.
+- **Dois públicos possíveis** (`audience`), escolhido na criação e
+  travado depois (o link já pode ter sido divulgado):
+  1. **`client`** — cliente final, responde via **link público**
+     (`/pesquisa/<slug>`, sem login, mesmo padrão de `/l/<slug>` das
+     Landing Pages) mandado por WhatsApp. **Envio é manual**: a
+     "campanha de pesquisa" é uma campanha comum já existente
+     (`POST /api/whatsapp/campaign`) cujo texto contém o link — nenhum
+     motor de disparo novo.
+  2. **`internal`** — atendente/usuário do próprio sistema, responde
+     **autenticado**, dentro da tela `/suggestions.html` (painel que só
+     aparece se houver uma pesquisa interna ativa no momento).
+- **Métricas** (`GET /api/satisfaction/:id/metrics`): total de
+  respostas, nota média, distribuição de nota por pergunta (barra
+  proporcional, sem SVG/lib — mesmo espírito visual do resto do
+  projeto), série diária (30 dias) e lista das 25 respostas mais
+  recentes.
+- **Sanitização de resposta** (`sanitizeAnswers` em
+  `src/satisfactionSurveys.js`): a rota pública não exige nenhuma
+  autenticação, então `answers` (jsonb livre) é validado contra o shape
+  real das perguntas da pesquisa antes de gravar — aceita só chaves que
+  batem com um `id` de pergunta existente, `rating` vira inteiro 1-5
+  (descarta fora da faixa), `text` é truncado em 2000 caracteres. Nunca
+  lança — um campo inválido é descartado, não rejeita a resposta
+  inteira.
+- **Schema**: `satisfaction_surveys` (`audience`, `slug` — só relevante
+  pra `client`, `questions` jsonb, `active`), `satisfaction_responses`
+  (`session_id`/`phone` nullable — cliente vinculado a conversa;
+  `respondent_owner_id` nullable — atendente autenticado, nunca os dois
+  preenchidos na mesma linha), `campaigns.satisfaction_survey_id` (FK
+  opcional, vínculo pra métrica futura "quantos da campanha X
+  responderam").
+
+---
+
 ## 15. Central de Notificações — Kanban e Calendário (`/notifications.html`)
 
 O sino da sidebar (compartilhado pelas 8 páginas) deixou de abrir um dropdown
@@ -2181,6 +2229,24 @@ gerado + config, nunca disparam uma geração nova sob demanda.
 | `/:id/send` | POST | Body `{ session, phone }`. Envia `insight.body` como mensagem de WhatsApp DE VERDADE ao cliente (`gateway.sendMessage` + persiste + broadcast `type:'message'`), depois marca `status='sent'`. Idempotente — insight já `sent` responde 409, não reenvia. Confirma posse antes de agir. |
 | `/commercial-config?session=` | GET | Config do copiloto pra instância (`{ enabled, playbook, topics }`). |
 | `/commercial-config` | PUT | Body `{ session, enabled?, playbook?, topics? }` — patch parcial, mesmo padrão de `agent_config`. **403** se `enabled:true` e o `ownerId` não estiver em `SUPER_ADMIN_OWNER_IDS` (piloto restrito, Parte EY — mesma régua de `PUT /api/agent/config`). |
+
+### `/api/satisfaction/*` (`src/routes/satisfaction.js`) e `/api/satisfaction-public/*` (`src/routes/satisfactionPublic.js`)
+
+Ver §14.10 — Pesquisa de Satisfação. O primeiro router exige
+`requireAuth`; o segundo é **público**, montado ANTES do `requireAuth`
+global (mesmo padrão de `/api/leads`).
+
+| Rota | Método | Auth | Uso |
+|---|---|---|---|
+| `/api/satisfaction/` | GET | `requireSuperAdmin` | Lista todas as pesquisas (cross-owner). |
+| `/api/satisfaction/` | POST | `requireSuperAdmin` | Body `{ audience, title, questions }`. Cria; gera `slug` único (só usado se `audience==='client'`). |
+| `/api/satisfaction/:id` | PUT | `requireSuperAdmin` | Body `{ title?, questions?, active? }` — patch parcial. |
+| `/api/satisfaction/:id` | DELETE | `requireSuperAdmin` | Remove a pesquisa e todas as respostas (cascade). |
+| `/api/satisfaction/:id/metrics` | GET | `requireSuperAdmin` | Totais, nota média, distribuição por pergunta, série diária, 25 respostas recentes. |
+| `/api/satisfaction/internal/active` | GET | `requireAuth` | Devolve a pesquisa `internal` ativa (se houver) — qualquer autenticado, é quem vai responder. |
+| `/api/satisfaction/:id/respond` | POST | `requireAuth` | Body `{ answers }`. `respondentOwnerId` sempre `req.ownerId` (nunca do client). Só aceita se a pesquisa for `audience==='internal'` e `active`. |
+| `/api/satisfaction-public/:slug` | GET | nenhuma | Devolve `{ title, questions }` de uma pesquisa `client` ativa — 404 genérico se não achar/não for do tipo certo. |
+| `/api/satisfaction-public/:slug` | POST | nenhuma | Body `{ answers, session?, phone? }`. `answers` passa por `sanitizeAnswers` (shape validado contra as perguntas reais, rating 1-5, texto truncado em 2000 chars) antes de gravar. |
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 

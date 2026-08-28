@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pesquisa de satisfação</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+<style>
+  /* Mesma paleta base das outras páginas públicas (lead-form.html) —
+     nunca uma identidade visual nova, mesmo sendo uma página fora do
+     app autenticado. */
+  :root{
+    --bg:#15120d; --surface:#1d1812; --surface-2:#241d15; --border:#34291a;
+    --gold:#d8ab4f; --gold-rgb:216,171,79; --gold-dim:#8a6b32; --text:#f3ede2; --text-muted:#a89a83;
+    --text-faint:#6e6353; --green:#4caf6e; --green-rgb:76,175,110; --red:#d9685f; --red-rgb:217,104,95; --radius:14px;
+  }
+  *{ box-sizing:border-box; }
+  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  body{
+    margin:0; min-height:100vh; color:var(--text);
+    font-family:'Inter', -apple-system, sans-serif; -webkit-font-smoothing:antialiased;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+    background: radial-gradient(560px 320px at 50% 0%, rgba(var(--gold-rgb),.05), transparent 70%), var(--bg);
+  }
+  .card{
+    width:100%; max-width:480px; background:var(--surface); border:1px solid var(--border);
+    border-radius:var(--radius); padding:32px 28px;
+  }
+  h1{ font-family:'Fraunces', serif; font-weight:700; font-size:22px; margin:0 0 6px; color:var(--text); }
+  .sub{ font-size:13px; color:var(--text-muted); margin:0 0 24px; }
+  .question{ margin-bottom:22px; }
+  .question-label{ font-size:13.5px; font-weight:600; color:var(--text); margin-bottom:10px; }
+  .rating-row{ display:flex; gap:8px; }
+  .rating-btn{
+    flex:1; padding:10px 0; border-radius:9px; border:1px solid var(--border); background:var(--surface-2);
+    color:var(--text-muted); font-size:15px; font-weight:600; cursor:pointer; transition:.15s;
+  }
+  .rating-btn:hover{ border-color:var(--gold-dim); }
+  .rating-btn.selected{ background:var(--gold); color:#1a1408; border-color:var(--gold); }
+  textarea{
+    width:100%; min-height:80px; resize:vertical; border-radius:9px; border:1px solid var(--border);
+    background:var(--surface-2); color:var(--text); font-family:inherit; font-size:13.5px; padding:10px 12px;
+  }
+  .submit-btn{
+    width:100%; padding:13px; border-radius:9px; border:none; background:var(--gold); color:#1a1408;
+    font-size:14px; font-weight:700; cursor:pointer; margin-top:8px;
+  }
+  .submit-btn:disabled{ opacity:.5; cursor:not-allowed; }
+  .state-screen{ text-align:center; padding:40px 0; }
+  .state-screen h2{ font-family:'Fraunces', serif; color:var(--gold); margin-bottom:8px; }
+  .state-screen p{ color:var(--text-muted); font-size:13.5px; }
+  .error-text{ color:var(--red); font-size:12.5px; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="state-screen"><p>Carregando…</p></div>
+</div>
+
+<script>
+(function () {
+  var slug = location.pathname.split('/').filter(Boolean).pop();
+  var card = document.getElementById('card');
+  var params = new URLSearchParams(location.search);
+  var session = params.get('session') || null;
+  var phone = params.get('phone') || null;
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str == null ? '' : str;
+    return div.innerHTML;
+  }
+
+  function renderError(message) {
+    card.innerHTML = '<div class="state-screen"><h2>Não encontramos essa pesquisa</h2><p>' + escapeHtml(message) + '</p></div>';
+  }
+
+  function renderThankYou() {
+    card.innerHTML = '<div class="state-screen"><h2>Obrigado!</h2><p>Sua resposta foi registrada.</p></div>';
+  }
+
+  function renderForm(survey) {
+    var answers = {};
+    var html = '<h1>' + escapeHtml(survey.title) + '</h1>' +
+      '<p class="sub">Sua opinião ajuda a melhorar o atendimento.</p>' +
+      '<form id="surveyForm">';
+
+    survey.questions.forEach(function (q) {
+      html += '<div class="question"><div class="question-label">' + escapeHtml(q.text) + '</div>';
+      if (q.type === 'rating') {
+        html += '<div class="rating-row">';
+        for (var i = 1; i <= 5; i++) {
+          html += '<button type="button" class="rating-btn" data-question-id="' + escapeHtml(q.id) + '" data-value="' + i + '">' + i + '</button>';
+        }
+        html += '</div>';
+      } else {
+        html += '<textarea data-question-id="' + escapeHtml(q.id) + '" placeholder="Escreva sua resposta..."></textarea>';
+      }
+      html += '</div>';
+    });
+
+    html += '<button type="submit" class="submit-btn" id="submitBtn">Enviar resposta</button>' +
+      '<div class="error-text" id="errorText" hidden></div></form>';
+    card.innerHTML = html;
+
+    // Notas (rating) — clique seleciona, um valor por pergunta.
+    card.querySelectorAll('.rating-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var qId = btn.getAttribute('data-question-id');
+        answers[qId] = Number(btn.getAttribute('data-value'));
+        card.querySelectorAll('.rating-btn[data-question-id="' + CSS.escape(qId) + '"]').forEach(function (b) {
+          b.classList.toggle('selected', b === btn);
+        });
+      });
+    });
+    // Texto livre — atualiza direto no blur/input.
+    card.querySelectorAll('textarea').forEach(function (ta) {
+      ta.addEventListener('input', function () { answers[ta.getAttribute('data-question-id')] = ta.value; });
+    });
+
+    document.getElementById('surveyForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var errorText = document.getElementById('errorText');
+      var submitBtn = document.getElementById('submitBtn');
+      errorText.hidden = true;
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Enviando...';
+
+      fetch('/api/satisfaction-public/' + encodeURIComponent(slug), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers: answers, session: session, phone: phone }),
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (r) {
+          if (!r.ok) throw new Error(r.data.error || 'falha ao enviar');
+          renderThankYou();
+        })
+        .catch(function (err) {
+          errorText.textContent = err.message;
+          errorText.hidden = false;
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Enviar resposta';
+        });
+    });
+  }
+
+  fetch('/api/satisfaction-public/' + encodeURIComponent(slug))
+    .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+    .then(function (r) {
+      if (!r.ok) return renderError(r.data.error || 'link inválido ou expirado');
+      renderForm(r.data);
+    })
+    .catch(function () { renderError('Não foi possível carregar a pesquisa agora.'); });
+})();
+</script>
+</body>
+</html>

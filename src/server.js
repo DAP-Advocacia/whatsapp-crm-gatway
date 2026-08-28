@@ -36,6 +36,8 @@ const { createCardGroupRouter } = require('./routes/cardGroup');
 const { createInternalNotesRouter } = require('./routes/internalNotes');
 const { createAgentRouter } = require('./routes/agent');
 const { createInsightsRouter } = require('./routes/insights');
+const { createSatisfactionRouter } = require('./routes/satisfaction');
+const { createSatisfactionPublicRouter } = require('./routes/satisfactionPublic');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -810,7 +812,73 @@ app.get('/api/brand', async (req, res) => {
 // chamadas de verdade continuam exigindo o Bearer token de sempre, gerado
 // em /settings.html ("Token de API"). Ver src/openapi.js.
 // ---------------------------------------------------------------
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, { customSiteTitle: 'API — WhatsApp Gateway' }));
+// customCss aplica a MESMA paleta dourada/escura do resto do app por
+// cima do tema padrão claro do Swagger UI (nunca uma identidade visual
+// nova, mesma regra de design system do resto do projeto) — swagger-ui-
+// express aceita CSS bruto via essa opção, sem precisar de build/asset
+// próprio. Cores em hex cru (não var(--x)) porque este CSS é injetado
+// isolado do :root das outras páginas.
+const SWAGGER_CUSTOM_CSS = `
+  body { background: #15120d; }
+  .swagger-ui { background: #15120d; color: #f3ede2; }
+  .swagger-ui .topbar { background: #1d1812; border-bottom: 1px solid #34291a; padding: 10px 0; }
+  .swagger-ui .info .title, .swagger-ui .info h1, .swagger-ui .info h2, .swagger-ui .info h3 { color: #d8ab4f; }
+  .swagger-ui .info .title small.version-stamp { background: #8a6b32; }
+  .swagger-ui .info .title small.version-stamp pre { background: #8a6b32; }
+  .swagger-ui .scheme-container { background: #1d1812; box-shadow: none; border-bottom: 1px solid #34291a; }
+  .swagger-ui .opblock-tag { color: #f3ede2; border-bottom: 1px solid #34291a; }
+  .swagger-ui .opblock-tag:hover { background: rgba(216,171,79,.06); }
+  .swagger-ui .opblock { background: #1d1812; border-color: #34291a; box-shadow: none; }
+  .swagger-ui .opblock .opblock-summary { border-color: #34291a; }
+  .swagger-ui .opblock .opblock-summary-description { color: #a89a83; }
+  .swagger-ui .opblock.opblock-get { background: #1d1812; border-color: rgba(97,175,254,.4); }
+  .swagger-ui .opblock.opblock-get .opblock-summary-method { background: #4c9fd8; }
+  .swagger-ui .opblock.opblock-post { background: #1d1812; border-color: rgba(76,175,110,.4); }
+  .swagger-ui .opblock.opblock-post .opblock-summary-method { background: #4caf6e; }
+  .swagger-ui .opblock.opblock-put { background: #1d1812; border-color: rgba(216,171,79,.4); }
+  .swagger-ui .opblock.opblock-put .opblock-summary-method { background: #d8ab4f; color: #1a1408; }
+  .swagger-ui .opblock.opblock-delete { background: #1d1812; border-color: rgba(217,104,95,.4); }
+  .swagger-ui .opblock.opblock-delete .opblock-summary-method { background: #d9685f; }
+  .swagger-ui .opblock-body pre.microlight, .swagger-ui .highlight-code { background: #241d15 !important; color: #f3ede2; }
+  .swagger-ui table thead tr td, .swagger-ui table thead tr th { color: #a89a83; border-bottom: 1px solid #34291a; }
+  .swagger-ui .parameter__name, .swagger-ui .response-col_status { color: #f3ede2; }
+  .swagger-ui .parameter__type, .swagger-ui .response-col_description { color: #a89a83; }
+  .swagger-ui .tab li, .swagger-ui .opblock-description-wrapper p, .swagger-ui .opblock-external-docs-wrapper p,
+  .swagger-ui .opblock-title_normal p, .swagger-ui .renderedMarkdown p { color: #a89a83; }
+  .swagger-ui select, .swagger-ui input[type=text] { background: #241d15; color: #f3ede2; border-color: #34291a; }
+  .swagger-ui .btn { border-color: #34291a; color: #f3ede2; }
+  .swagger-ui .btn.authorize { background: rgba(76,175,110,.1); border-color: #4caf6e; color: #4caf6e; }
+  .swagger-ui .btn.authorize svg { fill: #4caf6e; }
+  .swagger-ui .btn.execute { background: #d8ab4f; border-color: #d8ab4f; color: #1a1408; }
+  .swagger-ui .model-box, .swagger-ui section.models { background: #1d1812; border-color: #34291a; }
+  .swagger-ui section.models .model-container { background: #241d15; }
+  .swagger-ui .model-title, .swagger-ui .prop-name, .swagger-ui .model .property.primitive { color: #f3ede2; }
+  .swagger-ui .dialog-ux .modal-ux { background: #1d1812; border-color: #34291a; }
+  .swagger-ui .dialog-ux .modal-ux-header h3 { color: #d8ab4f; }
+  .swagger-ui .info a { color: #d8ab4f; }
+  .swagger-ui a.nostyle, .swagger-ui .opblock-summary-path, .swagger-ui .opblock-summary-path__deprecated { color: #f3ede2; }
+  .swagger-ui .response-col_links, .swagger-ui .responses-inner h4, .swagger-ui .responses-inner h5 { color: #a89a83; }
+  .swagger-ui .copy-to-clipboard { background: #34291a; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #15120d; }
+  ::-webkit-scrollbar-thumb { background: #34291a; border-radius: 100px; }
+`;
+
+app.use(
+  '/api-docs',
+  swaggerUi.serve,
+  swaggerUi.setup(openapiSpec, {
+    customSiteTitle: 'API — WhatsApp Gateway',
+    customCss: SWAGGER_CUSTOM_CSS,
+    swaggerOptions: {
+      docExpansion: 'list', // tags expandidas, operações recolhidas — mais fácil de navegar que "none" (tudo fechado) ou "full" (tudo aberto, rola demais)
+      defaultModelsExpandDepth: 1,
+      displayRequestDuration: true,
+      filter: true, // caixa de busca por tag/rota, útil com muitos endpoints
+      tryItOutEnabled: false, // exige clique em "Try it out" antes de editar parâmetros — evita disparo acidental de request real numa API que já tem token de longa duração
+    },
+  })
+);
 
 // ---------------------------------------------------------------
 // Formulários públicos de captura de lead ("Sites") — /l/<slug> é a
@@ -824,6 +892,19 @@ app.get('/l/:slug', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/lead-form.html'));
 });
 app.use('/api/leads', createLeadsRouter({ sessions, broadcast }));
+
+// ---------------------------------------------------------------
+// Pesquisa de Satisfação — /pesquisa/<slug> é a página pública (público
+// "client", sem login), consome /api/satisfaction-public/* (sem
+// requireAuth, ver src/routes/satisfactionPublic.js). O CRUD/métricas
+// (só super admin) e a resposta do público "internal" ficam em
+// /api/satisfaction, atrás de requireAuth, montado junto dos outros
+// mounts protegidos mais abaixo.
+// ---------------------------------------------------------------
+app.get('/pesquisa/:slug', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/satisfaction-form.html'));
+});
+app.use('/api/satisfaction-public', createSatisfactionPublicRouter());
 
 // ---------------------------------------------------------------
 // Teste A/B — URL pública única que divide o tráfego 50/50 entre as duas
@@ -941,6 +1022,7 @@ app.use('/api/agent', requireAuth, createAgentRouter());
 // agentDispatch acima, pra emitir `ai-insight` assim que gerado.
 insightGenerator.configure({ broadcast });
 app.use('/api/insights', requireAuth, createInsightsRouter({ sessions, broadcast }));
+app.use('/api/satisfaction', requireAuth, createSatisfactionRouter());
 
 // ---------------------------------------------------------------
 // Sobe HTTP + WebSocket no mesmo servidor/porta

@@ -353,6 +353,10 @@
   .btn:disabled{ opacity:.55; cursor:not-allowed; filter:none; }
   .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
   .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter:none; }
+  /* Nota selecionada no formulário de Pesquisa de Satisfação — mesmo
+     destaque dourado que .btn já usa por padrão (sem .secondary), só
+     precisava do estado explícito pra alternar a partir de .secondary. */
+  .btn.secondary.active{ background: var(--gold); color: #1a1408; border-color: var(--gold); }
 
   .char-count{ font-size: 11px; color: var(--text-faint); text-align:right; margin: -6px 0 12px; }
 
@@ -573,6 +577,17 @@
 <div id="app">
   <h1>Sugestões</h1>
   <p class="subtitle">Envie ideias de melhoria pro sistema — quando alguma for implementada, você recebe uma notificação aqui dentro do app.</p>
+
+  <!-- Pesquisa de Satisfação interna (ver src/routes/satisfaction.js
+       GET /internal/active) — só aparece se o super admin tiver uma
+       pesquisa "internal" ativa no momento; some depois de respondida
+       (fica escondido de novo até uma pesquisa nova ser criada). -->
+  <div class="panel" id="satisfactionPanel" style="display:none">
+    <h2 id="satisfactionPanelTitle">Pesquisa de satisfação</h2>
+    <p class="panel-hint">Como está sendo sua experiência com o sistema? Sua resposta ajuda a melhorar o DapZap.</p>
+    <div id="satisfactionQuestions"></div>
+    <button class="btn" id="satisfactionSubmitBtn">Enviar resposta</button>
+  </div>
 
   <div class="panel">
     <h2>Nova sugestão</h2>
@@ -1062,12 +1077,91 @@
 
   document.getElementById('refreshBtn').addEventListener('click', load);
 
+  // ---------------------------------------------------------------
+  // Pesquisa de Satisfação interna — mesmo espírito de "nova sugestão"
+  // acima (autenticado, sem requireSuperAdmin — qualquer usuário
+  // responde). Painel só aparece se houver uma pesquisa "internal"
+  // ativa (GET /internal/active, ver src/routes/satisfaction.js).
+  // ---------------------------------------------------------------
+  let activeSurvey = null;
+  const satisfactionAnswers = {};
+
+  async function loadActiveSatisfactionSurvey() {
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/satisfaction/internal/active`);
+      if (!res.ok) return; // best-effort — sem pesquisa ativa não é erro, o painel só fica escondido
+      const data = await res.json();
+      if (!data.survey) return;
+      activeSurvey = data.survey;
+      renderSatisfactionPanel();
+    } catch {}
+  }
+
+  function renderSatisfactionPanel() {
+    const panel = document.getElementById('satisfactionPanel');
+    document.getElementById('satisfactionPanelTitle').textContent = activeSurvey.title;
+    const el = document.getElementById('satisfactionQuestions');
+    el.innerHTML = activeSurvey.questions.map((q) => {
+      if (q.type === 'rating') {
+        return `
+          <div style="margin-bottom:18px;">
+            <div style="font-size:13px; font-weight:600; margin-bottom:8px;">${escapeHtml(q.text)}</div>
+            <div style="display:flex; gap:8px;" data-rating-group="${escapeHtml(q.id)}">
+              ${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="btn secondary" data-rating-btn="${escapeHtml(q.id)}" data-rating-value="${n}" style="flex:1;">${n}</button>`).join('')}
+            </div>
+          </div>
+        `;
+      }
+      return `
+        <div style="margin-bottom:18px;">
+          <div style="font-size:13px; font-weight:600; margin-bottom:8px;">${escapeHtml(q.text)}</div>
+          <textarea data-text-question="${escapeHtml(q.id)}" placeholder="Escreva sua resposta..."></textarea>
+        </div>
+      `;
+    }).join('');
+
+    el.querySelectorAll('[data-rating-btn]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const qId = btn.dataset.ratingBtn;
+        satisfactionAnswers[qId] = Number(btn.dataset.ratingValue);
+        el.querySelectorAll(`[data-rating-btn="${CSS.escape(qId)}"]`).forEach((b) => {
+          b.classList.toggle('active', b === btn);
+        });
+      });
+    });
+    el.querySelectorAll('[data-text-question]').forEach((ta) => {
+      ta.addEventListener('input', () => { satisfactionAnswers[ta.dataset.textQuestion] = ta.value; });
+    });
+
+    panel.style.display = 'block';
+  }
+
+  document.getElementById('satisfactionSubmitBtn').addEventListener('click', async () => {
+    if (!activeSurvey) return;
+    const btn = document.getElementById('satisfactionSubmitBtn');
+    btn.disabled = true;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/satisfaction/${activeSurvey.id}/respond`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answers: satisfactionAnswers }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao enviar resposta');
+      if (window.showToast) window.showToast('Obrigado pela resposta!', 'success');
+      document.getElementById('satisfactionPanel').style.display = 'none'; // some até uma pesquisa nova existir
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+      btn.disabled = false;
+    }
+  });
+
   async function init() {
     try {
       myOwnerId = await resolveOwner();
       startPresenceHeartbeat();
       revealAdminNavItemIfSuperAdmin();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
+      loadActiveSatisfactionSurvey(); // fire-and-forget — painel escondido por padrão, sem erro visível se não houver pesquisa
       await load();
     } catch (err) {
       listWrap.innerHTML = `<p class="empty">${escapeHtml(err.message)}</p>`;

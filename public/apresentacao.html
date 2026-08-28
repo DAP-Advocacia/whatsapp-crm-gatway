@@ -552,7 +552,7 @@
         <div class="eyebrow">01 · Sumário executivo</div>
         <h2 class="section-title">Um canal que virou dado.</h2>
         <p class="lede">Construímos um gateway próprio que conecta números de WhatsApp diretamente aos negócios do Bitrix24. O que era uma conversa perdida no celular de cada vendedor passou a ser: histórico vinculado ao negócio, disparo de campanhas com controle e rastreio, agendamento de envios, segmentação de contatos, painéis de métricas, uma central de notificações com histórico próprio e um agente de IA que atende automaticamente o primeiro contato de um lead novo — tudo dentro do CRM que a equipe já usa todo dia.</p>
-        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com dezoito telas e dezoito módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead, triagem de leads por IA e sugestões em tempo real pro time comercial. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
+        <p class="lede" style="margin-top:18px">Hoje o sistema está em uso interno, com dezoito telas e dezenove módulos funcionando de ponta a ponta — do atendimento dentro do negócio até a visão gerencial da operação inteira, passando por landing pages públicas com captura automática de lead, triagem de leads por IA, sugestões em tempo real pro time comercial e pesquisas de satisfação. Este relatório resume o que foi entregue, o que ele já permite enxergar sobre a operação, e os pontos de atenção antes de uma expansão maior.</p>
       </div>
     </section>
 
@@ -584,7 +584,7 @@
     <section class="section wide" id="solucao">
       <div class="section-inner reveal">
         <div class="eyebrow">03 · A solução</div>
-        <h2 class="section-title">Dezoito módulos, um só lugar de trabalho.</h2>
+        <h2 class="section-title">Dezenove módulos, um só lugar de trabalho.</h2>
         <p class="lede">Tudo acessível de dentro do Bitrix24, sem precisar aprender uma ferramenta nova.</p>
         <div class="grid">
           <div class="card">
@@ -695,6 +695,12 @@
             <p>Diferente do Agente de IA acima — aqui a IA nunca fala com o cliente, só <b>sugere pro atendente humano</b> em tempo real, durante um atendimento em andamento. Pensado pro time comercial: identifica situações recorrentes na conversa (ex: cliente diz que tem um documento pra enviar, ou que o valor oferecido é menor que o esperado) e gera um insight pronto para usar, classificado por tópico — aparece direto no Chat, junto da conversa, e agrupado num painel lateral. O atendente decide o que fazer: copiar o texto, enviar direto ao cliente (sempre com uma confirmação antes), marcar como útil ou dispensar. Configurável por número: regras do próprio negócio (texto livre) e os tópicos que a IA deve reconhecer. <b>Nasce desligado em cada número</b>, mesmo padrão do Agente de IA.</p>
             <div class="card-tag">Inteligência Artificial</div>
           </div>
+          <div class="card">
+            <div class="card-num">19</div>
+            <h3>Pesquisa de Satisfação</h3>
+            <p>Uma área restrita à direção, dentro do Painel Admin, pra criar e acompanhar pesquisas de satisfação — até 5 perguntas por pesquisa (nota de 1 a 5 ou resposta livre). Dois jeitos de coletar: um <b>link enviado por WhatsApp</b> pro cliente responder fora do app (a empresa dispara quando quiser, como uma campanha comum), e um <b>formulário interno</b> pro próprio time responder sobre a experiência de usar o sistema. As respostas viram métricas prontas — nota média, distribuição das notas e histórico de respostas — sem precisar exportar nada pra planilha.</p>
+            <div class="card-tag">Gestão &amp; Qualidade</div>
+          </div>
         </div>
       </div>
     </section>
@@ -775,7 +781,7 @@
         <p class="lede">Fatos de arquitetura — não projeções. Tudo abaixo já está implementado e em uso interno.</p>
         <div class="fact-strip">
           <div class="fact"><div class="fact-num">18</div><div class="fact-label">Telas entregues: chat (negócio e inbox, com painel de atendimento em equipe), campanhas, agendamento, contatos, sites (landing pages), análise, métricas de campanhas, métricas de sites, notificações, instâncias, sugestões, FAQ, onboarding, administração, apresentação, aparência, agente de IA e exemplos de conversa</div></div>
-          <div class="fact"><div class="fact-num">45</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de instância, delegação de acesso, posts do Feed, configuração e base de conhecimento vetorial do Agente de IA, insights do Copiloto Comercial…)</div></div>
+          <div class="fact"><div class="fact-num">49</div><div class="fact-label">Tabelas de dados estruturadas na nuvem (conversas, campanhas, contatos, agendamentos, notificações, sites, testes A/B, histórico de instância, delegação de acesso, posts do Feed, configuração e base de conhecimento vetorial do Agente de IA, insights do Copiloto Comercial, pesquisas de satisfação…)</div></div>
           <div class="fact"><div class="fact-num">3</div><div class="fact-label">Tipos de mídia que o Agente de IA reconhece na primeira mensagem de um lead — imagem e vídeo já em produção, áudio com o código pronto (pendente de liberação de modelo, ver seção 07)</div></div>
           <div class="fact"><div class="fact-num">1</div><div class="fact-label">Ponto único de trabalho — nenhuma equipe precisa sair do Bitrix24</div></div>
           <div class="fact"><div class="fact-num">0</div><div class="fact-label">Custo de licença por número de WhatsApp conectado</div></div>
@@ -834,6 +840,14 @@
             <div>
               <h3>Copiloto Comercial ainda sem teste com WhatsApp real</h3>
               <p>A geração de insights e o envio ao cliente foram validados por testes automatizados de lógica (regras de negócio, permissões de acesso), mas ainda não foram testados numa conversa real de WhatsApp. Recomenda-se um teste guiado com uma instância comercial antes de habilitar o recurso em produção para o time.</p>
+              <div class="risk-severity">Severidade baixa · pendente de validação em produção</div>
+            </div>
+          </div>
+          <div class="risk">
+            <div class="risk-flag low"></div>
+            <div>
+              <h3>Pesquisa de Satisfação ainda sem teste de ponta a ponta</h3>
+              <p>A lógica de validação, cálculo de métricas e as permissões de acesso já foram testadas automaticamente, mas o fluxo completo — enviar o link por WhatsApp, o cliente responder na página pública, o atendente responder o formulário interno — ainda não foi testado numa situação real.</p>
               <div class="risk-severity">Severidade baixa · pendente de validação em produção</div>
             </div>
           </div>
