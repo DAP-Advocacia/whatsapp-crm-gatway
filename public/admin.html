@@ -391,6 +391,18 @@
   .users-filters select{ width:auto; min-width:170px; flex:1 1 170px; }
   .users-filters .btn{ flex:0 0 auto; }
 
+  /* Busca + botão de ação lado a lado (ex: aba Instâncias) — mesmo
+     princípio de quebra do .users-filters acima (sem flex-wrap, o botão
+     fica espremido contra o input em tela estreita, já que
+     input{width:100%} disputa o espaço todo dentro do flex). Classe
+     reaproveitável em vez de style inline porque esse padrão tende a se
+     repetir em outras abas com exportação/ação ao lado da busca. */
+  .toolbar-row{
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:12px;
+  }
+  .toolbar-row input[type="search"]{ flex:1 1 240px; margin-bottom:0; }
+  .toolbar-row .btn{ flex:0 0 auto; }
+
   .admin-table{ width:100%; border-collapse:collapse; font-size:13px; }
   .admin-table th{
     text-align:left; font-size:11px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
@@ -843,7 +855,10 @@
   <div class="panel">
     <h2>Instâncias <span class="panel-count" id="instancesCount">—</span></h2>
     <p class="panel-hint">Todas as instâncias de WhatsApp do sistema, de qualquer usuário — número conectado e quem está logado (pelo ID do Bitrix), pra gestão sem precisar entrar em cada conta.</p>
-    <input type="search" id="instancesSearch" placeholder="Buscar por número, nome ou label da instância…" style="margin-bottom:12px">
+    <div class="toolbar-row">
+      <input type="search" id="instancesSearch" placeholder="Buscar por número, nome ou label da instância…">
+      <button class="btn secondary" id="instancesExportBtn" type="button">Baixar CSV</button>
+    </div>
     <table class="admin-table" id="instancesTable">
       <thead>
         <tr><th>Instância</th><th>Número</th><th>Dono (Bitrix)</th><th>Criada em</th></tr>
@@ -1452,6 +1467,53 @@
   }
 
   document.getElementById('instancesSearch')?.addEventListener('input', renderInstancesAdmin);
+
+  // Baixar CSV — mesmo padrão de download client-side já usado no Chat
+  // (Blob + link temporário, ver exportAsTxt em public/chat.html), sem
+  // rota nova no backend (os dados já vêm completos em GET /admin/instances,
+  // já carregados em memória). Exporta exatamente as linhas VISÍVEIS agora
+  // (respeita a busca ativa) — mesmo princípio de "o que é exportado é
+  // exatamente o que a pessoa está vendo" já usado no export de conversa.
+  function csvEscape(value) {
+    const str = String(value ?? '');
+    return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  }
+
+  function exportInstancesCsv() {
+    const term = (document.getElementById('instancesSearch')?.value || '').trim().toLowerCase();
+    const rows = term
+      ? instancesAdminRows.filter((i) =>
+          (i.phone || '').toLowerCase().includes(term) ||
+          (i.ownerName || '').toLowerCase().includes(term) ||
+          (i.label || '').toLowerCase().includes(term)
+        )
+      : instancesAdminRows;
+    if (!rows.length) {
+      if (window.showToast) window.showToast('Nenhuma instância pra exportar.', 'error');
+      return;
+    }
+    const header = ['Instância', 'Número', 'Dono (Bitrix)', 'Owner ID', 'Removida', 'Criada em'];
+    const lines = rows.map((i) => [
+      i.label,
+      i.phone || '',
+      i.ownerName || '',
+      i.ownerId || '',
+      i.isOrphan ? 'sim' : 'não',
+      new Date(i.createdAt).toLocaleString('pt-BR'),
+    ].map(csvEscape).join(';'));
+    // BOM (﻿) — sem ele o Excel no Windows abre acento como lixo
+    // (mesmo problema de sempre com UTF-8 puro em CSV nesse programa).
+    const csv = '﻿' + header.join(';') + '\n' + lines.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `instancias-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('instancesExportBtn')?.addEventListener('click', exportInstancesCsv);
 
   // Preenche os dropdowns de "Página favorita" e "Cargo" com os valores
   // que de fato aparecem em usersRows (não uma lista fixa) — evita opção

@@ -135,7 +135,7 @@ só falta o teste de ponta a ponta com WhatsApp real.
     alta, a lista de tópicos padrão precisa crescer ou virar mais
     flexível.
 
-## 3.5. Débito de UX pendente — tooltip nativo na lista de conversas do Chat
+## 3.5. Débito de UX pendente — tooltip nativo em Chat e Admin
 
 Achado do `design-system-checker-agent` na construção do Dapinho
 (2026-08-27): a regra global do Daniel ("tooltip/ícone informativo
@@ -143,20 +143,28 @@ sempre no MESMO componente visual do app, nunca `title` nativo") foi
 corrigida só no item NOVO (badge de não-lidas do Dapinho,
 `public/chat.html`) — os itens de conversa **pré-existentes** da mesma
 lista continuam usando `title` nativo no badge equivalente
-(`public/chat.html:3186`) e possivelmente em outros pontos do arquivo,
-nunca migrados porque o Chat nunca teve um componente de tooltip
-customizado reaproveitável (diferente de outras telas do projeto que já
-usam `.chart-tooltip`/`data-tooltip`). Não é regressão desta sessão — é
-débito que já existia antes.
+(`public/chat.html:3186`), nunca migrados porque o Chat nunca teve um
+componente de tooltip customizado reaproveitável (diferente de outras
+telas do projeto que já usam `.chart-tooltip`/`data-tooltip`). Não é
+regressão desta sessão — é débito que já existia antes.
+
+**Confirmado também em `public/admin.html`** (checker rodado de novo em
+2026-08-28, na revisão do botão "Baixar CSV"): `title` nativo
+pré-existente em várias linhas (601, 630, 657, 742, 1650, 1765, 2408) —
+mesmo padrão de débito, mesma causa (nenhum tooltip customizado nesse
+arquivo ainda).
 
 - **Critério de validação**: nenhum `title=` sobrando em
-  `public/chat.html` explicando algo pro usuário (crachá, ícone de
-  ação, etc.) — todos usando o mesmo componente de tooltip customizado
-  novo, com a paleta do projeto (claro/escuro), delegado no `document`
-  (mesmo padrão já usado em `negocios-fechados-408`).
+  `public/chat.html`/`public/admin.html` explicando algo pro usuário
+  (crachá, ícone de ação, etc.) — todos usando o mesmo componente de
+  tooltip customizado novo, com a paleta do projeto (claro/escuro),
+  delegado no `document` (mesmo padrão já usado em
+  `negocios-fechados-408`).
 - **Escopo**: baixo risco, ação isolada (criar 1 componente + trocar N
   atributos `title` por `data-tooltip`) — não decisão arquitetural,
-  cabe resolver na próxima sessão que tocar `public/chat.html`.
+  cabe resolver na próxima sessão que tocar qualquer um dos dois
+  arquivos. Se o componente for genérico o bastante, reaproveitar entre
+  as duas páginas em vez de duplicar.
 
 ## 4. Teto de escala já documentado em outras áreas do projeto
 

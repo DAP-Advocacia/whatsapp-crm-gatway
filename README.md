@@ -1416,6 +1416,22 @@ acesso, tempo total (30d), página favorita e bloqueio.
   variável configurada, a lista fica vazia com um aviso explícito na
   tela (não um erro nem um vazio silencioso).
 
+### Instâncias — todas as do sistema, cross-usuário (restrito a super admin)
+
+Tabela única (`GET /admin/instances`) com **toda** instância de WhatsApp
+já cadastrada no gateway, de qualquer usuário — instância, número
+conectado, dono (nome resolvido pelo ID do Bitrix via `listEmployees`) e
+data de criação, incluindo órfãs (instância removida, mas com histórico
+de conversa mantido — ver `instancesStore.listAll()`). Objetivo: gestão
+cross-usuário sem precisar entrar em cada conta pra ver quem está
+conectado em quê. Busca client-side por número/nome/label (`#instancesSearch`).
+
+**Baixar CSV** (`exportInstancesCsv`, `public/admin.html`): exporta
+exatamente as linhas **visíveis** na hora (respeita a busca ativa) — sem
+rota nova no backend, os dados já vêm completos em `GET /admin/instances`
+e já estão em memória no client. BOM UTF-8 no início do arquivo (senão o
+Excel no Windows abre acento como lixo, problema conhecido de CSV puro).
+
 ### Publicar no Feed do Bitrix — restrito a super admin
 
 Painel novo na mesma tela (`admin.html`): anuncia novidades do sistema

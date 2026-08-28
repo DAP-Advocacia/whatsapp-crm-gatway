@@ -3,7 +3,16 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-27 — Parte FF: **Dapinho** —
+> aberto). Última atualização: sessão de 2026-08-28 — Parte FG: **Botão
+> "Baixar CSV" na aba Instâncias do Painel Admin** — a tela em si (todas as
+> instâncias do sistema, de qualquer usuário, número + dono pelo ID do
+> Bitrix, ver README §14.5) já existia da Parte EQ; faltava só exportar.
+> Client-side puro (`exportInstancesCsv`, `public/admin.html`), sem rota
+> nova — reaproveita `GET /admin/instances` já carregado em memória, exporta
+> exatamente as linhas visíveis (respeita a busca ativa), BOM UTF-8 pra
+> abrir certo no Excel do Windows.
+>
+> Antes disso, sessão de 2026-08-27 — Parte FF: **Dapinho** —
 > assistente de IA conversacional POR DONO (não por instância/conversa, diferente
 > do Copiloto Comercial e do Agente de IA): uma conversa fixa e fixada como
 > primeira da lista no Chat de cada usuário, com dois papéis: (1) o usuário
