@@ -37,10 +37,43 @@ git push (branch main)
 
 O build usa o `Dockerfile` da raiz do repositório. Configuração no painel:
 
-- **Source**: Github → `DAP-Advocacia/whatsapp-crm-gatway`, branch `main`
-  (o campo espera `owner/repo`, não a URL completa)
+- **Source**: Github → `DanielCosta1997/whatsapp-gateway`, branch `main`
+  (o campo espera `owner/repo`, não a URL completa) — **trocado em
+  2026-08-28** do repositório antigo `DAP-Advocacia/whatsapp-crm-gatway`
+  (ver §2.1 abaixo, incidente real de deploy travado).
 - **Build**: Dockerfile, arquivo `Dockerfile`
 - **Port**: `3333`
+
+### 2.1 Incidente real: deploy travado num repositório GitHub diferente (2026-08-28)
+
+O usuário trabalha este projeto com duas contas diferentes (empresa +
+pessoal), e cada uma fazia push num repositório GitHub distinto do
+mesmo histórico — `DAP-Advocacia/whatsapp-crm-gatway` (antigo) e
+`DanielCosta1997/whatsapp-gateway` (atual, usado hoje). O Source do
+EasyPanel continuou apontando pro repositório antigo por engano —
+3-4 commits inteiros (uma feature grande, o "Dapinho") foram
+publicados no repo novo e nunca chegaram ao servidor, **sem nenhum
+erro visível no painel de deploy** (o deploy sempre "funcionava", só
+que sempre rebuildava o mesmo commit antigo).
+
+**Sinal de alerta**: `curl -I https://whatsapp.bmdholding.com.br/chat.html`
+mostrando `Last-Modified` muito mais antigo que o último commit
+esperado — se esse timestamp bater com um commit específico e antigo
+(não "genericamente antigo"), é sinal de Source desatualizado, não bug
+de código.
+
+**Fix aplicado**: trocado o campo Source do serviço `gateway` no
+EasyPanel pro repositório que de fato recebe push
+(`DanielCosta1997/whatsapp-gateway`) + disparado um deploy manual pra
+confirmar. Nenhum commit foi perdido — os dois repositórios
+compartilhavam o mesmo histórico até o ponto da divergência (hash
+idêntico confirmado via `gh api repos/<org>/<repo>/commits/<sha>` nos
+dois lados).
+
+**Prevenção**: ao trabalhar com mais de uma conta/máquina neste
+projeto, sempre confirmar `git remote -v` bate com
+`DanielCosta1997/whatsapp-gateway` antes de dar push — um push no
+repositório errado não dá erro nenhum, só nunca chega ao ar.
 
 > ✅ **Webhook de deploy automático resolvido em 31/07/2026.** A integração
 > Github↔EasyPanel (Settings → Github) de fato nunca chegou a ser

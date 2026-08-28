@@ -3691,6 +3691,24 @@
     input.focus();
   }
 
+  // Insere/atualiza uma mensagem do Dapinho por ID, nunca duplicando —
+  // chamado tanto pelo retorno de POST /ask (resposta HTTP) quanto pelo
+  // WebSocket (broadcast do backend, ver openDapinhoSocket). As duas vias
+  // entregam a MESMA mensagem (o backend grava e faz broadcast da pergunta
+  // E da resposta, ver persistAndBroadcast em src/dapinho.js) — sem esse
+  // dedupe por ID real, a pergunta/resposta apareciam 2x (bug reportado
+  // pelo usuário, 2026-08-28): a otimista tinha um ID temporário
+  // (`tmp-...`) diferente do ID real que o socket entregava depois, então
+  // a checagem antiga de "já apareceu" nunca reconhecia como a mesma.
+  function upsertDapinhoMessage(msg, { optimisticId } = {}) {
+    if (optimisticId) {
+      const idx = state.dapinho.messages.findIndex((m) => m.id === optimisticId);
+      if (idx !== -1) { state.dapinho.messages[idx] = msg; return; }
+    }
+    const alreadyShown = state.dapinho.messages.some((m) => m.id === msg.id);
+    if (!alreadyShown) state.dapinho.messages.push(msg);
+  }
+
   async function askDapinho() {
     const input = document.getElementById('dapinhoInput');
     const btn = document.getElementById('dapinhoSendBtn');
@@ -3701,8 +3719,8 @@
     state.dapinho.asking = true;
     btn.disabled = true;
 
-    const optimisticQuestion = { id: 'tmp-' + Date.now(), direction: 'out', type: 'text', text: question, createdAt: new Date().toISOString() };
-    state.dapinho.messages.push(optimisticQuestion);
+    const optimisticId = 'tmp-' + Date.now();
+    upsertDapinhoMessage({ id: optimisticId, direction: 'out', type: 'text', text: question, createdAt: new Date().toISOString() });
     renderDapinhoMessages({ typing: true });
 
     try {
@@ -3713,7 +3731,12 @@
       });
       if (!res.ok) throw new Error('falha ao perguntar ao Dapinho');
       const data = await res.json();
-      state.dapinho.messages.push(data.answer);
+      // "Batiza" a pergunta otimista com o id real que o backend gerou —
+      // se o socket já tiver entregue essa mesma pergunta antes disso
+      // (corrida rara, mas possível), upsertDapinhoMessage já reconhece
+      // pelo id e não duplica.
+      upsertDapinhoMessage({ id: data.questionId, direction: 'out', type: 'text', text: question, createdAt: new Date().toISOString() }, { optimisticId });
+      upsertDapinhoMessage(data.answer);
       if (state.dapinho.conversation) {
         state.dapinho.conversation.lastText = data.answer.text;
         state.dapinho.conversation.lastDirection = 'in';
@@ -3721,7 +3744,7 @@
       }
     } catch (err) {
       console.error('Erro ao perguntar ao Dapinho:', err);
-      state.dapinho.messages.push({ id: 'err-' + Date.now(), direction: 'in', type: 'text', text: 'Não consegui responder agora — tente de novo em instantes.', createdAt: new Date().toISOString() });
+      upsertDapinhoMessage({ id: 'err-' + Date.now(), direction: 'in', type: 'text', text: 'Não consegui responder agora — tente de novo em instantes.', createdAt: new Date().toISOString() });
     } finally {
       state.dapinho.asking = false;
       renderDapinhoMessages();
@@ -5231,8 +5254,13 @@
       if (payload.type !== 'message') return;
 
       if (state.dapinho.open) {
-        const alreadyShown = state.dapinho.messages.some((m) => m.id === payload.message.id);
-        if (!alreadyShown) { state.dapinho.messages.push(payload.message); renderDapinhoMessages(); }
+        // Mesmo helper de dedupe usado em askDapinho (ver upsertDapinhoMessage)
+        // — nunca um push cru aqui: esta mensagem pode já ter chegado pela
+        // resposta HTTP de POST /ask (a própria aba que perguntou também
+        // recebe o eco do broadcast).
+        const before = state.dapinho.messages.length;
+        upsertDapinhoMessage(payload.message);
+        if (state.dapinho.messages.length !== before) renderDapinhoMessages();
       } else if (payload.message.direction === 'in') {
         notifyNewMessage('Dapinho', payload.message, { isDapinho: true });
       }

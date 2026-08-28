@@ -147,8 +147,9 @@ async function ask(ownerId, questionText, { ownerName } = {}) {
   if (!question) throw new Error('a pergunta não pode ficar vazia');
   if (question.length > MAX_QUESTION_LENGTH) throw new Error(`a pergunta não pode ter mais que ${MAX_QUESTION_LENGTH} caracteres`);
 
+  const questionId = await nextMessageId();
   await persistAndBroadcast(ownerId, {
-    id: await nextMessageId(),
+    id: questionId,
     direction: 'out',
     type: 'text',
     text: question,
@@ -161,7 +162,7 @@ async function ask(ownerId, questionText, { ownerName } = {}) {
     const busyText = 'Calma aí, já estou processando sua última pergunta — aguarde alguns segundos antes de mandar outra.';
     const busyMsg = { id: await nextMessageId(), direction: 'in', type: 'text', text: busyText, createdAt: new Date().toISOString() };
     await persistAndBroadcast(ownerId, busyMsg);
-    return busyMsg;
+    return { questionId, answer: busyMsg };
   }
 
   let answerText;
@@ -186,7 +187,7 @@ async function ask(ownerId, questionText, { ownerName } = {}) {
 
   saveExample(ownerId, question, answerText); // fire-and-forget, best-effort (ver dapinhoExamples.saveExample)
 
-  return answerMsg;
+  return { questionId, answer: answerMsg };
 }
 
 // Aviso manual de feature nova — disparado pelo super admin (ver POST

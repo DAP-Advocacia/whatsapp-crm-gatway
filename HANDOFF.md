@@ -3,7 +3,38 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-28 — Parte FG: **aba
+> aberto). Última atualização: sessão de 2026-08-28 — Parte FH: **incidente de
+> deploy travado + duplicação de mensagem no Dapinho corrigidos**.
+>
+> (1) O usuário reportou que o Dapinho continuava "sumido" mesmo depois do
+> push da correção anterior (Parte FG) e de um "deploy manual" — investigação
+> revelou que o EasyPanel builda a partir de um repositório GitHub DIFERENTE
+> (`DAP-Advocacia/whatsapp-crm-gatway`, congelado desde 27/08 19h) do que o
+> usuário usa pra dar push (`DanielCosta1997/whatsapp-gateway`) — resultado de
+> trabalhar o projeto com duas contas (empresa + pessoal). 3-4 commits nunca
+> chegaram ao servidor, sem erro nenhum visível (o deploy sempre "funcionava",
+> só sempre do commit antigo). Diagnóstico: `curl -I .../chat.html` mostrando
+> `Last-Modified` batendo com um commit específico e antigo. Fix: usuário
+> trocou o Source do EasyPanel pro repositório certo + deploy manual —
+> confirmado via `curl`/grep que o Dapinho (114 ocorrências) e
+> `DAPINHO_API_BASE` agora estão no arquivo servido. Nenhum commit perdido
+> (os dois repos compartilhavam histórico até a divergência, hash idêntico
+> confirmado). Detalhe completo em `DEPLOY.md` §2.1.
+>
+> (2) Com o Dapinho finalmente no ar, usuário reportou mensagem duplicada
+> ("mandei oi e foi 2 vezes"). Causa: `askDapinho` (front) usava um ID
+> temporário (`tmp-...`) pra mensagem otimista, mas o eco via WebSocket (o
+> backend grava E broadcasta tanto a pergunta quanto a resposta,
+> `persistAndBroadcast`) chegava com o ID real — o dedupe por igualdade de
+> `id` nunca reconhecia como a mesma mensagem. Fix: `upsertDapinhoMessage`
+> (novo helper, `public/chat.html`), mesmo padrão de `resolveOptimisticId`
+> já usado pelo composer normal (chat.html:4790) — "batiza" a otimista com o
+> ID real assim que o POST /ask retorna, chamado tanto no retorno HTTP quanto
+> no handler do socket, nunca `.push()` cru. Backend (`src/dapinho.js::ask`)
+> passou a devolver `{questionId, answer}` em vez de só `answer`, pra o front
+> ter o ID real da pergunta pra fazer esse "batismo".
+>
+> Antes disso, sessão de 2026-08-28 — Parte FG: **aba
 > "Instâncias" do Painel Admin unificada dentro da tabela "Usuários"**,
 > a pedido explícito do usuário ("unifique as tabelas, tudo fica dentro
 > da tabela usuários"). Escopo evoluiu 3x na mesma sessão: (1) pedido

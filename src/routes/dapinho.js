@@ -59,8 +59,8 @@ function createDapinhoRouter() {
   router.post('/ask', async (req, res) => {
     const { question, ownerName } = req.body || {};
     try {
-      const answer = await dapinho.ask(req.ownerId, question, { ownerName });
-      res.json({ ok: true, answer });
+      const { questionId, answer } = await dapinho.ask(req.ownerId, question, { ownerName });
+      res.json({ ok: true, questionId, answer });
     } catch (err) {
       console.error('[dapinho] erro ao processar pergunta:', err.message);
       res.status(400).json({ error: err.message });
