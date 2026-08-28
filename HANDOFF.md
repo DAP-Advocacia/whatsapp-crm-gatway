@@ -10866,3 +10866,17 @@ nos blocos `<script>` de `admin.html`/`suggestions.html`/
 WhatsApp com link, preenchimento do formulário) — mesma limitação de
 ambiente das features anteriores.
 
+### Parte FF — Tema visual customizado no Swagger UI (`/api-docs`) (2026-08-27)
+
+Pedido pontual do usuário (print do Swagger com o tema claro padrão,
+destoando do resto do app): `src/server.js` ganhou `SWAGGER_CUSTOM_CSS`,
+passado via `customCss` do `swagger-ui-express` — reaplica a paleta
+dourada/escura (`--bg`/`--gold`/`--surface`/etc, mesmos valores hex do
+resto do app) por cima do tema claro padrão do Swagger, sem nenhum
+asset/build novo (é só CSS bruto injetado). Também ligado
+`swaggerOptions`: `docExpansion:'list'` (tags abertas, operações
+fechadas), `filter:true` (busca), `tryItOutEnabled:false` (evita
+disparo acidental de request real com o token de 90 dias já
+preenchido). `node -c` ok — mudança só de configuração/CSS, sem lógica
+nova pra testar.
+
