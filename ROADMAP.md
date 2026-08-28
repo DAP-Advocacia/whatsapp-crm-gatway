@@ -107,10 +107,11 @@ conhecido em que passam a importar de verdade.
 
 O Copiloto Comercial (Parte EW) foi construído e passou por revisão de
 design/segurança, mas **ainda não foi testado com WhatsApp real em
-produção** nem teve o DDL das 3 tabelas novas validado contra o banco de
-produção (token MCP do Supabase sem acesso à organização "SAS", onde
-fica o banco real — `db/migrate.js` aplica no próximo deploy normal, como
-sempre acontece neste projeto).
+produção** — o DDL das 3 tabelas (`commercial_config`,
+`conversation_insight_state`, `conversation_insights`) já está confirmado
+existindo no banco real (`qqfzfudbeqgldodusoit`, projeto "Wpp CRM",
+confirmado na sessão do Dapinho, 2026-08-27 — ver `HANDOFF.md` Parte FF),
+só falta o teste de ponta a ponta com WhatsApp real.
 
 - **Hipótese 1 — anti-flood de 60s é o intervalo certo**: evita gerar
   insight repetido a cada mensagem numa conversa corrida, sem deixar o
@@ -133,6 +134,29 @@ sempre acontece neste projeto).
     fora da lista" (logado, não forçado num tópico ao acaso) — se for
     alta, a lista de tópicos padrão precisa crescer ou virar mais
     flexível.
+
+## 3.5. Débito de UX pendente — tooltip nativo na lista de conversas do Chat
+
+Achado do `design-system-checker-agent` na construção do Dapinho
+(2026-08-27): a regra global do Daniel ("tooltip/ícone informativo
+sempre no MESMO componente visual do app, nunca `title` nativo") foi
+corrigida só no item NOVO (badge de não-lidas do Dapinho,
+`public/chat.html`) — os itens de conversa **pré-existentes** da mesma
+lista continuam usando `title` nativo no badge equivalente
+(`public/chat.html:3186`) e possivelmente em outros pontos do arquivo,
+nunca migrados porque o Chat nunca teve um componente de tooltip
+customizado reaproveitável (diferente de outras telas do projeto que já
+usam `.chart-tooltip`/`data-tooltip`). Não é regressão desta sessão — é
+débito que já existia antes.
+
+- **Critério de validação**: nenhum `title=` sobrando em
+  `public/chat.html` explicando algo pro usuário (crachá, ícone de
+  ação, etc.) — todos usando o mesmo componente de tooltip customizado
+  novo, com a paleta do projeto (claro/escuro), delegado no `document`
+  (mesmo padrão já usado em `negocios-fechados-408`).
+- **Escopo**: baixo risco, ação isolada (criar 1 componente + trocar N
+  atributos `title` por `data-tooltip`) — não decisão arquitetural,
+  cabe resolver na próxima sessão que tocar `public/chat.html`.
 
 ## 4. Teto de escala já documentado em outras áreas do projeto
 

@@ -1294,3 +1294,75 @@ create index if not exists idx_satisfaction_responses_survey on satisfaction_res
 -- "quantos da campanha X responderam". Nullable: uma campanha comum
 -- (não ligada a nenhuma pesquisa) nunca preenche isso.
 alter table campaigns add column if not exists satisfaction_survey_id bigint references satisfaction_surveys(id) on delete set null;
+
+-- ================================================================
+-- Dapinho — assistente de IA conversacional POR DONO (não por
+-- instância/conversa, diferente do Copiloto Comercial e do Agente de
+-- IA): uma conversa fixa e fixada como primeira da lista no Chat de
+-- cada usuário, onde ele pode perguntar sobre as PRÓPRIAS conversas
+-- (ex: "quais leads não respondi", "resuma minhas conversas de hoje")
+-- e também recebe avisos manuais de feature nova, disparados pelo
+-- super admin no Painel Admin (mesmo espírito de log/histórico do
+-- Feed do Bitrix, ver bitrixFeed.js/feed_posts).
+--
+-- Reaproveita as tabelas `conversations`/`messages` já existentes —
+-- a "conversa" do Dapinho é uma linha normal em `conversations`, com
+-- session_id virtual `dapinho::<ownerId>` (ver src/dapinho.js) e
+-- phone fixo 'dapinho'. Não referencia `instances(id)` de propósito
+-- (diferente de todo o resto do schema que trava sessionId em
+-- `instances`) — o Dapinho nunca é uma instância WhatsApp real, não
+-- deve poder ser criado/removido pela tela de Instâncias, e authz.js
+-- reconhece esse padrão de session_id como sempre pertencente ao
+-- próprio ownerId embutido nele, sem consultar `instances`.
+-- ================================================================
+
+-- Few-shot do Dapinho: cada interação real (pergunta do usuário +
+-- resposta gerada) vira uma linha aqui automaticamente, sem fluxo de
+-- aprovação/anonimização manual — diferente de agent_examples (que
+-- guarda conversa com um LEAD/cliente, dado de terceiro, e por isso
+-- exige revisão humana antes de reutilizar). Aqui é o próprio dono
+-- vendo dado dele mesmo, então a interação já nasce reutilizável.
+-- `embedding` é da PERGUNTA (mesmo padrão de agent_examples/
+-- agent_knowledge_chunks: busca por similaridade na pergunta nova
+-- contra perguntas passadas, pra trazer o par pergunta+resposta mais
+-- parecido como referência de estilo/conteúdo).
+create table if not exists dapinho_examples (
+  id bigserial primary key,
+  owner_id text not null,
+  question text not null,
+  answer text not null,
+  embedding vector(1536),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_dapinho_examples_owner on dapinho_examples (owner_id, created_at desc);
+create index if not exists idx_dapinho_examples_embedding
+  on dapinho_examples using ivfflat (embedding vector_cosine_ops) with (lists = 100);
+
+-- Anti-flood por DONO (não por conversa, diferente de
+-- conversation_insight_state) — evita o usuário martelando perguntas
+-- rápido demais e estourando custo de OpenAI; checado antes de gerar
+-- (mesmo padrão de shouldGenerate em src/insightGenerator.js).
+create table if not exists dapinho_state (
+  owner_id text primary key,
+  last_generated_at timestamptz
+);
+
+-- Histórico LOCAL de avisos de feature nova disparados pelo super
+-- admin (mesmo espírito de feed_posts) — nunca é a fonte de verdade
+-- de "o que o usuário já viu" (isso é a própria mensagem em
+-- `messages`), só o registro de "o que já foi anunciado", pra não
+-- duplicar aviso sem querer.
+-- `sent_by` nullable: sempre preenchido no fluxo real (req.ownerId de
+-- quem clicou "Enviar" no Painel Admin, ver src/routes/dapinho.js), mas
+-- sem CHECK/not null pra nunca quebrar o INSERT se um chamador futuro
+-- (script manual, migração de dados) não tiver esse dado à mão — mesmo
+-- espírito de `agent_examples.candidate_id` (nullable com rastreabilidade
+-- best-effort, não uma garantia rígida).
+create table if not exists dapinho_broadcasts (
+  id bigserial primary key,
+  sent_by text,
+  title text,
+  message text not null,
+  recipient_count int not null default 0,
+  created_at timestamptz not null default now()
+);

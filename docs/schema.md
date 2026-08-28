@@ -247,6 +247,46 @@ histórico (`internal_note_revisions`) que um insight não tem. Misturar
 forçaria coluna nula nos dois sentidos (ver comentário original em
 `db/schema.sql`).
 
+## 5.5. Dapinho (`dapinho_examples`, `dapinho_state`, `dapinho_broadcasts`) — NOVAS, 2026-08-27
+
+Assistente de IA conversacional **por DONO** (não por instância/conversa,
+diferente do Copiloto Comercial acima) — a "conversa" do Dapinho em si
+**não** tem tabela própria: é uma linha comum em `conversations`/
+`messages` (§1), com `session_id` virtual `dapinho::<ownerId>` e `phone`
+fixo `'dapinho'`, deliberadamente **sem FK pra `instances`** (o Dapinho
+nunca é uma instância WhatsApp real). Só o que é exclusivo do Dapinho
+mora nas 3 tabelas abaixo. Aplicado em produção em 2026-08-27 (banco
+`qqfzfudbeqgldodusoit`, confirmado via `get_advisors` sem achado novo
+relevante).
+
+```mermaid
+erDiagram
+    dapinho_examples {
+        bigserial id PK
+        text owner_id "não FK — Dapinho não tem tabela de conversa própria"
+        text question
+        text answer
+        vector embedding "1536 dim, embedding da PERGUNTA"
+    }
+    dapinho_state {
+        text owner_id PK
+        timestamptz last_generated_at "anti-flood, 15s por dono"
+    }
+    dapinho_broadcasts {
+        bigserial id PK
+        text sent_by "ownerId de quem disparou, nullable"
+        text title
+        text message
+        int recipient_count
+    }
+```
+
+**Por que sem fluxo de aprovação/anonimização manual** (diferente de
+`agent_examples`, §4): ali a IA aprende com conversa de um LEAD/cliente
+(dado de terceiro, exige revisão humana antes de reutilizar); aqui é o
+próprio dono conversando sobre os próprios dados — a interação já nasce
+reutilizável, sem intermediário.
+
 ## 6. Notificações, notas e outras tabelas de suporte
 
 ```mermaid

@@ -66,6 +66,30 @@ checagem de posse à sua maneira (ver item 3 em "Pendências resolvidas
 nesta sessão" abaixo, que é exatamente o gap que motivou consolidar
 nesse helper).
 
+### Dapinho — session_id virtual, isolado por design (2026-08-27)
+
+O Dapinho (assistente de IA por dono, ver README §14.11) usa um
+`session_id` virtual (`dapinho::<ownerId>`) que **nunca** passa pelas
+regras normais de `assertOwnsSession` acima — `src/authz.js::isDapinhoSession`
+intercepta esse padrão antes de qualquer consulta a `instances` e só
+libera acesso quando o `ownerId` embutido no próprio id bate
+**exatamente** com o `ownerId` autenticado da request. Diferente de toda
+sessão real, a conversa do Dapinho **nunca é delegável nem herdável por
+hierarquia** (gestor de departamento não vê o Dapinho de um
+subordinado) — decisão deliberada, é uma conversa pessoal com um
+assistente, não um canal de atendimento compartilhado.
+
+Superfície de dado exposta ao modelo de IA: o snapshot de contexto
+(`src/dapinho.js::buildConversationsSnapshot`) inclui o texto da última
+mensagem de cada conversa do dono — texto potencialmente escrito por um
+lead/contato externo malicioso. Mitigação: cada linha do snapshot é
+marcada explicitamente como `[mensagem do contato]` e o system message
+tem uma guarda textual contra prompt injection (mesmo padrão já usado no
+Copiloto Comercial, `src/insightGenerator.js`) — reduz o risco, não o
+elimina (nenhuma guarda em prompt é 100% à prova de injeção adversarial;
+o dado sensível real, se houver, já está mitigado por essa conversa
+nunca sair do próprio dono).
+
 ### Escopo de "admin" — limitação conhecida, decisão consciente
 
 - **`/admin.html`** e as rotas `GET /admin/*` exigem `ownerId` estar na

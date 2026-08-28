@@ -3,7 +3,45 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-27 — Parte FE: **Pesquisa de
+> aberto). Última atualização: sessão de 2026-08-27 — Parte FF: **Dapinho** —
+> assistente de IA conversacional POR DONO (não por instância/conversa, diferente
+> do Copiloto Comercial e do Agente de IA): uma conversa fixa e fixada como
+> primeira da lista no Chat de cada usuário, com dois papéis: (1) o usuário
+> pergunta livremente e recebe insights sobre as PRÓPRIAS conversas de WhatsApp
+> (ex: "quais leads não respondi hoje"), aprendendo por few-shot a cada interação
+> real (tabela `dapinho_examples`, sem fluxo de aprovação/anonimização manual —
+> diferente do Agente de IA, aqui é o próprio dono vendo dado dele mesmo); (2)
+> recebe avisos manuais de feature nova, disparados pelo super admin numa aba
+> nova do Painel Admin (com botão "Testar comigo" antes do disparo real pra
+> todos). Reaproveita `conversations`/`messages` já existentes — a "conversa" do
+> Dapinho é uma linha normal ali, com `session_id` virtual `dapinho::<ownerId>`
+> (nunca passa por `instances`, ver `src/authz.js::isDapinhoSession`) — tela
+> dedicada e isolada no Chat (`public/chat.html`, não reaproveita
+> openConversation/bindComposer, que assumem WhatsApp real). Reaproveita 100% da
+> infra de IA já existente: `gpt-4o-mini` via `src/openai.js`, embeddings via
+> `src/embeddings.js`, e `store.listConversations` como snapshot de contexto
+> (não `computeMetrics`, mais barato pra esse caso). 2 achados corrigidos por
+> `security-reviewer-agent`: prompt injection (texto de lead malicioso podia
+> virar "instrução" pro Dapinho via snapshot — corrigido com guarda explícita no
+> system message + marcação `[mensagem do contato]`) e race condition no
+> anti-flood (select+insert separados viravam bypass sob paralelismo — corrigido
+> pra um único `UPDATE` condicional atômico). 1 achado corrigido por
+> `design-system-checker-agent` (tooltip `title` nativo no badge de não-lidas do
+> item Dapinho — removido; débito PRÉ-EXISTENTE nos demais ícones da lista de
+> conversas registrado em `licoes-tecnicas.md`, não é regressão desta sessão).
+> **Migração confirmada em produção** (2026-08-27, mesma sessão): o projeto
+> Supabase certo é `qqfzfudbeqgldodusoit` ("Wpp CRM") — dois candidatos errados
+> descartados no caminho (`whatsapp-gateway-dev`, projeto pausado sem relação
+> real; `xkeycore`, projeto pessoal do usuário reativado por engano, sem dano,
+> sem mudança de schema nele). `db/schema.sql` completo (idempotente) aplicado
+> contra o banco certo via Management API — confirmou de quebra uma pendência
+> ANTERIOR nunca aplicada (`satisfaction_surveys`/`satisfaction_responses`, da
+> Parte FE) e criou as 3 tabelas do Dapinho. `get_advisors` rodado: nenhum
+> achado novo relevante (WARNs existentes são pré-existentes do projeto, não
+> introduzidos por esta migração; `unused_index` nas tabelas novas é esperado —
+> zero dado/tráfego ainda).
+>
+> Antes disso, sessão de 2026-08-27 — Parte FE: **Pesquisa de
 > Satisfação**, tab nova no Painel Admin (só super admin) — `admin.html`
 > reestruturado em ABAS DE VERDADE (era uma sequência de painéis empilhados;
 > agora Métricas/Usuários/Instâncias/Feed/Sugestões/Satisfação são abas,

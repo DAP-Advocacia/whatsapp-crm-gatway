@@ -758,6 +758,7 @@
     <button type="button" data-admin-tab="usuarios">Usuários</button>
     <button type="button" data-admin-tab="instancias">Instâncias</button>
     <button type="button" data-admin-tab="feed">Feed</button>
+    <button type="button" data-admin-tab="dapinho">Dapinho</button>
     <button type="button" data-admin-tab="sugestoes">Sugestões</button>
     <button type="button" data-admin-tab="satisfacao">Pesquisa de Satisfação</button>
   </div>
@@ -862,6 +863,20 @@
     <textarea id="feedPostMessage" rows="5" placeholder="Texto do anúncio…" style="margin-bottom:10px;"></textarea>
     <button class="btn" id="feedPostPublishBtn">Publicar no Feed</button>
     <div id="feedPostHistory" style="margin-top:16px;"></div>
+  </div>
+  </div>
+
+  <div id="adminTab-dapinho" class="admin-tab-content" style="display:none">
+  <div class="panel">
+    <h2>Aviso de feature nova pelo Dapinho</h2>
+    <p class="panel-hint">Manda uma mensagem para a conversa fixa do Dapinho de TODO usuário já cadastrado no gateway, avisando de uma feature nova liberada. Disparo é sempre manual — revise o texto com cuidado, a mensagem já vai direto pro Chat de cada um.</p>
+    <input type="text" id="dapinhoBroadcastTitle" placeholder="Título (opcional)" style="margin-bottom:10px;">
+    <textarea id="dapinhoBroadcastMessage" rows="5" placeholder="Texto do aviso…" style="margin-bottom:10px;"></textarea>
+    <div style="display:flex; gap:10px;">
+      <button class="btn secondary" id="dapinhoBroadcastTestBtn" type="button">Testar comigo</button>
+      <button class="btn" id="dapinhoBroadcastBtn">Enviar aviso pelo Dapinho</button>
+    </div>
+    <div id="dapinhoBroadcastHistory" style="margin-top:16px;"></div>
   </div>
   </div>
 
@@ -1999,6 +2014,80 @@
     }
   });
 
+  // ---------------- Aviso de feature nova pelo Dapinho ----------------
+  // Mesmo padrão de "Publicar no Feed do Bitrix" acima, mas em
+  // /api/dapinho (router próprio, ver src/routes/dapinho.js) — não
+  // /api/whatsapp, então usa sua própria base de URL.
+  const DAPINHO_API_BASE = window.location.origin + '/api/dapinho';
+
+  function dapinhoBroadcastHistoryItemHtml(b) {
+    const titleHtml = b.title ? `<b>${escapeHtml(b.title)}</b> — ` : '';
+    return `
+      <div class="kanban-card" style="margin-bottom:8px;">
+        <div class="card-text">${titleHtml}${escapeHtml(b.message)}</div>
+        <div class="card-meta">${new Date(b.createdAt).toLocaleString('pt-BR')} · enviado a ${b.recipientCount} usuário(s)</div>
+      </div>
+    `;
+  }
+
+  async function loadDapinhoBroadcasts() {
+    const container = document.getElementById('dapinhoBroadcastHistory');
+    try {
+      const res = await apiFetch(`${DAPINHO_API_BASE}/admin/broadcasts`);
+      if (!res.ok) throw new Error('falha ao carregar histórico');
+      const data = await res.json();
+      const broadcasts = data.broadcasts || [];
+      container.innerHTML = broadcasts.length
+        ? broadcasts.map(dapinhoBroadcastHistoryItemHtml).join('')
+        : `<div class="empty-state">Nenhum aviso enviado ainda.</div>`;
+    } catch (err) {
+      console.error('[admin] erro ao carregar histórico do Dapinho:', err.message);
+    }
+  }
+
+  async function sendDapinhoBroadcast({ testOnly }) {
+    const titleEl = document.getElementById('dapinhoBroadcastTitle');
+    const messageEl = document.getElementById('dapinhoBroadcastMessage');
+    const message = messageEl.value.trim();
+    if (!message) {
+      if (window.showToast) window.showToast('Escreva o texto do aviso antes de enviar.', 'error');
+      return;
+    }
+    if (!testOnly) {
+      const confirmed = await window.confirmDialog('Enviar este aviso pelo Dapinho pra TODO usuário já cadastrado no gateway? A mensagem vai direto pro Chat de cada um.');
+      if (!confirmed) return;
+    }
+    const testBtn = document.getElementById('dapinhoBroadcastTestBtn');
+    const sendBtn = document.getElementById('dapinhoBroadcastBtn');
+    testBtn.disabled = true;
+    sendBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${DAPINHO_API_BASE}/admin/broadcast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: titleEl.value.trim(), message, testOnly: !!testOnly }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao enviar');
+      if (testOnly) {
+        if (window.showToast) window.showToast('Aviso de teste enviado só pra você — confira na aba Chat.', 'success');
+      } else {
+        if (window.showToast) window.showToast(`Aviso enviado a ${data.recipientCount} usuário(s).`, 'success');
+        titleEl.value = '';
+        messageEl.value = '';
+        loadDapinhoBroadcasts();
+      }
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      testBtn.disabled = false;
+      sendBtn.disabled = false;
+    }
+  }
+
+  document.getElementById('dapinhoBroadcastTestBtn').addEventListener('click', () => sendDapinhoBroadcast({ testOnly: true }));
+  document.getElementById('dapinhoBroadcastBtn').addEventListener('click', () => sendDapinhoBroadcast({ testOnly: false }));
+
   // ---------------- Kanban de Sugestões ----------------
 
   let suggestionsRows = [];
@@ -2450,7 +2539,7 @@
       startPresenceHeartbeat();
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
 
-      await Promise.all([loadUsageMetrics(), loadUsers(), loadInstancesAdmin(), loadSuggestions(), loadFeedPosts()]);
+      await Promise.all([loadUsageMetrics(), loadUsers(), loadInstancesAdmin(), loadSuggestions(), loadFeedPosts(), loadDapinhoBroadcasts()]);
       setInterval(loadUsageMetrics, 30000);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');

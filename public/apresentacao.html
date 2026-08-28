@@ -373,6 +373,18 @@
   .road .road-when{ font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; color:var(--gold-dim); padding-top:2px; }
   .road h3{ font-size:15px; font-weight:600; margin-bottom:4px; }
   .road p{ font-size:13px; color:var(--text-muted); line-height:1.6; }
+  /* Item concluído: NUNCA sai da lista (histórico), só ganha um selo de
+     data + título riscado — decisão confirmada (2026-08-27): "a fazer"
+     continua registrado, marcado como feito, não apagado. */
+  .road.done{ opacity:.72; }
+  .road.done .road-when{ color:var(--text-faint); }
+  .road.done h3{ text-decoration:line-through; text-decoration-color:var(--border-soft); text-decoration-thickness:1px; }
+  .road-done-badge{
+    display:inline-flex; align-items:center; gap:5px; font-size:10.5px; font-weight:600;
+    letter-spacing:.04em; text-transform:uppercase; color:var(--green); margin-left:10px;
+    text-decoration:none; vertical-align:middle;
+  }
+  .road-done-badge svg{ width:12px; height:12px; flex-shrink:0; }
 
   /* closing */
   .closing{ align-items:center; text-align:left; }
@@ -868,6 +880,10 @@
         <div class="eyebrow">08 · Próximos passos</div>
         <h2 class="section-title">O que vem a seguir.</h2>
         <div class="roadmap">
+          <div class="road done">
+            <div class="road-when">Curto prazo <span class="road-done-badge"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Concluído em 27/08/2026</span></div>
+            <div><h3>Dapinho — assistente de IA + avisos de feature nova, direto no Chat</h3><p>Uma conversa fixa e fixada como primeira da lista em todo usuário, chamada "Dapinho" — sem depender de número/chip de WhatsApp real, é uma mensagem inserida diretamente no histórico da conversa dentro do próprio app. Responde perguntas sobre as próprias conversas (leads sem resposta, conversas paradas), aprende com cada interação (few-shot) e também avisa automaticamente quando uma feature nova é liberada, disparado pelo super admin no Painel Admin.</p></div>
+          </div>
           <div class="road">
             <div class="road-when">Curto prazo</div>
             <div><h3>Upgrade de servidor: 2 → 4 vCPUs</h3><p>Ação mais simples e de maior efeito para sustentar o crescimento de 136 para 500 conexões — resolve a margem de CPU descrita na seção de riscos, sem exigir mudança de código.</p></div>

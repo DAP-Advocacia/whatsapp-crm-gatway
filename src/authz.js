@@ -16,6 +16,15 @@ function normalizeSessionIds(raw) {
   return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+// session_id virtual do Dapinho (ver src/dapinho.js) — NUNCA passa por
+// `instances`, de propósito: é uma conversa de sistema, não uma instância
+// WhatsApp real, então não pode ser delegada nem herdada por hierarquia
+// como as demais. Pertence estrita e exclusivamente ao ownerId embutido no
+// próprio id — só o dono citado no sufixo acessa a própria conversa.
+function isDapinhoSession(id) {
+  return typeof id === 'string' && id.startsWith('dapinho::');
+}
+
 // Cobre dono com uma instância só (id === ownerId, ver
 // instances.ensureDefault), dono com várias instâncias, e delegado (não é o
 // dono, mas está em instance_delegates pra essa instância) — nesses dois
@@ -29,6 +38,10 @@ async function assertOwnsSession(sessionIdOrCsv, ownerId) {
   let subordinates = null;
   for (const id of ids) {
     if (id === ownerId) continue;
+    if (isDapinhoSession(id)) {
+      if (id === `dapinho::${ownerId}`) continue;
+      return false; // Dapinho de OUTRO dono — nunca acessível, nem por hierarquia
+    }
     const inst = await instancesStore.get(id);
     if (!inst) return false;
     if (inst.ownerId === ownerId) continue;
@@ -119,4 +132,5 @@ module.exports = {
   requireOwnerMatch,
   requireResourceOwner,
   normalizeSessionIds,
+  isDapinhoSession,
 };

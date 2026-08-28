@@ -1788,6 +1788,71 @@ componente novo inventado.
 
 ---
 
+## 14.11. Dapinho — assistente de IA + avisos de feature nova (Chat)
+
+Conversa fixa e fixada como **primeira da lista** na aba Chat (`/chat.html`),
+uma por dono do Bitrix (não por instância/conversa, diferente do Copiloto
+Comercial e do Agente de IA) — módulo `src/dapinho.js` + router
+`src/routes/dapinho.js` (`/api/dapinho/*`, atrás de `requireAuth`).
+
+Dois papéis no mesmo canal:
+
+1. **Assistente conversacional**: o usuário pergunta livremente sobre as
+   **próprias** conversas de WhatsApp (ex: "quais leads eu não respondi
+   hoje?", "resuma minhas conversas de hoje") e recebe uma resposta gerada
+   por IA (`gpt-4o-mini`, mesmo client `src/openai.js` do resto do
+   projeto) com base num **snapshot real** das conversas acessíveis ao
+   dono (`store.listConversations`, não `computeMetrics` — mais barato de
+   montar e já traz o texto da última mensagem por conversa). Cada
+   interação real (pergunta + resposta) é salva automaticamente em
+   `dapinho_examples` (embedding da pergunta via `text-embedding-3-small`,
+   `src/embeddings.js`) para **few-shot** — próxima pergunta parecida do
+   mesmo dono traz esse par como referência de estilo. Diferente do
+   fluxo de few-shot do Agente de IA, aqui **não há aprovação/anonimização
+   manual**: é o próprio dono vendo dado dele mesmo, não conversa com um
+   lead de terceiro.
+2. **Avisos de feature nova**: o super admin escreve um texto numa aba
+   nova do Painel Admin ("Dapinho") e dispara — a mensagem chega direto na
+   conversa do Dapinho de **todo owner_id já cadastrado** no gateway
+   (`instancesStore.listAllOwnerIds`). Sempre manual (mesma decisão de
+   produto já usada no Feed do Bitrix), com botão **"Testar comigo"** que
+   manda só pro próprio super admin antes do disparo real pra todos.
+
+**Modelagem** — reaproveita as tabelas `conversations`/`messages` já
+existentes (não uma tabela nova): a "conversa" do Dapinho é uma linha
+normal ali, com `session_id` virtual `dapinho::<ownerId>` e `phone` fixo
+`'dapinho'`. **Nunca** referencia `instances(id)` de propósito — o Dapinho
+não é uma instância WhatsApp real, não aparece no dropdown de trocar
+instância, e `src/authz.js::isDapinhoSession` reconhece esse padrão como
+sempre pertencente ao próprio `ownerId` embutido, sem consultar `instances`
+nem permitir hierarquia/delegação (diferente de sessão real).
+
+**Frontend isolado**: `public/chat.html` tem uma tela **dedicada** pro
+Dapinho (`renderDapinhoView`/`askDapinho`/`renderDapinhoMessages`),
+deliberadamente **sem** reaproveitar `openConversation`/`bindComposer` —
+aquele fluxo assume WhatsApp real por trás (status de conexão, mídia,
+gravação de áudio, nota interna, mover de instância), nada disso existe
+pro Dapinho. Reaproveita só as classes CSS de bolha (`.bubble`/
+`.bubble-row`) pra manter a mesma cara visual do resto do Chat. WebSocket
+próprio (`openDapinhoSocket`), independente de qual instância está
+selecionada no filtro.
+
+**Segurança**: o texto de mensagens reais de WhatsApp (potencialmente
+escrito por um lead malicioso) entra no snapshot de contexto — o system
+message do Dapinho tem uma guarda explícita contra prompt injection
+(mesmo padrão do Copiloto Comercial), e cada linha do snapshot marca o
+texto como `[mensagem do contato]`, nunca instrução. Anti-flood por dono
+(`dapinho_state`, 15s) é uma única query atômica (`INSERT ... ON
+CONFLICT ... WHERE`), não select-depois-insert — evita bypass por
+paralelismo.
+
+**Schema**: `dapinho_examples` (few-shot: `owner_id`, `question`,
+`answer`, `embedding vector(1536)`, índice IVFFlat), `dapinho_state`
+(anti-flood, PK `owner_id`), `dapinho_broadcasts` (histórico local de
+avisos manuais disparados, nunca a fonte de verdade de "quem já viu").
+
+---
+
 ## 15. Central de Notificações — Kanban e Calendário (`/notifications.html`)
 
 O sino da sidebar (compartilhado pelas 8 páginas) deixou de abrir um dropdown
@@ -2248,6 +2313,23 @@ global (mesmo padrão de `/api/leads`).
 | `/api/satisfaction-public/:slug` | GET | nenhuma | Devolve `{ title, questions }` de uma pesquisa `client` ativa — 404 genérico se não achar/não for do tipo certo. |
 | `/api/satisfaction-public/:slug` | POST | nenhuma | Body `{ answers, session?, phone? }`. `answers` passa por `sanitizeAnswers` (shape validado contra as perguntas reais, rating 1-5, texto truncado em 2000 chars) antes de gravar. |
 
+### `/api/dapinho/*` (`src/routes/dapinho.js`)
+
+Ver §14.11 — Dapinho. Router PRÓPRIO (não dentro de `routes/whatsapp.js`)
+porque **nunca** toca `sessions`/`SessionManager` (Baileys) — a "conversa"
+do Dapinho não é uma instância WhatsApp real. Rotas não-admin sempre
+operam sobre a própria conversa do `req.ownerId` autenticado, nunca
+recebem `session`/`owner` alheio pra checar.
+
+| Rota | Método | Auth | Uso |
+|---|---|---|---|
+| `/` (raiz) | GET | `requireAuth` | A "conversa" fixa do Dapinho pro dono autenticado (mesmo formato de uma linha de `store.listConversations`), pra injetar no topo da lista do Chat. |
+| `/history` | GET | `requireAuth` | Histórico completo (`store.getHistory`), sem tocar status de conexão/presença (não existe pra uma conversa de sistema). |
+| `/ask` | POST | `requireAuth` | Body `{ question, ownerName? }`. Gera e grava a resposta da IA (snapshot de conversas + few-shot), grava o par pergunta+resposta em `dapinho_examples`. Anti-flood de 15s por dono (`dapinho_state`). |
+| `/mark-read` | POST | `requireAuth` | Marca como lidas as notificações da conversa do Dapinho — chamado ao abrir. |
+| `/admin/broadcast` | POST | `requireSuperAdmin` | Body `{ title?, message, testOnly? }`. Dispara o aviso de feature nova pra todo `owner_id` já cadastrado (`instancesStore.listAllOwnerIds`) — sempre manual. `testOnly:true` manda só pro próprio super admin, sem registrar em `dapinho_broadcasts`. |
+| `/admin/broadcasts` | GET | `requireSuperAdmin` | Histórico local de avisos já disparados. |
+
 ### `/api/settings/*` (`src/routes/settings.js`)
 
 | Rota | Método | Uso |
@@ -2347,8 +2429,10 @@ src/
   exampleAnonymizer.js     # anonymizeTranscript (regex+IA+reverificação) + findPiiLeaks reusada 3x (pós-regex/pós-IA/pós-edição-humana) (§14.8)
   exampleApproval.js       # orquestra os 2 passos de aprovação (reviewCandidate/confirmApproval), grava embedding + agent_examples (§14.8)
   agentExamples.js         # searchRelevantExamples — busca semântica de exemplos aprovados, espelha agentKnowledge.js (§14.8)
+  dapinho.js             # Dapinho: ask/broadcastFeatureAnnouncement/getConversationSummary, snapshot de conversas + few-shot + anti-flood (§14.11)
+  dapinhoExamples.js      # saveExample/searchRelevantExamples — few-shot POR DONO do Dapinho (dapinho_examples), espelha agentExamples.js (§14.11)
   auth.js               # verifica access_token contra o Bitrix de verdade + emite/valida o token de app (sessão + API)
-  authz.js              # confere que session/owner de cada request pertence ao dono autenticado
+  authz.js              # confere que session/owner de cada request pertence ao dono autenticado; isDapinhoSession reconhece o session_id virtual `dapinho::<ownerId>` (§14.11)
   adminAuth.js           # requireSuperAdmin — confere req.ownerId contra SUPER_ADMIN_OWNER_IDS (Painel Admin, §14.5)
   presence.js            # heartbeat()/listPresence() — "quem está com o app aberto agora" (admin_presence)
   pageSessions.js        # trackeamento real de navegação (page_sessions) — open/ping/close + closeStaleSessions + agregações (§14.5)
@@ -2372,6 +2456,7 @@ src/
     cardGroup.js           # rotas REST /api/card-group/* ("Criar grupo" no card do negócio, §15.7)
     internalNotes.js        # rotas REST /api/internal-notes/* (nota interna, nunca visível ao cliente, §15.7)
     agent.js               # rotas REST /api/agent/* (config, upload de base de conhecimento, toggle por conversa, §14.7; fila de exemplos few-shot, §14.8)
+    dapinho.js             # rotas REST /api/dapinho/* (conversa fixa por dono + broadcast de feature nova, §14.11) — NUNCA toca sessions/SessionManager
 public/
   index.html           # frontend da aba do chat (vanilla JS + SDK BX24) — seletor de instância, "Criar grupo"/switch Cliente-Grupo e nota interna no cabeçalho (§15.7)
   dashboard.html        # Análise de Conversas

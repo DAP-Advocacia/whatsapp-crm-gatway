@@ -34,6 +34,7 @@ const { createSettingsRouter } = require('./routes/settings');
 const { createConversationAnalysisRouter } = require('./routes/conversationAnalysis');
 const { createCardGroupRouter } = require('./routes/cardGroup');
 const { createInternalNotesRouter } = require('./routes/internalNotes');
+const { createDapinhoRouter } = require('./routes/dapinho');
 const { createAgentRouter } = require('./routes/agent');
 const { createInsightsRouter } = require('./routes/insights');
 const { createSatisfactionRouter } = require('./routes/satisfaction');
@@ -46,12 +47,13 @@ const contactsStore = require('./contacts');
 const { onCampaignMessageStatus } = require('./campaigns');
 const { logMessageToTimeline, logStatusToTimeline } = require('./bitrix');
 const { verifyBitrixToken, ownerIdFor, issueAppToken, verifyAppToken, requireAuth, TOKEN_TTL_MS } = require('./auth');
-const { assertOwnsSession } = require('./authz');
+const { assertOwnsSession, isDapinhoSession } = require('./authz');
 const instancesStore = require('./instances');
 const instanceHealthStore = require('./instanceHealthStore');
 const agentDispatch = require('./agentDispatch');
 const agentRetryWorker = require('./agentRetryWorker');
 const insightGenerator = require('./insightGenerator');
+const dapinho = require('./dapinho');
 const alertDispatcher = require('./alertDispatcher');
 
 const PORT = process.env.PORT || 3333;
@@ -1011,6 +1013,11 @@ app.use('/api/settings', requireAuth, createSettingsRouter());
 app.use('/api/conversation-analysis', requireAuth, createConversationAnalysisRouter());
 app.use('/api/card-group', requireAuth, createCardGroupRouter({ sessions }));
 app.use('/api/internal-notes', requireAuth, createInternalNotesRouter({ broadcast }));
+// Dapinho (assistente de IA por dono + avisos de feature nova, ver
+// src/dapinho.js) — mesma injeção de broadcast que internalNotes/
+// agentDispatch/insightGenerator acima.
+dapinho.configure({ broadcast });
+app.use('/api/dapinho', requireAuth, createDapinhoRouter());
 // agentDispatch precisa de `sessions`/`broadcast` (pra enviar a resposta
 // gerada e persistir/broadcastar como qualquer mensagem de saída) — módulo
 // separado, sem acesso a essas variáveis por closure, então injetado
@@ -1066,7 +1073,13 @@ server.on('upgrade', async (request, socket, head) => {
     if (!subscribers.has(key)) subscribers.set(key, new Set());
     subscribers.get(key).add(ws);
 
-    ws.send(JSON.stringify({ type: 'status', status: sessions.get(session).getStatus() }));
+    // Dapinho (ver src/authz.js, isDapinhoSession) nunca é uma sessão real
+    // do SessionManager — sessions.get(session) lançaria pra esse
+    // session_id virtual. Sem status de conexão faz sentido (não é
+    // WhatsApp real), então só pula o envio inicial nesse caso.
+    if (!isDapinhoSession(session)) {
+      ws.send(JSON.stringify({ type: 'status', status: sessions.get(session).getStatus() }));
+    }
 
     ws.on('close', () => {
       const set = subscribers.get(key);

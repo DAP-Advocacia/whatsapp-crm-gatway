@@ -656,6 +656,14 @@
   .avatar-status.online{ background: var(--green); }
   .avatar-status.offline{ background: var(--red); }
 
+  /* Dapinho (ver src/dapinho.js) — mesmo tom âmbar (--gold) já usado pra
+     elemento "de sistema" no Chat (nota interna, ver .composer--note),
+     nunca uma cor nova fora da paleta. Ícone em vez de iniciais/foto —
+     não é um contato de verdade. */
+  .dapinho-avatar{ background: rgba(var(--gold-rgb),.14); border-color: rgba(var(--gold-rgb),.4); color: var(--gold); }
+  .conv-item--dapinho{ border-bottom: 1px solid var(--border); }
+  .conv-item--dapinho .conv-item-name{ color: var(--gold); }
+
   /* ======================================================
      Painel de detalhes do contato (dados do Bitrix), à direita da conversa
      ====================================================== */
@@ -895,6 +903,14 @@
   }
   .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
   .bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; }
+
+  /* "Dapinho está digitando" — mesma bolha .theirs, só com 3 pontos
+     pulsando em vez de texto (ver renderDapinhoMessages). */
+  .bubble--typing{ display:flex; align-items:center; gap:4px; padding:12px 14px; }
+  .typing-dot{ width:6px; height:6px; border-radius:50%; background: var(--text-faint); animation: typing-bounce 1.2s infinite ease-in-out; }
+  .typing-dot:nth-child(2){ animation-delay: .15s; }
+  .typing-dot:nth-child(3){ animation-delay: .3s; }
+  @keyframes typing-bounce{ 0%, 60%, 100%{ transform: translateY(0); opacity:.5; } 30%{ transform: translateY(-4px); opacity:1; } }
   .reaction-badge{
     position: absolute; bottom: -11px; right: 10px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
@@ -1023,6 +1039,12 @@
   }
   .composer-tab:hover{ color:var(--text); }
   .composer-tab.active{ color:var(--gold); border-bottom-color:var(--gold); font-weight:600; background: rgba(var(--gold-rgb),.06); }
+  .composer-note-wrap{ display:flex; flex-direction:column; background: rgba(var(--gold-rgb),.04); flex-shrink:0; }
+  .composer-note-desc{
+    display:flex; align-items:flex-start; gap:8px; padding:10px 14px 0;
+    font-size:11.5px; line-height:1.45; color: var(--text-muted);
+  }
+  .composer-note-desc svg{ flex-shrink:0; margin-top:1px; color: var(--gold); }
   .composer--note{ background: rgba(var(--gold-rgb),.04); }
   .composer--note textarea{ border-color: rgba(var(--gold-rgb),.35); background: rgba(var(--gold-rgb),.06); }
   .send-btn--note{ background: var(--gold-dim); }
@@ -2402,6 +2424,7 @@
   // Clicar numa notificação (toast, ou card em /notifications.html via deep
   // link ?session=&phone=) abre a conversa. `target`: { sessionId, phone, contactName }.
   window.__notifNavigate = function (target) {
+    if (target?.isDapinho) { openDapinho(); return; }
     const conv = state.conversations.find((c) => c.sessionId === target.sessionId && c.phone === target.phone);
     openConversation(conv || { sessionId: target.sessionId, phone: target.phone, contactName: target.contactName || target.phone, dealId: null, tags: [] });
   };
@@ -2461,6 +2484,13 @@
     peerPresenceTimer: null,
     replyingTo: null,    // { id, text, type, direction } — mensagem sendo citada na próxima resposta
     inboxSockets: [],   // [{ id, socket }]
+    // Conversa fixa do Dapinho (ver src/dapinho.js) — NUNCA misturada em
+    // `conversations` (não é uma instância WhatsApp real, não passa por
+    // filtro de tag/atendente/arquivamento) — sempre a primeira da lista,
+    // renderizada à parte em renderConvList. `open` é o único jeito de
+    // saber "a conversa aberta agora é o Dapinho" (diferente de `active`,
+    // que continua null enquanto o Dapinho está aberto).
+    dapinho: { conversation: null, messages: [], open: false, asking: false },
   };
 
   // Emoji de reação com o picker aberto no momento (só um por vez) — não
@@ -2536,6 +2566,7 @@
     revealAdminNavItemIfSuperAdmin();
     applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
     fetchMyBitrixName();
+    loadDapinhoConversation(); // fire-and-forget — independe de qual instância está selecionada, nunca atrasa o boot do resto do Chat
     const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(state.ownerId)}`);
     const data = await res.json();
     const list = data.instances || [];
@@ -3086,13 +3117,56 @@
     });
   }
 
+  // =========================================================
+  // Dapinho — assistente de IA por dono + avisos de feature nova (ver
+  // src/dapinho.js). Conversa fixa e fixada como primeira da lista,
+  // independente de instância/filtro/arquivamento — por isso NUNCA entra
+  // em state.conversations, é renderizada à parte em renderConvList.
+  // =========================================================
+  async function loadDapinhoConversation() {
+    try {
+      const res = await apiFetch(`${API_BASE}/dapinho`);
+      if (!res.ok) throw new Error('falha ao carregar o Dapinho');
+      const data = await res.json();
+      state.dapinho.conversation = data.conversation;
+      renderConvList();
+    } catch (err) {
+      console.error('Erro ao carregar o Dapinho:', err);
+    }
+  }
+
+  function renderDapinhoItem() {
+    const c = state.dapinho.conversation;
+    if (!c) return '';
+    const isActive = state.dapinho.open;
+    return `
+      <div class="conv-item conv-item--dapinho ${isActive ? 'active' : ''}" data-dapinho="1">
+        <div class="avatar sm dapinho-avatar">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 2.4 1.2 4.1 2.5 5.3.7.6 1 1.4 1 2.2V18h7v-1.5c0-.8.3-1.6 1-2.2C17.8 13.1 19 11.4 19 9a7 7 0 0 0-7-7Z"/><path d="M9 21h6"/><path d="M10 18v0M14 18v0"/></svg>
+        </div>
+        <div class="conv-item-body">
+          <div class="conv-item-top">
+            <span class="conv-item-name">Dapinho</span>
+            <span class="conv-item-top-right">
+              ${c.unreadCount > 0 ? `<span class="conv-item-unread-dot"></span>` : ''}
+              <span class="conv-item-time">${formatListTime(c.lastAt)}</span>
+            </span>
+          </div>
+          <div class="conv-item-snippet">${c.lastDirection === 'out' ? 'Você: ' : ''}${escapeHtml(c.lastText || '')}</div>
+        </div>
+      </div>
+    `;
+  }
+
   function renderConvList() {
     const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c) && passesGroupsFilter(c));
+    const dapinhoHtml = renderDapinhoItem();
     if (!list.length) {
-      convList.innerHTML = `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
+      convList.innerHTML = dapinhoHtml || `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
+      bindDapinhoItem();
       return;
     }
-    convList.innerHTML = list.map((c) => {
+    convList.innerHTML = dapinhoHtml + list.map((c) => {
       const name = c.contactName || c.phone;
       const isActive = state.active && state.active.sessionId === c.sessionId && state.active.phone === c.phone;
       const mine = c.lastDirection === 'out';
@@ -3134,7 +3208,7 @@
       `;
     }).join('');
 
-    convList.querySelectorAll('.conv-item').forEach((el) => {
+    convList.querySelectorAll('.conv-item[data-session]').forEach((el) => {
       el.addEventListener('click', (e) => {
         if (e.target.closest('[data-archive-toggle], [data-mute-toggle]')) return; // tratado abaixo, não abre a conversa
         const conv = state.conversations.find((c) => c.sessionId === el.dataset.session && c.phone === el.dataset.phone);
@@ -3156,6 +3230,11 @@
         });
       }
     });
+    bindDapinhoItem();
+  }
+
+  function bindDapinhoItem() {
+    convList.querySelector('[data-dapinho]')?.addEventListener('click', openDapinho);
   }
 
   function bumpConversation(sessionId, phone, patch) {
@@ -3502,13 +3581,181 @@
   // vez só. Também prioriza cancelar uma citação em andamento ("Respondendo
   // a…") antes de sair — sem isso, ESC no meio de uma resposta desistida
   // saía da conversa inteira em vez de só limpar a barra de citação (bug
-  // real reportado pelo usuário, ver HANDOFF.md).
+  // real reportado pelo usuário, ver HANDOFF.md). Mesmo tratamento pro
+  // Dapinho aberto (ver closeDapinho abaixo).
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (document.querySelector('.overlay.open')) return;
     if (state.replyingTo) { cancelReply(); return; }
+    if (state.dapinho.open) { closeDapinho(); return; }
     if (state.active) closeConversation();
   });
+
+  // =========================================================
+  // Dapinho — tela de conversa DEDICADA e isolada, deliberadamente NÃO
+  // reaproveitando openConversation/renderConversationView/bindComposer:
+  // aquele fluxo inteiro assume uma instância WhatsApp real por trás
+  // (status de conexão, mídia, gravação de áudio, nota interna, mover de
+  // instância, resumo de IA) — nada disso existe pro Dapinho, e emendar
+  // exceções em cada um desses pontos seria mais arriscado de manter do
+  // que uma tela própria, simples, reaproveitando só as classes CSS de
+  // bolha (.bubble/.bubble-row) já existentes pra manter a mesma cara
+  // visual do resto do Chat.
+  // =========================================================
+  function openDapinho() {
+    state.active = null;
+    state.dapinho.open = true;
+    appEl.classList.add('chat-open');
+    renderConvList();
+    renderDapinhoView();
+    loadDapinhoHistory();
+    markDapinhoRead();
+  }
+
+  function closeDapinho() {
+    state.dapinho.open = false;
+    appEl.classList.remove('chat-open');
+    renderEmptyView();
+    renderConvList();
+  }
+
+  function markDapinhoRead() {
+    const c = state.dapinho.conversation;
+    if (!c || !c.unreadCount) return;
+    c.unreadCount = 0;
+    renderConvList();
+    apiFetch(`${API_BASE}/dapinho/mark-read`, { method: 'POST' })
+      .then((res) => { if (!res.ok) throw new Error('falha ao marcar como lida'); })
+      .catch((err) => console.error('Erro ao marcar o Dapinho como lido:', err));
+  }
+
+  async function loadDapinhoHistory() {
+    const el = document.getElementById('dapinhoMessages');
+    if (el) el.innerHTML = `<div class="state-screen" style="padding:20px"><div class="spinner"></div></div>`;
+    try {
+      const res = await apiFetch(`${API_BASE}/dapinho/history`);
+      if (!res.ok) throw new Error('falha ao carregar histórico do Dapinho');
+      const data = await res.json();
+      state.dapinho.messages = data.messages || [];
+      renderDapinhoMessages();
+    } catch (err) {
+      console.error('Erro ao carregar histórico do Dapinho:', err);
+      if (el) el.innerHTML = `<div class="state-screen"><h3>Falha ao carregar</h3><p>Não foi possível carregar a conversa com o Dapinho.</p></div>`;
+    }
+  }
+
+  function renderDapinhoView() {
+    convView.innerHTML = `
+      <div class="chat-header">
+        <button class="icon-btn back-btn" id="dapinhoBackBtn" title="Voltar para a lista" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="avatar dapinho-avatar">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 0-7 7c0 2.4 1.2 4.1 2.5 5.3.7.6 1 1.4 1 2.2V18h7v-1.5c0-.8.3-1.6 1-2.2C17.8 13.1 19 11.4 19 9a7 7 0 0 0-7-7Z"/><path d="M9 21h6"/><path d="M10 18v0M14 18v0"/></svg>
+        </div>
+        <div class="header-info">
+          <div class="name">Dapinho</div>
+          <div class="meta"><span>Assistente de IA · insights sobre suas conversas</span></div>
+        </div>
+      </div>
+
+      <div class="messages" id="dapinhoMessages"></div>
+
+      <div class="composer" id="dapinhoComposer">
+        <textarea id="dapinhoInput" placeholder="Pergunte ao Dapinho sobre suas conversas…" rows="1"></textarea>
+        <button class="send-btn" id="dapinhoSendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <div class="composer-hint">
+        <span>Enter envia · Shift+Enter quebra linha · o Dapinho só enxerga as conversas de WhatsApp que você já tem acesso.</span>
+      </div>
+    `;
+
+    document.getElementById('dapinhoBackBtn').addEventListener('click', closeDapinho);
+    const input = document.getElementById('dapinhoInput');
+    const btn = document.getElementById('dapinhoSendBtn');
+    const refresh = () => { btn.disabled = !input.value.trim() || state.dapinho.asking; };
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
+      refresh();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!btn.disabled) askDapinho(); }
+    });
+    btn.addEventListener('click', askDapinho);
+    input.focus();
+  }
+
+  async function askDapinho() {
+    const input = document.getElementById('dapinhoInput');
+    const btn = document.getElementById('dapinhoSendBtn');
+    const question = input.value.trim();
+    if (!question || state.dapinho.asking) return;
+    input.value = '';
+    input.style.height = 'auto';
+    state.dapinho.asking = true;
+    btn.disabled = true;
+
+    const optimisticQuestion = { id: 'tmp-' + Date.now(), direction: 'out', type: 'text', text: question, createdAt: new Date().toISOString() };
+    state.dapinho.messages.push(optimisticQuestion);
+    renderDapinhoMessages({ typing: true });
+
+    try {
+      const res = await apiFetch(`${API_BASE}/dapinho/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, ownerName: myBitrixName }),
+      });
+      if (!res.ok) throw new Error('falha ao perguntar ao Dapinho');
+      const data = await res.json();
+      state.dapinho.messages.push(data.answer);
+      if (state.dapinho.conversation) {
+        state.dapinho.conversation.lastText = data.answer.text;
+        state.dapinho.conversation.lastDirection = 'in';
+        state.dapinho.conversation.lastAt = data.answer.createdAt;
+      }
+    } catch (err) {
+      console.error('Erro ao perguntar ao Dapinho:', err);
+      state.dapinho.messages.push({ id: 'err-' + Date.now(), direction: 'in', type: 'text', text: 'Não consegui responder agora — tente de novo em instantes.', createdAt: new Date().toISOString() });
+    } finally {
+      state.dapinho.asking = false;
+      renderDapinhoMessages();
+      renderConvList();
+      btn.disabled = !input.value.trim();
+    }
+  }
+
+  function renderDapinhoMessages({ typing = false } = {}) {
+    const el = document.getElementById('dapinhoMessages');
+    if (!el) return;
+    if (!state.dapinho.messages.length && !typing) {
+      el.innerHTML = `
+        <div class="state-screen" style="padding:20px;">
+          <h3>Pergunte ao Dapinho</h3>
+          <p>Ex: "quais leads eu ainda não respondi?" ou "resuma minhas conversas de hoje".</p>
+        </div>`;
+      return;
+    }
+    const html = state.dapinho.messages.map((msg) => {
+      const mine = msg.direction === 'out';
+      return `
+        <div class="bubble-row ${mine ? 'mine' : 'theirs'}">
+          <div class="bubble">
+            <p>${escapeHtml(msg.text)}</p>
+            <span class="timestamp">${formatTime(msg.createdAt)}</span>
+          </div>
+        </div>
+      `;
+    }).join('') + (typing ? `
+        <div class="bubble-row theirs">
+          <div class="bubble bubble--typing"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
+        </div>
+      ` : '');
+    el.innerHTML = compactHtml(html);
+    el.scrollTop = el.scrollHeight;
+  }
 
   function renderConversationView() {
     const a = state.active;
@@ -3590,11 +3837,17 @@
         </button>
       </div>
 
-      <div class="composer composer--note" id="composerNote" hidden>
-        <textarea id="noteInput" placeholder="Escreva uma nota interna…" rows="1"></textarea>
-        <button class="send-btn send-btn--note" id="noteSendBtn" disabled>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
-        </button>
+      <div class="composer-note-wrap" id="composerNote" hidden>
+        <div class="composer-note-desc">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v12H8l-4 4V4Z"/><path d="M8 9h8M8 12.5h5"/></svg>
+          <span>Nota interna é um recado para a equipe, não uma mensagem enviada ao cliente — use para deixar contexto, combinar um próximo passo com outro atendente ou registrar uma decisão sobre o atendimento. Fica só visível a quem já tem acesso a esta conversa.</span>
+        </div>
+        <div class="composer composer--note">
+          <textarea id="noteInput" placeholder="Escreva uma nota interna…" rows="1"></textarea>
+          <button class="send-btn send-btn--note" id="noteSendBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+          </button>
+        </div>
       </div>
 
       <div class="composer-hint" id="composerHint">
@@ -4951,6 +5204,50 @@
     state.inboxSockets = [];
   }
 
+  // Socket dedicado do Dapinho — independente de state.sessionIds (não
+  // muda ao trocar de instância no dropdown, diferente dos sockets acima),
+  // aberto uma única vez no boot. Cobre principalmente o aviso de feature
+  // nova chegando com a tela aberta em OUTRA conversa/aba (a própria
+  // pergunta+resposta já aparece direto pela resposta de POST /ask, sem
+  // depender do socket).
+  let dapinhoSocket = null;
+  function openDapinhoSocket() {
+    if (!state.ownerId) return;
+    const dapinhoSessionId = `dapinho::${state.ownerId}`;
+    let socket;
+    try {
+      const wsUrl = API_BASE.replace(/^http/, 'ws') + `/stream?session=${encodeURIComponent(dapinhoSessionId)}&token=${encodeURIComponent(appToken)}`;
+      socket = new WebSocket(wsUrl);
+    } catch (err) {
+      console.warn('Realtime do Dapinho indisponível:', err);
+      return;
+    }
+    socket.onmessage = (event) => {
+      let payload;
+      try { payload = JSON.parse(event.data); } catch { return; }
+      if (payload.type !== 'message') return;
+
+      if (state.dapinho.open) {
+        const alreadyShown = state.dapinho.messages.some((m) => m.id === payload.message.id);
+        if (!alreadyShown) { state.dapinho.messages.push(payload.message); renderDapinhoMessages(); }
+      } else if (payload.message.direction === 'in') {
+        notifyNewMessage('Dapinho', payload.message, { isDapinho: true });
+      }
+
+      if (state.dapinho.conversation) {
+        state.dapinho.conversation.lastText = payload.message.text ?? null;
+        state.dapinho.conversation.lastDirection = payload.message.direction;
+        state.dapinho.conversation.lastAt = payload.message.createdAt;
+        if (!state.dapinho.open && payload.message.direction === 'in') {
+          state.dapinho.conversation.unreadCount = (state.dapinho.conversation.unreadCount || 0) + 1;
+        }
+        renderConvList();
+      }
+    };
+    socket.onclose = () => { setTimeout(openDapinhoSocket, 4000); };
+    dapinhoSocket = socket;
+  }
+
   // =========================================================
   // Boot
   // =========================================================
@@ -4958,13 +5255,18 @@
     renderEmptyView();
     try {
       await initInstances();
+      openDapinhoSocket();
       // Deep link vindo de fora do Chat (ex: card em /notifications.html) —
       // mesmo fallback de window.__notifNavigate: usa a conversa já
       // carregada se achar (nome/tags certos), senão abre só com o telefone cru.
+      // session começando com 'dapinho::' (ver src/authz.js) é sempre a
+      // conversa do Dapinho — nunca abre como instância WhatsApp comum.
       const params = new URLSearchParams(location.search);
       const dlSession = params.get('session');
       const dlPhone = params.get('phone');
-      if (dlSession && dlPhone) {
+      if (dlSession && dlSession.startsWith('dapinho::')) {
+        openDapinho();
+      } else if (dlSession && dlPhone) {
         const conv = state.conversations.find((c) => c.sessionId === dlSession && c.phone === dlPhone);
         openConversation(conv || { sessionId: dlSession, phone: dlPhone, contactName: dlPhone, dealId: null, tags: [] });
       }

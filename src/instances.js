@@ -167,6 +167,15 @@ async function listAll() {
   return rows;
 }
 
+// Todo owner_id distinto já cadastrado (tem ao menos 1 instância) — usado
+// pelo broadcast manual do Dapinho (ver src/dapinho.js), pra avisar "todo
+// usuário que já usa o gateway" sem depender de uma lista à parte de
+// funcionários do Bitrix (que incluiria gente que nunca usou o app).
+async function listAllOwnerIds() {
+  const { rows } = await pool.query(`select distinct owner_id as "ownerId" from instances`);
+  return rows.map((r) => r.ownerId);
+}
+
 module.exports = {
   listByOwner,
   get,
@@ -180,4 +189,5 @@ module.exports = {
   removeDelegate,
   listAccessible,
   listAll,
+  listAllOwnerIds,
 };

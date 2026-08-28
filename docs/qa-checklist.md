@@ -104,11 +104,24 @@ if not exists` — o schema inteiro é idempotente, seguro de rodar de novo
 a qualquer momento sem duplicar nada.
 
 **Quando o MCP do Supabase não tem acesso ao projeto de produção**
-(cenário real, Parte EW, 2026-08-27): o token MCP disponível só enxerga
-a organização errada, sem acesso ao banco real do gateway. Nesse caso, a
-validação do DDL fica só em **revisão estática cuidadosa do SQL**
-(conferir sintaxe, tipos, FKs, defaults manualmente) — `db/migrate.js`
+(cenário real, Partes EW e FF, 2026-08-27): o token MCP/`SUPABASE_ACCESS_TOKEN`
+disponível na sessão pode enxergar a organização errada (ou nenhuma),
+sem acesso ao banco real do gateway. Nesse caso, a validação do DDL fica
+só em **revisão estática cuidadosa do SQL** (conferir sintaxe, tipos,
+FKs, defaults manualmente) até resolver o acesso — `db/migrate.js`
 aplica de verdade no próximo deploy normal na VPS, como sempre.
+
+**Resolução real que funcionou (Parte FF)**: o usuário gerou um Personal
+Access Token novo em supabase.com/dashboard/account/tokens, **confirmando
+antes que a conta logada ao gerar era a dona do projeto certo**
+(checável comparando o `ref` do projeto de produção contra
+`GET /v1/projects` com o token novo) — dois tokens anteriores apontavam
+pra contas/organizações erradas (um deles chegou a reativar um projeto
+Supabase PESSOAL do usuário por engano, sem dano, mas confirma o risco de
+agir antes de validar a identidade do projeto). **Nunca aplicar migração
+sem antes confirmar por query real** que um conjunto de tabelas já
+conhecidas do projeto (ex: `conversations`, `messages`, `instances`)
+existe no banco — nome do projeto sozinho não é confiável o bastante.
 
 ## 5. Teste end-to-end contra produção (quando necessário)
 
