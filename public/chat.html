@@ -1580,6 +1580,9 @@
   const AGENT_API_BASE = window.location.origin + '/api/agent';
   // Rotas do Copiloto Comercial / insights de IA (routes/insights.js).
   const INSIGHTS_API_BASE = window.location.origin + '/api/insights';
+  // Rotas do Dapinho (routes/dapinho.js) — router próprio, mesmo motivo de
+  // API_ROOT/AGENT_API_BASE acima (nunca dentro de /api/whatsapp).
+  const DAPINHO_API_BASE = window.location.origin + '/api/dapinho';
   const FETCH_HEADERS = { 'ngrok-skip-browser-warning': 'true' };
 
   let appToken = null;
@@ -3125,7 +3128,7 @@
   // =========================================================
   async function loadDapinhoConversation() {
     try {
-      const res = await apiFetch(`${API_BASE}/dapinho`);
+      const res = await apiFetch(DAPINHO_API_BASE);
       if (!res.ok) throw new Error('falha ao carregar o Dapinho');
       const data = await res.json();
       state.dapinho.conversation = data.conversation;
@@ -3624,7 +3627,7 @@
     if (!c || !c.unreadCount) return;
     c.unreadCount = 0;
     renderConvList();
-    apiFetch(`${API_BASE}/dapinho/mark-read`, { method: 'POST' })
+    apiFetch(`${DAPINHO_API_BASE}/mark-read`, { method: 'POST' })
       .then((res) => { if (!res.ok) throw new Error('falha ao marcar como lida'); })
       .catch((err) => console.error('Erro ao marcar o Dapinho como lido:', err));
   }
@@ -3633,7 +3636,7 @@
     const el = document.getElementById('dapinhoMessages');
     if (el) el.innerHTML = `<div class="state-screen" style="padding:20px"><div class="spinner"></div></div>`;
     try {
-      const res = await apiFetch(`${API_BASE}/dapinho/history`);
+      const res = await apiFetch(`${DAPINHO_API_BASE}/history`);
       if (!res.ok) throw new Error('falha ao carregar histórico do Dapinho');
       const data = await res.json();
       state.dapinho.messages = data.messages || [];
@@ -3703,7 +3706,7 @@
     renderDapinhoMessages({ typing: true });
 
     try {
-      const res = await apiFetch(`${API_BASE}/dapinho/ask`, {
+      const res = await apiFetch(`${DAPINHO_API_BASE}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, ownerName: myBitrixName }),
