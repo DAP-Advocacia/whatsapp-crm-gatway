@@ -697,6 +697,13 @@ sessions.startAllExisting();
 // já chegou na hora marcada e dispara sozinho
 require('./scheduler').startPolling(sessions);
 
+// Varre a cada ~20min os negócios vinculados a conversas em busca de
+// mudança pra etapa "ganho" — dispara o grupo automático do Agente de
+// IA no FECHAMENTO do negócio (mudança de gatilho, antes disparava na
+// criação do card — ver HANDOFF). Sem retroatividade: só mudança
+// observada a partir de agora conta.
+require('./dealStagePoller').startPolling();
+
 // Fecha sozinha page_sessions "órfãs" (aba fechada sem o beacon de saída
 // disparar — crash, queda de luz, ver HANDOFF Parte CO) — sem isto,
 // ficariam com ended_at null pra sempre. Intervalo de 60s (mais frequente

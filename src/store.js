@@ -212,6 +212,20 @@ async function getDealForPhone(sessionId, phone) {
   return rows[0]?.deal_id || null;
 }
 
+// Todas as conversas com negócio vinculado, cross-instância — usado por
+// src/dealStagePoller.js pra saber quais negócios varrer periodicamente
+// em busca de mudança de etapa (grupo automático no fechamento). Uma
+// linha por (session_id, phone, deal_id) — um mesmo deal_id não deveria
+// se repetir (é 1 negócio por conversa), mas o poller já lida com isso
+// via upsert em deal_stage_watch (PK deal_id).
+async function listConversationsWithDeal() {
+  const { rows } = await pool.query(
+    `select session_id as "sessionId", phone, deal_id as "dealId"
+     from conversations where deal_id is not null`
+  );
+  return rows;
+}
+
 // Arquivar/desarquivar (tela Chat) — só organiza a lista (some da principal,
 // aparece em "Arquivadas"); não afeta recebimento/envio. Só faz sentido numa
 // conversa que já existe, por isso é um update direto (sem
@@ -1031,6 +1045,7 @@ module.exports = {
   getMessageForReply,
   setDealForPhone,
   getDealForPhone,
+  listConversationsWithDeal,
   setConversationArchived,
   assignConversation,
   getAssignmentPeriods,

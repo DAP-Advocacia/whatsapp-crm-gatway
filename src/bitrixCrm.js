@@ -183,10 +183,48 @@ async function getStageDistribution(dealIds) {
     .sort((a, b) => a.sort - b.sort);
 }
 
+// Busca ID/etapa/categoria de um lote de negócios de uma vez — mesmo
+// padrão de paginação em lotes de 50 já usado por getStageDistribution
+// acima, extraído aqui pra ser reaproveitado por
+// src/dealStagePoller.js sem duplicar a lógica de chunking.
+async function listDealStages(dealIds) {
+  const uniqueIds = [...new Set(dealIds)].filter(Boolean);
+  if (!uniqueIds.length) return [];
+
+  const chunks = [];
+  for (let i = 0; i < uniqueIds.length; i += 50) chunks.push(uniqueIds.slice(i, i + 50));
+
+  const deals = [];
+  for (const chunk of chunks) {
+    const result = await safeCall('crm.deal.list', {
+      filter: { '@ID': chunk },
+      select: ['ID', 'STAGE_ID', 'CATEGORY_ID'],
+    });
+    if (result) deals.push(...result);
+  }
+  return deals;
+}
+
+// Resolve o STAGE_ID de "ganho" (negócio fechado) de uma categoria —
+// usado por src/dealStagePoller.js pra saber quando disparar o grupo
+// automático. Bitrix nomeia o estágio de sucesso terminando em "WON"
+// dentro de cada categoria (ex: "C628:WON" — categoria != 0 sempre
+// prefixa "C<id>:"; a categoria padrão 0 usa só "WON"), então resolve
+// dinamicamente via crm.dealcategory.stage.list em vez de hardcodar o
+// formato exato. Best-effort: null se a categoria não tiver estágio de
+// ganho (não deveria acontecer, mas nunca lança).
+async function getWonStageId(categoryId) {
+  const stages = await safeCall('crm.dealcategory.stage.list', { id: categoryId });
+  const won = (stages || []).find((s) => String(s.STATUS_ID || '').endsWith(':WON') || s.STATUS_ID === 'WON');
+  return won ? won.STATUS_ID : null;
+}
+
 module.exports = {
   ensureBitrixContact,
   createDealForLead,
   createBitrixArtifactsForLead,
   createDealForNewLead,
   getStageDistribution,
+  listDealStages,
+  getWonStageId,
 };

@@ -1539,27 +1539,35 @@ texto difícil de ler.
   resposta da IA ao lead — a tag aparece na lista de conversas do Chat
   em tempo real (WebSocket `type: 'tags-updated'`), sem precisar de
   reload manual.
-- **Grupo de WhatsApp automático** (Parte EV): junto com o card, cria
-  também um grupo de WhatsApp reunindo o **cliente** (o próprio lead) e
-  o **dono da instância** (celular cadastrado no Bitrix, `PERSONAL_MOBILE`).
-  Nome do grupo = mesmo título do card ("LP: `<nome>`" ou "Campanha").
-  O grupo é gravado com `source='card'` + `deal_id` (mesma marca da
-  criação manual pela aba DapZap, §15.7) — herda o bypass que faz
-  mensagem recebida de grupo ser salva em vez de descartada, e o switch
-  Cliente/Grupo no card. Best-effort: se o dono não tiver celular no
-  Bitrix, o grupo é criado só com o cliente; se a instância estiver
-  offline no momento, o grupo simplesmente não é criado (o card fica).
-  Idempotente (não cria um segundo grupo pro mesmo negócio). **Só** pros
-  cards criados pelo Agente de IA — card de LP/Campanha sem o agente
-  ativo continua sem grupo automático (a criação manual pela aba DapZap
-  segue existindo pra esses). **Rastro visível** (Parte EY,
-  2026-08-27): a criação avisa em 2 lugares — comentário na timeline
-  do NEGÓCIO no Bitrix (`logStatusToTimeline`, mesmo mecanismo de
-  `crm.timeline.comment.add` já usado pra registrar mensagens/status de
-  entrega) e uma **nota interna** (nunca visível ao cliente) na
-  conversa do lead no Chat, rotulada "Nota interna · Agente de IA".
-  Ambos best-effort/fire-and-forget — falha em qualquer um dos dois não
-  desfaz o grupo já criado.
+- **Grupo de WhatsApp automático** (Parte EV, gatilho mudado na Parte FD):
+  dispara **quando o negócio FECHA** (atinge a etapa de "ganho" no
+  Bitrix) — não mais na criação do card. Cria um grupo de WhatsApp
+  reunindo o **cliente** (o próprio lead) e o **dono da instância**
+  (celular cadastrado no Bitrix, `PERSONAL_MOBILE`). Nome do grupo =
+  mesmo título do card ("LP: `<nome>`" ou "Campanha"). O grupo é gravado
+  com `source='card'` + `deal_id` (mesma marca da criação manual pela
+  aba DapZap, §15.7) — herda o bypass que faz mensagem recebida de
+  grupo ser salva em vez de descartada, e o switch Cliente/Grupo no
+  card. Best-effort: se o dono não tiver celular no Bitrix, o grupo é
+  criado só com o cliente; se a instância estiver offline no momento, o
+  grupo simplesmente não é criado. Idempotente (não cria um segundo
+  grupo pro mesmo negócio). **Só** pros cards criados pelo Agente de IA.
+  **Rastro visível** (Parte EY, 2026-08-27): a criação avisa em 2
+  lugares — comentário na timeline do NEGÓCIO no Bitrix
+  (`logStatusToTimeline`) e uma **nota interna** (nunca visível ao
+  cliente) na conversa do lead no Chat, rotulada "Nota interna · Agente
+  de IA". Ambos best-effort/fire-and-forget.
+  - **Detecção do fechamento** (Parte FD, `src/dealStagePoller.js`): o
+    Bitrix não avisa o gateway quando um negócio muda de etapa (sem
+    webhook de evento configurado) — um poller próprio varre a cada
+    ~20min todos os negócios vinculados a conversas (`deal_id`
+    preenchido), compara a etapa atual com a última vista
+    (`deal_stage_watch`), e dispara o grupo só quando detecta a MUDANÇA
+    pra etapa de "ganho" (`STAGE_ID` terminando em `:WON`, resolvido
+    dinamicamente por categoria via `crm.dealcategory.stage.list`, nunca
+    hardcoded). **Sem retroatividade**: negócio nunca visto antes tem a
+    etapa atual gravada como baseline sem disparar nada — só conta
+    mudança observada a partir de agora.
 - **Mensagem de sistema**: texto livre por instância, complementa (não
   substitui) uma persona padrão embutida — em branco, a IA usa só a
   persona padrão.

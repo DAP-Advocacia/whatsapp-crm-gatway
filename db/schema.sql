@@ -1231,3 +1231,66 @@ create table if not exists push_subscriptions (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_push_subscriptions_owner on push_subscriptions (owner_id);
+
+-- ================================================================
+-- Grupo automático do Agente de IA passa a disparar no FECHAMENTO do
+-- negócio (etapa de "ganho" no Bitrix), não mais na criação do card
+-- (ver HANDOFF Parte EV/EY para o comportamento antigo, e a parte mais
+-- recente pra esta mudança de gatilho). Como o Bitrix não avisa o
+-- gateway quando um negócio muda de etapa (nenhum webhook de evento
+-- configurado — só o webhook de ENTRADA que o gateway já usa pra
+-- CHAMAR o Bitrix), src/dealStagePoller.js varre periodicamente os
+-- negócios vinculados a conversas e compara com a última etapa vista
+-- aqui. `last_seen_stage_id` nulo = negócio nunca observado antes —
+-- nesse caso a etapa atual vira baseline SEM disparar o grupo (decisão
+-- confirmada: sem retroatividade, só dispara em negócio que o poller
+-- observar MUDAR pra "ganho" a partir de agora).
+-- ================================================================
+create table if not exists deal_stage_watch (
+  deal_id text primary key,
+  last_seen_stage_id text,
+  checked_at timestamptz not null default now()
+);
+
+-- ================================================================
+-- Pesquisa de Satisfação — tab nova no Painel Admin, restrita a super
+-- admin. Dois públicos possíveis por survey: `client` (cliente final,
+-- responde via link público /pesquisa/<slug>, sem login — mesmo padrão
+-- de lead_forms) e `internal` (atendente/usuário do próprio sistema,
+-- responde autenticado). `questions` é um array de até 5 perguntas fixas
+-- (nunca builder livre tipo lead_forms) — cada uma
+-- {id, text, type: 'rating'|'text'}.
+-- ================================================================
+create table if not exists satisfaction_surveys (
+  id bigserial primary key,
+  owner_id text not null,
+  audience text not null check (audience in ('client', 'internal')),
+  slug text unique,
+  title text not null,
+  questions jsonb not null,
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_satisfaction_surveys_owner on satisfaction_surveys (owner_id);
+
+-- Uma resposta — `session_id`/`phone` preenchidos só quando o
+-- respondente é um CLIENTE vinculado a uma conversa (permite cruzar com
+-- instância/atendente depois); `respondent_owner_id` preenchido só
+-- quando é o ATENDENTE interno respondendo (autenticado). Nunca os dois
+-- ao mesmo tempo — um survey é de um público só (`audience` acima).
+create table if not exists satisfaction_responses (
+  id bigserial primary key,
+  survey_id bigint not null references satisfaction_surveys(id) on delete cascade,
+  session_id text,
+  phone text,
+  respondent_owner_id text,
+  answers jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_satisfaction_responses_survey on satisfaction_responses (survey_id, created_at);
+
+-- Vínculo opcional entre uma campanha de disparo (campaigns, já
+-- existente) e o survey que ela está divulgando — permite a métrica
+-- "quantos da campanha X responderam". Nullable: uma campanha comum
+-- (não ligada a nenhuma pesquisa) nunca preenche isso.
+alter table campaigns add column if not exists satisfaction_survey_id bigint references satisfaction_surveys(id) on delete set null;

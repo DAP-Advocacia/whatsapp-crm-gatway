@@ -90,17 +90,14 @@ async function handleNewLeadMessage({ sessionId, phone, pushName, leadMessageTex
       if (origin.submissionId && (dealId || contactId)) {
         await leadForms.setSubmissionBitrixIds(origin.submissionId, { dealId, contactId });
       }
-      // Grupo de WhatsApp automático pro card criado pelo Agente de IA —
-      // aninhado aqui porque depende do `dealId` (o grupo é gravado com
-      // source='card' + deal_id, mesma marca que a criação manual do
-      // card usa). Best-effort próprio: qualquer falha aqui (dono sem
-      // celular no Bitrix, instância que caiu entre a mensagem e agora,
-      // groupCreate recusado) é logada e ignorada — nunca afeta o card
-      // já criado nem a resposta da IA.
-      if (dealId) {
-        await createCardGroupForNewLead({ sessionId, ownerId, phone, dealId, origin })
-          .catch((err) => console.error(`[agent-dispatch] falha ao criar grupo do card (${sessionId}/${phone}):`, err.message));
-      }
+      // Grupo de WhatsApp automático: NÃO dispara mais aqui (na criação
+      // do card) — mudança de gatilho: agora só dispara quando o
+      // negócio FECHA, detectado por src/dealStagePoller.js (varredura
+      // periódica de etapa, já que o Bitrix não avisa o gateway quando
+      // um negócio muda de etapa). `createCardGroupForNewLead` continua
+      // existindo e exportada, só passa a ser chamada de lá — o
+      // comportamento da função em si (participantes, idempotência,
+      // rastro na timeline/nota interna) não muda.
     })
     .catch((err) => console.error(`[agent-dispatch] falha ao criar negócio no Bitrix (${sessionId}/${phone}):`, err.message));
 
@@ -298,4 +295,8 @@ async function sendAgentReply(sessionId, phone, text) {
   _broadcast(sessionId, phone, { type: 'message', message });
 }
 
-module.exports = { configure, handleNewLeadMessage, dispatchAgentReply, resolveLeadOrigin };
+// createCardGroupForNewLead exportada pra ser reaproveitada por
+// src/dealStagePoller.js (grupo automático disparado no fechamento do
+// negócio, não mais só na criação do card — ver HANDOFF, mudança de
+// gatilho). Assinatura/comportamento não mudam.
+module.exports = { configure, handleNewLeadMessage, dispatchAgentReply, resolveLeadOrigin, createCardGroupForNewLead };

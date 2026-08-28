@@ -3,7 +3,25 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-27 — Parte EW: **Copiloto
+> aberto). Última atualização: sessão de 2026-08-27 — Parte FD: **grupo
+> automático do Agente de IA muda de gatilho** — disparava na criação do card,
+> agora dispara só quando o negócio **fecha** (etapa de "ganho" no Bitrix).
+> Precisou de um poller novo (`src/dealStagePoller.js`, ~20min) porque o Bitrix
+> não avisa o gateway de mudança de etapa (sem webhook de evento configurado).
+> Sem retroatividade — só negócio que fechar A PARTIR DE AGORA ganha o grupo.
+> Também em andamento na mesma sessão: **Pesquisa de Satisfação** (tab nova no
+> Painel Admin, só super admin, com abas de verdade substituindo os painéis
+> empilhados de antes) — ver Parte FE quando concluída.
+>
+> Antes disso, mesma sessão (retomada) — commits publicados por outra sessão
+> enquanto o usuário estava fora, sincronizados via fast-forward sem conflito
+> (Partes EX a FC): schema do Copiloto Comercial aplicado em produção de
+> verdade (Parte EX); grupo automático ganhou rastro visível + aba "Grupos" no
+> Chat + restrição a piloto/super admin (Parte EY); correção de bug visual de
+> outline (Parte FB); Alerta de instância caída ganhou 3 canais reais — Web
+> Push, WhatsApp de sistema, e-mail via Resend (Parte FC).
+>
+> Antes disso, sessão de 2026-08-27 — Parte EW: **Copiloto
 > Comercial**, insights de IA em tempo real durante o atendimento (diferente do
 > Agente de IA — aqui a IA sugere pro atendente humano, nunca responde sozinha).
 > Só instâncias marcadas "comercial" (novo toggle, nasce desligado); a cada
@@ -10679,4 +10697,73 @@ configurada e 2 instâncias reais do mesmo dono; confirmar em produção
 real que `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` também estão
 configuradas lá (mesmo par gerado localmente — gerar de novo
 invalidaria subscriptions já salvas).
+
+### Parte FD — Grupo automático muda de gatilho: dispara no FECHAMENTO do negócio, não mais na criação do card (2026-08-27)
+
+Pedido do usuário: o grupo de WhatsApp automático do Agente de IA (Parte
+EV/EY) disparava no momento em que o card do lead novo era criado — bem
+no início do atendimento. Passou a disparar só quando o negócio **fecha**
+(atinge a etapa de "ganho" no Bitrix).
+
+**Achado central, confirmado por Explore antes de implementar**: o
+Bitrix não avisa o gateway quando um negócio muda de etapa — não existe
+NENHUM webhook de evento configurado (`ONCRMDEALUPDATE` etc, zero
+ocorrências no projeto), só o webhook de ENTRADA que o gateway já usa
+pra CHAMAR o Bitrix. Também não havia nenhum poller de negócio (o único
+poller existente, `src/scheduler.js`, é exclusivo de campanhas
+agendadas). Precisou ser construído do zero.
+
+**`src/agentDispatch.js`**: removida a chamada de
+`createCardGroupForNewLead` de dentro de `handleNewLeadMessage` (não
+dispara mais na criação do card) — a função em si não mudou nada
+(participantes, idempotência, rastro na timeline/nota interna todos
+preservados), só passou a ser **exportada** pra ser chamada de outro
+lugar.
+
+**`src/dealStagePoller.js`** (novo) — `startPolling(intervalMs = 20min)`,
+mesmo padrão `setInterval` de `scheduler.js`:
+1. Busca todos os `deal_id` distintos vinculados a conversas
+   (`store.listConversationsWithDeal`, nova).
+2. Consulta a etapa atual de todos de uma vez via `crm.deal.list` em
+   lotes de 50 (`bitrixCrm.listDealStages`, extraída da lógica de
+   chunking que `getStageDistribution` já tinha).
+3. Resolve o `STAGE_ID` de "ganho" da categoria 628 dinamicamente via
+   `crm.dealcategory.stage.list` (`bitrixCrm.getWonStageId`) — Bitrix
+   nomeia esse estágio terminando em `:WON` por categoria; nunca
+   hardcoded, cacheado em memória por boot do processo (não muda com
+   frequência).
+4. Pra cada negócio: se é a **primeira vez** que o poller vê aquele
+   `deal_id` (`deal_stage_watch` sem linha), grava a etapa atual como
+   **baseline sem disparar nada** — decisão confirmada com o usuário:
+   **sem retroatividade**, só MUDANÇA observada a partir de agora conta
+   (negócio que já tinha fechado antes desta feature existir não ganha
+   grupo retroativo). Se já visto antes e a etapa mudou pra "ganho",
+   dispara `agentDispatch.createCardGroupForNewLead` (reaproveitada
+   1:1, já idempotente via `getCardGroupForDeal` — protege contra
+   disparo duplicado mesmo numa corrida). Se mudou mas não é "ganho",
+   só atualiza a etapa vista, sem disparar.
+
+**`src/dealStageStore.js`** (novo) — CRUD de `deal_stage_watch`
+(`deal_id` PK, `last_seen_stage_id`, `checked_at`) — mesmo padrão de
+tabela de estado já usado por `conversation_insight_state` do Copiloto
+Comercial.
+
+**`src/store.js`**: nova `listConversationsWithDeal()` — todas as
+conversas com `deal_id` preenchido, cross-instância.
+
+**`src/bitrixCrm.js`**: `listDealStages(dealIds)` (chunking extraído de
+`getStageDistribution`) e `getWonStageId(categoryId)`, ambas exportadas.
+
+**Validação**: harness de extração de função via regex (mesmo padrão já
+usado nas features anteriores), 9 asserções cobrindo os 6 cenários —
+primeira observação (baseline, sem disparo), sem mudança de etapa,
+mudança pra etapa que não é "ganho", mudança pra "ganho" (dispara 1x,
+params corretos), já em "ganho" sem mudança (não redispara), negócio não
+encontrado no Bitrix (ignora sem lançar). `node -c` em todos os arquivos
+tocados. **Sem teste com Bitrix real** — mesma limitação de ambiente das
+features anteriores (sem acesso a produção a partir daqui).
+
+**Grupo manual** (`src/routes/cardGroup.js`, aba DapZap) não muda em
+nada — continua criável a qualquer momento por clique, sem relação com
+etapa de funil.
 
