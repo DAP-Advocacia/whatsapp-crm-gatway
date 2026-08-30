@@ -739,6 +739,18 @@
   a.contact-doc-item:hover{ background:var(--surface-2); color:var(--text); }
   .contact-doc-item svg{ width:13px; height:13px; flex-shrink:0; color:var(--text-faint); }
   .contact-doc-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Paginação de "Documentos anexados" (ver renderDocumentsSection) —
+     compacta, no mesmo espírito visual do resto do painel de detalhes
+     (fonte pequena, sem os botões .btn grandes do resto do app, que
+     destoariam deste painel lateral estreito). */
+  .contact-docs-pager{ display:flex; align-items:center; justify-content:space-between; margin-top:6px; padding-top:6px; border-top:1px solid var(--border); }
+  .contact-docs-pager-btn{
+    background:none; border:none; color:var(--gold); cursor:pointer; font-size:11px; font-family:inherit;
+    padding:2px 4px; border-radius:4px;
+  }
+  .contact-docs-pager-btn:hover{ background:rgba(var(--gold-rgb),.1); }
+  .contact-docs-pager-btn:disabled{ color:var(--text-faint); cursor:not-allowed; }
+  .contact-docs-pager-info{ font-size:10.5px; color:var(--text-faint); }
   .contact-fields{ display:flex; flex-direction:column; padding:10px; gap:2px; }
   .contact-field{
     display:flex; align-items:flex-start; gap:10px;
@@ -826,6 +838,15 @@
   /* ---------- Mensagens ---------- */
   .messages{
     flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 4px;
+    /* justify-content:flex-end ancora as mensagens embaixo (perto do
+       composer) quando a conversa tem poucas mensagens e não preenche a
+       altura toda — mesmo comportamento do WhatsApp/Telegram reais (o
+       vazio sobra no TOPO, não embaixo). Sem isso, o padrão do flexbox
+       (flex-start) deixava um vazio enorme entre a última mensagem e o
+       composer, reportado pelo usuário com print. Continua funcionando
+       normalmente quando há muitas mensagens (o conteúdo já preenche a
+       altura e cresce pra cima com o scroll, como sempre). */
+    justify-content: flex-end;
     background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
     background-size: 22px 22px;
   }
@@ -1470,7 +1491,7 @@
 
 <div class="credit-row">
   <a class="credit-badge" href="https://www.linkedin.com/in/danielcostads/" target="_blank" rel="noopener">
-    <span class="dot"></span> Desenvolvido por Daniel Costa e Gabriel Alves
+    <span class="dot"></span> Desenvolvido por Daniel Costa
   </a>
 </div>
 
@@ -2049,6 +2070,7 @@
     if (historyBtn) historyBtn.addEventListener('click', openSummaryHistoryModal);
     const markExampleBtn = document.getElementById('markAsExampleBtn');
     if (markExampleBtn) markExampleBtn.addEventListener('click', markAsExample);
+    bindDocumentsPager();
     hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
   }
 
@@ -2390,23 +2412,45 @@
 
   // Documentos (PDF, PPT, DOCX...) trocados nesta conversa — busca direto em
   // `state.messages` (já carregado pro histórico), sem chamada extra à API.
+  // Paginado (docsPage/DOCS_PAGE_SIZE) — conversa com muitos documentos
+  // anexados enchia o painel lateral inteiro numa lista só, sem fim à
+  // vista (pedido do usuário, print com 6+ documentos visíveis de uma vez).
   function renderDocumentsSection() {
     const docs = state.messages.filter((m) => m.type === 'document' && m.mediaUrl);
     if (!docs.length) {
       return `<div class="contact-docs"><div class="contact-docs-label">Documentos anexados</div><div class="contact-doc-item">Nenhum encontrado.</div></div>`;
     }
+    const totalPages = Math.max(1, Math.ceil(docs.length / DOCS_PAGE_SIZE));
+    if (docsPage > totalPages) docsPage = totalPages;
+    const start = (docsPage - 1) * DOCS_PAGE_SIZE;
+    const pageItems = docs.slice(start, start + DOCS_PAGE_SIZE);
+    const pagerHtml = totalPages > 1 ? `
+      <div class="contact-docs-pager">
+        <button type="button" class="contact-docs-pager-btn" data-docs-page-prev ${docsPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+        <span class="contact-docs-pager-info">${docsPage}/${totalPages} · ${docs.length} documento${docs.length === 1 ? '' : 's'}</span>
+        <button type="button" class="contact-docs-pager-btn" data-docs-page-next ${docsPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+      </div>
+    ` : '';
     return `
       <div class="contact-docs">
         <div class="contact-docs-label">Documentos anexados</div>
         <div class="contact-docs-list">
-          ${docs.map((d) => `
+          ${pageItems.map((d) => `
             <a class="contact-doc-item" data-media-url="${escapeHtml(d.mediaUrl)}" href="#" download="${escapeHtml(d.fileName || 'arquivo')}" target="_blank" rel="noopener">
               ${MEDIA_TYPE_ICONS.document}<span class="contact-doc-name">${escapeHtml(d.fileName || 'Documento')}</span>
             </a>
           `).join('')}
         </div>
+        ${pagerHtml}
       </div>
     `;
+  }
+
+  function bindDocumentsPager() {
+    const prevBtn = contactPanel.querySelector('[data-docs-page-prev]');
+    const nextBtn = contactPanel.querySelector('[data-docs-page-next]');
+    if (prevBtn) prevBtn.addEventListener('click', () => { docsPage--; renderContactPanel(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { docsPage++; renderContactPanel(); });
   }
 
   function formatTime(iso) {
@@ -2547,6 +2591,12 @@
   // Grupos em comum com o contato aberto — `undefined` = carregando, array =
   // resultado (pode vir vazio). Best-effort (ver getGroupParticipantPhones).
   let commonGroups = null;
+  // Paginação da seção "Documentos anexados" (ver renderDocumentsSection)
+  // — resetada ao trocar de conversa (mesmo ponto que zera contactInfo em
+  // openConversation), senão a página 3 de uma conversa vazaria pra
+  // página 3 da próxima conversa aberta.
+  const DOCS_PAGE_SIZE = 5;
+  let docsPage = 1;
   // Resumo da conversa gerado por IA (painel de detalhes) — `null` = nunca
   // gerado; `'loading'` = gerando agora; string = resumo pronto. Vem
   // persistido junto do histórico (GET /history) e é regenerado sob demanda
@@ -3594,6 +3644,7 @@
     clearTimeout(summaryRefreshTimer);
     clearTimeout(state.peerPresenceTimer);
     contactInfo = undefined; // "carregando" — evita mostrar o contato da conversa anterior por um instante
+    docsPage = 1; // reseta a paginação de "Documentos anexados" ao trocar de conversa
     appEl.classList.add('chat-open'); // em telas estreitas, esconde a lista e mostra só a conversa
     renderConvList();
     renderConversationView();

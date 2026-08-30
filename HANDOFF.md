@@ -3,7 +3,25 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FJ: **3 bugs reais
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FK: **paginação em
+> "Documentos anexados"** (painel de detalhes do contato, Chat) — conversa com
+> muitos documentos enchia o painel lateral numa lista só sem fim (print do
+> usuário com 6+ documentos visíveis de uma vez); agora pagina de 5 em 5
+> (`docsPage`/`DOCS_PAGE_SIZE`), mini-paginador compacto no rodapé da seção,
+> resetado ao trocar de conversa. **Mensagens ancoradas embaixo** no feed do
+> Chat (`justify-content: flex-end` em `.messages`) — com poucas mensagens,
+> antes sobrava um vazio enorme entre a última mensagem e o composer (print
+> real); agora o vazio sobra no TOPO, como WhatsApp/Telegram de verdade.
+> **Crédito "Desenvolvido por" simplificado pra só Daniel Costa** em 21
+> páginas de `public/` — pedido do usuário: Gabriel Alves só ajudou com
+> deploy na VPS numa ocasião (acesso ao GitHub da empresa indisponível),
+> não é coautor do código; menções a "Gabriel"/"Gabriel Alves" em contexto
+> factual (nome de contato de teste, instância WhatsApp real, autor de
+> webhook — HANDOFF/handoff.json) NÃO foram tocadas, só os créditos de
+> autoria na UI. Ambas as mudanças de UI passaram por
+> `design-system-checker-agent` sem achado.
+>
+> Antes disso, sessão de 2026-08-30 — Parte FJ: **3 bugs reais
 > corrigidos** reportados logo após publicar a Parte FI (ações do Dapinho):
 >
 > (1) **Pergunta duplicada no Dapinho** — 2ª rodada do mesmo tipo de bug da
