@@ -797,11 +797,19 @@
   .contact-tabs{ position:relative; display:flex; border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; scrollbar-width:none; }
   .contact-tabs::-webkit-scrollbar{ display:none; }
   .contact-tab-btn{
+    display:flex; align-items:center; gap:6px;
     background:none; border:none; color:var(--text-faint); font-size:11.5px; font-weight:600;
     padding:11px 13px; cursor:pointer; font-family:inherit; white-space:nowrap; flex-shrink:0;
     transition: color .15s ease;
   }
   .contact-tab-btn:hover{ color:var(--text); }
+  .contact-tab-icon{ display:inline-flex; flex-shrink:0; }
+  .contact-tab-icon svg{ width:14px; height:14px; transition: transform .2s cubic-bezier(.4,0,.2,1); }
+  /* Ícone "pulsa" um pouco na troca pra aba ativa (pedido do usuário,
+     "melhore a navegação com... animação") — sem exagerar, é só o mesmo
+     tipo de microinteração já usada no resto do app (ex: .contact-summary
+     no :hover), não uma animação chamativa que distrai da leitura. */
+  .contact-tab-btn.active .contact-tab-icon svg{ transform: scale(1.12); }
   /* --gold-on-light (não --gold puro) — mesmo cuidado já aplicado em
      .nav-item.active/.painel-kpi-card .value: --gold sozinho rende só
      ~2.1:1 de contraste no tema claro (abaixo do AA 4.5:1), e "texto de
@@ -846,18 +854,30 @@
   a.contact-doc-item:hover{ background:var(--surface-2); color:var(--text); }
   .contact-doc-item svg{ width:13px; height:13px; flex-shrink:0; color:var(--text-faint); }
   .contact-doc-name{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  /* Paginação de "Documentos anexados" (ver renderDocumentsSection) —
-     compacta, no mesmo espírito visual do resto do painel de detalhes
+  /* Paginador genérico (ver renderPagerHtml) — compartilhado por
+     "Documentos anexados" e "Fotos" (2026-08-30, renomeado de
+     .contact-docs-pager* pra não ficar amarrado ao nome de uma seção só).
+     Compacto, no mesmo espírito visual do resto do painel de detalhes
      (fonte pequena, sem os botões .btn grandes do resto do app, que
      destoariam deste painel lateral estreito). */
-  .contact-docs-pager{ display:flex; align-items:center; justify-content:space-between; margin-top:6px; padding-top:6px; border-top:1px solid var(--border); }
-  .contact-docs-pager-btn{
-    background:none; border:none; color:var(--gold); cursor:pointer; font-size:11px; font-family:inherit;
+  .contact-pager{ display:flex; align-items:center; justify-content:space-between; margin-top:6px; padding-top:6px; border-top:1px solid var(--border); }
+  .contact-pager-btn{
+    background:none; border:none; color:var(--gold-on-light); cursor:pointer; font-size:11px; font-family:inherit;
     padding:2px 4px; border-radius:4px;
   }
-  .contact-docs-pager-btn:hover{ background:rgba(var(--gold-rgb),.1); }
-  .contact-docs-pager-btn:disabled{ color:var(--text-faint); cursor:not-allowed; }
-  .contact-docs-pager-info{ font-size:10.5px; color:var(--text-faint); }
+  .contact-pager-btn:hover{ background:rgba(var(--gold-rgb),.1); }
+  .contact-pager-btn:disabled{ color:var(--text-faint); cursor:not-allowed; }
+  .contact-pager-info{ font-size:10.5px; color:var(--text-faint); }
+  /* Grade de fotos (ver renderPhotosSection) — 3 colunas de thumbnail
+     quadrado, diferente da lista vertical de Documentos (conteúdo
+     visual se reconhece melhor por miniatura que por nome de arquivo). */
+  .contact-photos-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .contact-photo-item{
+    display:block; aspect-ratio:1; border-radius:8px; overflow:hidden; background:var(--surface-2);
+    border:1px solid var(--border); transition: transform .12s ease, border-color .12s ease;
+  }
+  .contact-photo-item:hover{ transform: scale(1.03); border-color: var(--gold-dim); }
+  .contact-photo-item img{ width:100%; height:100%; object-fit:cover; display:block; }
   .contact-fields{ display:flex; flex-direction:column; padding:10px; gap:2px; }
   .contact-field{
     display:flex; align-items:flex-start; gap:10px;
@@ -2318,23 +2338,58 @@
     positionContactTabsIndicator();
   }
 
-  // As 4 seções do painel viraram abas (pedido do usuário, 2026-08-30) —
-  // antes tudo ficava empilhado numa rolagem só. "summary" agrupa Resumo
-  // da conversa + Insights de IA (mesma origem: análise por IA da
-  // conversa); "client" agrupa os campos do CRM + Grupos em comum (tudo
-  // que é "sobre a pessoa", não sobre o atendimento em si).
+  // Ícones dedicados da navegação por abas (2026-08-30, pedido do
+  // usuário: "melhore a navegação com ícones") — mesmo estilo de traço
+  // (stroke="currentColor" stroke-width="2") já usado em CONTACT_ICONS/
+  // MEDIA_TYPE_ICONS/GROUP_ICON, só que SVGs próprios pra "resumo" e
+  // "labels" (não existia ícone pronto pra nenhum dos dois no projeto).
+  // "documents"/"photos" reaproveitam MEDIA_TYPE_ICONS (declarado mais
+  // abaixo no arquivo — seguro, essas funções só RODAM depois do boot,
+  // bem depois do parse do script inteiro).
+  const CONTACT_TAB_ICONS = {
+    // resumo: folha com linhas de texto + "sparkle" de IA no canto
+    summary: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-7"/><path d="M7 8h5M7 12h4"/><path d="M18 3l.9 2.1L21 6l-2.1.9L18 9l-.9-2.1L15 6l2.1-.9L18 3z"/></svg>',
+    // labels: etiqueta clássica com o furo
+    labels: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H4a2 2 0 0 0-2 2v8l10.6 10.6a2 2 0 0 0 2.83 0l6.17-6.17a2 2 0 0 0 0-2.83L12 2Z"/><circle cx="7" cy="7" r="1.5"/></svg>',
+    // dados do cliente: pessoa
+    client: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/></svg>',
+  };
+  // 'function' (hoisted) — pode referenciar MEDIA_TYPE_ICONS com segurança
+  // mesmo ele sendo declarado bem mais abaixo no arquivo, diferente de um
+  // 'const' que tentasse o mesmo lookup na hora da própria declaração
+  // (cairia em erro de temporal dead zone). 'documents'/'photos' usam
+  // MEDIA_TYPE_ICONS em vez de duplicar SVG que já existe.
+  function contactTabIcon(tabId) {
+    if (tabId === 'documents') return MEDIA_TYPE_ICONS.document;
+    if (tabId === 'photos') return MEDIA_TYPE_ICONS.image;
+    return CONTACT_TAB_ICONS[tabId] || '';
+  }
+
+  // As 5 seções do painel viraram abas (pedido do usuário, 2026-08-30,
+  // depois estendido com "Fotos" e reordenado) — antes tudo ficava
+  // empilhado numa rolagem só. "client" (Dados do cliente) vem PRIMEIRO —
+  // pedido explícito, é o que o atendente mais busca de relance ao abrir
+  // uma conversa nova. "summary" agrupa Resumo da conversa + Insights de
+  // IA (mesma origem: análise por IA); "client" agrupa os campos do CRM +
+  // Grupos em comum (tudo que é "sobre a pessoa", não sobre o
+  // atendimento em si); "photos"/"documents" são as duas categorias de
+  // mídia trocada na conversa, cada uma com paginação própria.
   const CONTACT_TABS = [
+    { id: 'client', label: 'Dados do cliente' },
     { id: 'summary', label: 'Resumo' },
+    { id: 'photos', label: 'Fotos' },
     { id: 'documents', label: 'Documentos' },
     { id: 'labels', label: 'Labels' },
-    { id: 'client', label: 'Dados do cliente' },
   ];
 
   function renderContactTabsNav() {
     return `
       <div class="contact-tabs" id="contactTabsNav" role="tablist">
         ${CONTACT_TABS.map((t) => `
-          <button type="button" class="contact-tab-btn${t.id === contactActiveTab ? ' active' : ''}" data-tab="${t.id}" role="tab" aria-selected="${t.id === contactActiveTab}">${t.label}</button>
+          <button type="button" class="contact-tab-btn${t.id === contactActiveTab ? ' active' : ''}" data-tab="${t.id}" role="tab" aria-selected="${t.id === contactActiveTab}">
+            <span class="contact-tab-icon">${contactTabIcon(t.id)}</span>
+            <span class="contact-tab-label">${t.label}</span>
+          </button>
         `).join('')}
         <span class="contact-tabs-indicator" id="contactTabsIndicator"></span>
       </div>
@@ -2343,6 +2398,7 @@
 
   function renderContactTabPanel(tabId, { info, phone, webHref }) {
     if (tabId === 'documents') return renderDocumentsSection();
+    if (tabId === 'photos') return renderPhotosSection();
     if (tabId === 'labels') return `${renderContactPanelAssignee()}${renderContactPanelLabels()}`;
     if (tabId === 'client') {
       return `
@@ -2371,7 +2427,8 @@
     const markExampleBtn = document.getElementById('markAsExampleBtn');
     if (markExampleBtn) markExampleBtn.addEventListener('click', markAsExample);
     bindDocumentsPager();
-    hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
+    bindPhotosPager();
+    hydrateMedia(contactPanel); // resolve os href="#" dos documentos/fotos anexados pra URL de verdade
   }
 
   function bindContactTabsNav(ctx) {
@@ -2785,6 +2842,24 @@
     `;
   }
 
+  // Paginador genérico compartilhado por "Documentos anexados" e "Fotos"
+  // (extraído em 2026-08-30 ao adicionar a 2ª seção paginada do painel —
+  // mesma lógica do padrão já usado no projeto pra setas horizontais de
+  // tabela: extrair de forma reaproveitável desde a 1ª repetição, nunca
+  // duplicar a mesma paginação por seção). `page` vem por referência via
+  // getter/setter (não dá pra passar a variável primitiva por
+  // referência em JS) — `label` é o singular/plural do item (documento/foto).
+  function renderPagerHtml({ page, totalPages, totalItems, label, prevAttr, nextAttr }) {
+    if (totalPages <= 1) return '';
+    return `
+      <div class="contact-pager">
+        <button type="button" class="contact-pager-btn" ${prevAttr} ${page <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
+        <span class="contact-pager-info">${page}/${totalPages} · ${totalItems} ${label}${totalItems === 1 ? '' : 's'}</span>
+        <button type="button" class="contact-pager-btn" ${nextAttr} ${page >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
+      </div>
+    `;
+  }
+
   // Documentos (PDF, PPT, DOCX...) trocados nesta conversa — busca direto em
   // `state.messages` (já carregado pro histórico), sem chamada extra à API.
   // Paginado (docsPage/DOCS_PAGE_SIZE) — conversa com muitos documentos
@@ -2799,13 +2874,6 @@
     if (docsPage > totalPages) docsPage = totalPages;
     const start = (docsPage - 1) * DOCS_PAGE_SIZE;
     const pageItems = docs.slice(start, start + DOCS_PAGE_SIZE);
-    const pagerHtml = totalPages > 1 ? `
-      <div class="contact-docs-pager">
-        <button type="button" class="contact-docs-pager-btn" data-docs-page-prev ${docsPage <= 1 ? 'disabled' : ''}>&larr; Anterior</button>
-        <span class="contact-docs-pager-info">${docsPage}/${totalPages} · ${docs.length} documento${docs.length === 1 ? '' : 's'}</span>
-        <button type="button" class="contact-docs-pager-btn" data-docs-page-next ${docsPage >= totalPages ? 'disabled' : ''}>Próxima &rarr;</button>
-      </div>
-    ` : '';
     return `
       <div class="contact-docs">
         <div class="contact-docs-label">Documentos anexados</div>
@@ -2816,7 +2884,7 @@
             </a>
           `).join('')}
         </div>
-        ${pagerHtml}
+        ${renderPagerHtml({ page: docsPage, totalPages, totalItems: docs.length, label: 'documento', prevAttr: 'data-docs-page-prev', nextAttr: 'data-docs-page-next' })}
       </div>
     `;
   }
@@ -2826,6 +2894,44 @@
     const nextBtn = contactPanel.querySelector('[data-docs-page-next]');
     if (prevBtn) prevBtn.addEventListener('click', () => { docsPage--; renderContactPanel(); });
     if (nextBtn) nextBtn.addEventListener('click', () => { docsPage++; renderContactPanel(); });
+  }
+
+  // Fotos (imagens) trocadas nesta conversa — mesmo padrão de Documentos
+  // (busca direto em state.messages, sem chamada extra), mas em GRADE
+  // (thumbnails 3 colunas) em vez de lista, já que é conteúdo visual —
+  // uma lista de nomes de arquivo não ajudaria a reconhecer a foto certa
+  // de relance como uma miniatura ajuda. Clique abre a imagem original
+  // em nova aba (mesmo mecanismo de download de Documentos — <a
+  // data-media-url> vira href de verdade via hydrateMedia/setMediaSrc).
+  function renderPhotosSection() {
+    const photos = state.messages.filter((m) => m.type === 'image' && m.mediaUrl);
+    if (!photos.length) {
+      return `<div class="contact-docs"><div class="contact-docs-label">Fotos enviadas</div><div class="contact-doc-item">Nenhuma encontrada.</div></div>`;
+    }
+    const totalPages = Math.max(1, Math.ceil(photos.length / PHOTOS_PAGE_SIZE));
+    if (photosPage > totalPages) photosPage = totalPages;
+    const start = (photosPage - 1) * PHOTOS_PAGE_SIZE;
+    const pageItems = photos.slice(start, start + PHOTOS_PAGE_SIZE);
+    return `
+      <div class="contact-docs">
+        <div class="contact-docs-label">Fotos enviadas</div>
+        <div class="contact-photos-grid">
+          ${pageItems.map((p) => `
+            <a class="contact-photo-item" data-media-url="${escapeHtml(p.mediaUrl)}" href="#" target="_blank" rel="noopener">
+              <img data-media-url="${escapeHtml(p.mediaUrl)}" alt="Foto enviada" loading="lazy">
+            </a>
+          `).join('')}
+        </div>
+        ${renderPagerHtml({ page: photosPage, totalPages, totalItems: photos.length, label: 'foto', prevAttr: 'data-photos-page-prev', nextAttr: 'data-photos-page-next' })}
+      </div>
+    `;
+  }
+
+  function bindPhotosPager() {
+    const prevBtn = contactPanel.querySelector('[data-photos-page-prev]');
+    const nextBtn = contactPanel.querySelector('[data-photos-page-next]');
+    if (prevBtn) prevBtn.addEventListener('click', () => { photosPage--; renderContactPanel(); });
+    if (nextBtn) nextBtn.addEventListener('click', () => { photosPage++; renderContactPanel(); });
   }
 
   function formatTime(iso) {
@@ -2966,17 +3072,22 @@
   // Grupos em comum com o contato aberto — `undefined` = carregando, array =
   // resultado (pode vir vazio). Best-effort (ver getGroupParticipantPhones).
   let commonGroups = null;
-  // Paginação da seção "Documentos anexados" (ver renderDocumentsSection)
-  // — resetada ao trocar de conversa (mesmo ponto que zera contactInfo em
-  // openConversation), senão a página 3 de uma conversa vazaria pra
-  // página 3 da próxima conversa aberta.
+  // Paginação das seções "Documentos anexados"/"Fotos" (ver
+  // renderDocumentsSection/renderPhotosSection) — resetada ao trocar de
+  // conversa (mesmo ponto que zera contactInfo em openConversation),
+  // senão a página 3 de uma conversa vazaria pra página 3 da próxima
+  // conversa aberta. Fotos usa grade (mais itens cabem por página que a
+  // lista de documentos).
   const DOCS_PAGE_SIZE = 5;
   let docsPage = 1;
+  const PHOTOS_PAGE_SIZE = 9;
+  let photosPage = 1;
   // Aba ativa da navegação do painel de detalhes (abaixo dos KPIs de
-  // mensagens) — ver renderContactPanel/CONTACT_TABS. Resetada ao trocar
+  // mensagens) — ver renderContactPanel/CONTACT_TABS. 'client' (Dados do
+  // cliente) é a 1ª aba da lista — pedido do usuário. Resetada ao trocar
   // de conversa (mesmo ponto que zera docsPage/contactInfo), senão a aba
   // "Documentos" aberta numa conversa vazaria pra próxima.
-  let contactActiveTab = 'summary';
+  let contactActiveTab = 'client';
   // Resumo da conversa gerado por IA (painel de detalhes) — `null` = nunca
   // gerado; `'loading'` = gerando agora; string = resumo pronto. Vem
   // persistido junto do histórico (GET /history) e é regenerado sob demanda
@@ -4028,7 +4139,8 @@
     clearTimeout(state.peerPresenceTimer);
     contactInfo = undefined; // "carregando" — evita mostrar o contato da conversa anterior por um instante
     docsPage = 1; // reseta a paginação de "Documentos anexados" ao trocar de conversa
-    contactActiveTab = 'summary'; // volta pra 1ª aba do painel de detalhes ao trocar de conversa
+    photosPage = 1; // reseta a paginação de "Fotos" ao trocar de conversa
+    contactActiveTab = 'client'; // volta pra 1ª aba do painel de detalhes ao trocar de conversa
     appEl.classList.add('chat-open'); // em telas estreitas, esconde a lista e mostra só a conversa
     renderConvList();
     renderConversationView();

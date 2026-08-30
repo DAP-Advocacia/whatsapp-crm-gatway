@@ -191,6 +191,27 @@ sentimento (`.contact-sentiment-face`).
   mesma função/CSS (copiar, já que os arquivos não compartilham módulo
   JS) na hora de migrar.
 
+## 3.7. Débito de acessibilidade — `prefers-reduced-motion` ausente
+
+Observação do `design-system-checker-agent` (2026-08-30, revisão da
+animação de ícone das abas do painel de detalhes): `public/chat.html`
+não tem NENHUM `@media (prefers-reduced-motion: reduce)` no arquivo
+inteiro, apesar de já ter várias transições/animações (indicador
+deslizante das abas, fade+slide de troca de aba, escala de ícone ativo,
+hover de foto, etc.). Não é regressão de uma sessão específica — é uma
+característica sistêmica da base de código desde antes de qualquer uma
+dessas features existir.
+
+- **Critério de validação**: toda animação/transição não-essencial
+  (decorativa, não ligada a dar feedback de uma ação crítica) respeita
+  `prefers-reduced-motion: reduce` — reduzida a algo instantâneo ou bem
+  mais sutil pra quem ativou essa preferência do sistema operacional.
+- **Escopo**: baixo risco, mas espalhado (não é 1 componente, é uma
+  convenção a aplicar em CADA `transition`/`animation` do CSS) — cabe
+  resolver como uma varredura dedicada, não pontualmente a cada feature
+  nova que adicionar mais uma animação. Não é bloqueio pra nenhuma
+  feature nova continuar usando transição/animação normalmente.
+
 ## 3.6. Flash residual de cor padrão → cor pessoal — RESOLVIDO (2026-08-30)
 
 Reportado de novo pelo usuário (2026-08-28, depois de novo em 2026-08-30
