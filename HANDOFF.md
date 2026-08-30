@@ -3,7 +3,40 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FI: **Dapinho ganha
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FJ: **3 bugs reais
+> corrigidos** reportados logo após publicar a Parte FI (ações do Dapinho):
+>
+> (1) **Pergunta duplicada no Dapinho** — 2ª rodada do mesmo tipo de bug da
+> Parte FH: o socket entrega o eco da PERGUNTA antes do `POST /ask` sequer
+> retornar (o backend faz `persistAndBroadcast` da pergunta ANTES de gerar
+> a resposta da IA, que é a parte lenta) — nessa ordem, o "batismo" da
+> mensagem otimista (trocar seu ID temporário pelo ID real) inseria uma
+> SEGUNDA linha, porque só substituía no índice da otimista sem checar se
+> o ID real já existia em outra posição (inserido pelo socket antes). Fix:
+> `upsertDapinhoMessage` agora sempre remove qualquer linha com aquele ID
+> (de onde quer que tenha vindo) antes de inserir — nunca duas fontes
+> resultam em duas linhas.
+>
+> (2) **Switch Responder/Nota interna quebrado** (regressão real, "você
+> dividiu a nota interna e o chat mas quero que seja o switch como
+> antes") — quando `#composerNote` ganhou a descrição explicativa (sessão
+> anterior), o elemento trocou de classe `.composer` para
+> `.composer-note-wrap`, órfão da correção `.composer[hidden]{display:
+> none}` que já existia especificamente pra vencer a especificidade de
+> `display:flex` da classe. Os dois composers ficavam visíveis juntos de
+> novo. Fix: mesma regra `.composer-note-wrap[hidden]`.
+>
+> (3) **Flash de cor na Apresentação** ("pisca a tela e aparece a cor
+> marrom padrão") — causa raiz real (não a mesma investigação já tentada
+> 2x sem sucesso pro resto do app, ver ROADMAP §3.6): `apresentacao.html`
+> tinha uma cópia DESATUALIZADA de `window.__applyPalette`, sem o
+> parâmetro `skipVisual` que as outras 17 telas já tinham desde o commit
+> `68ca6de` — provavelmente porque essa página foi criada antes daquele
+> fix e nunca recebeu retroativamente. Corrigido igual às demais.
+> Auditoria de todas as 23 páginas de `public/` confirmou: nenhuma outra
+> tinha esse gap — ROADMAP §3.6 fechado como resolvido.
+>
+> Antes disso, sessão de 2026-08-30 — Parte FI: **Dapinho ganha
 > ações de execução real** — enviar mensagem de WhatsApp, gerar relatório em
 > PDF, arquivar/marcar conversa como pendente, tudo por comando em linguagem
 > natural no chat com o assistente. Pedido do usuário: "faça essa funcionalidade

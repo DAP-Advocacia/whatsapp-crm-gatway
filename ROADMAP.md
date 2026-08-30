@@ -177,34 +177,40 @@ deliberadamente.
   arquivos. Se o componente for genérico o bastante, reaproveitar entre
   as duas páginas em vez de duplicar.
 
-## 3.6. Débito de UX pendente — flash residual de cor padrão → cor pessoal
+## 3.6. Flash residual de cor padrão → cor pessoal — RESOLVIDO (2026-08-30)
 
-Reportado de novo pelo usuário (2026-08-28): "a tela dá uma piscada,
+Reportado de novo pelo usuário (2026-08-28, depois de novo em 2026-08-30
+especificamente na página de Apresentação): "a tela dá uma piscada,
 aparece a cor marrom padrão e depois muda para a cor selecionada no
-config" — confirmado por ele como comportamento **pré-existente**, não
-introduzido pelas mudanças do Dapinho/deploy desta sessão. Já houve
-pelo menos 2 rodadas de correção documentadas no histórico de commits
-(`68ca6de` "Elimina o flash residual... (18 telas)" e o mecanismo de 2
-caches separados `palette_`/`personalPalette_` + `skipVisual`, ver
-comentário em `public/chat.html:41-47` citando HANDOFF Partes DP/EO) —
-nenhuma eliminou o problema por completo, só reduziu.
+config" / "quando eu vou para a página da apresentação do projeto ela
+pisca a tela e aparece a cor marrom (cor padrão)". Já tinha havido 2
+rodadas de correção documentadas (`68ca6de` "Elimina o flash residual...
+(18 telas)" e o mecanismo de 2 caches separados `palette_`/
+`personalPalette_` + parâmetro `skipVisual`) — mas nenhuma cobria
+`public/apresentacao.html` até agora.
 
-- **Critério de validação**: nenhum flash perceptível de cor padrão ao
-  navegar entre telas ou ao carregar uma tela pela primeira vez, com
-  paleta pessoal já configurada — em qualquer uma das 18 telas com
-  sidebar.
-- **Investigação necessária**: como já foi mexido 2x sem eliminar de
-  vez, a próxima tentativa deveria PRIMEIRO reproduzir o cenário exato
-  (qual tela, F5 vs. navegação via link, cache frio vs. quente,
-  velocidade de rede) antes de tentar outro fix — evitar uma 3ª rodada
-  de correção parcial no escuro. Considerar logar timestamps do fetch
-  de `/api/brand` vs. `/api/settings` (paleta pessoal) pra confirmar se
-  ainda é a mesma corrida entre os dois já documentada, ou uma causa
-  nova.
-- **Escopo**: não decisão arquitetural grande, mas histórico de 2
-  tentativas sem sucesso sugere que precisa de uma sessão dedicada só a
-  isso (reproduzir + instrumentar + corrigir), não um fix de 5 minutos
-  no meio de outra tarefa.
+**Causa raiz encontrada**: `apresentacao.html` tinha uma cópia
+**desatualizada** de `window.__applyPalette` — só 2 parâmetros (`b,
+prefix`), sem o terceiro `skipVisual` que as outras 17 telas já tinham.
+Sem esse parâmetro, o fetch de `/api/brand` (paleta GLOBAL) sempre
+reaplicava visualmente a cor por cima da paleta PESSOAL já aplicada do
+cache — exatamente o "pisca" reportado. Provavelmente porque
+`apresentacao.html` foi criada/copiada ANTES do commit `68ca6de` corrigir
+as outras telas, e nunca recebeu essa atualização retroativamente.
+
+**Fix**: `skipVisual` implementado igual às outras 17 telas (`if
+(!skipVisual)` em cada `setProperty`/`removeProperty`), e o fetch de
+`/api/brand` passa `hasPersonalPalette =
+!!localStorage.getItem('personalPalette_gold')` como terceiro argumento.
+
+**Auditoria de todas as 23 páginas de `public/`** (rodada na mesma
+sessão, pra confirmar que não sobrava mais nenhuma): 18 com o mecanismo
+completo e correto (incluindo `apresentacao.html` já corrigida), 0
+quebradas, 5 sem o mecanismo por design (páginas públicas sem sessão de
+usuário ou sem consumir `/api/brand` visualmente — `index.html`,
+`settings.html`, `lead-form.html`, `bridge.html`,
+`satisfaction-form.html`). **Critério de validação cumprido**: nenhuma
+página com esse bug restando.
 
 ## 4. Teto de escala já documentado em outras áreas do projeto
 

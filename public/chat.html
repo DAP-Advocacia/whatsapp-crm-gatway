@@ -1051,6 +1051,13 @@
   .composer-tab:hover{ color:var(--text); }
   .composer-tab.active{ color:var(--gold); border-bottom-color:var(--gold); font-weight:600; background: rgba(var(--gold-rgb),.06); }
   .composer-note-wrap{ display:flex; flex-direction:column; background: rgba(var(--gold-rgb),.04); flex-shrink:0; }
+  /* Mesmo bug/fix de .composer[hidden] acima (comentário linhas 1011-1017)
+     — quando #composerNote deixou de ter a classe .composer (virou
+     .composer-note-wrap, pra caber a descrição acima do campo), a
+     correção anterior parou de bater nele: display:flex da classe
+     voltou a vencer o hidden, os dois composers ficavam visíveis juntos
+     de novo (regressão real, reportada pelo usuário, 2026-08-30). */
+  .composer-note-wrap[hidden]{ display: none; }
   .composer-note-desc{
     display:flex; align-items:flex-start; gap:8px; padding:10px 14px 0;
     font-size:11.5px; line-height:1.45; color: var(--text-muted);
@@ -3755,13 +3762,21 @@
   // pelo usuário, 2026-08-28): a otimista tinha um ID temporário
   // (`tmp-...`) diferente do ID real que o socket entregava depois, então
   // a checagem antiga de "já apareceu" nunca reconhecia como a mesma.
+  //
+  // 2ª rodada do mesmo bug (2026-08-30): o socket costuma entregar o eco
+  // da PERGUNTA antes do POST /ask sequer retornar (o backend faz
+  // persistAndBroadcast da pergunta ANTES de gerar a resposta da IA, que
+  // é a parte lenta) — nessa ordem, o socket já inseria uma linha com o
+  // ID REAL, e quando o POST retornava, o "batismo" da otimista (pelo
+  // optimisticId) inseria uma SEGUNDA linha com esse mesmo ID real,
+  // porque só checava `messages[idx] = msg` sem nunca conferir se o ID
+  // real já existia em outra posição. Fix: sempre remover primeiro
+  // qualquer linha com `msg.id` (de onde quer que tenha vindo) antes de
+  // inserir/substituir — nunca duas fontes (otimista batizada + eco do
+  // socket) resultam em duas linhas com o mesmo ID.
   function upsertDapinhoMessage(msg, { optimisticId } = {}) {
-    if (optimisticId) {
-      const idx = state.dapinho.messages.findIndex((m) => m.id === optimisticId);
-      if (idx !== -1) { state.dapinho.messages[idx] = msg; return; }
-    }
-    const alreadyShown = state.dapinho.messages.some((m) => m.id === msg.id);
-    if (!alreadyShown) state.dapinho.messages.push(msg);
+    state.dapinho.messages = state.dapinho.messages.filter((m) => m.id !== msg.id && m.id !== optimisticId);
+    state.dapinho.messages.push(msg);
   }
 
   async function askDapinho() {

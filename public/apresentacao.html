@@ -42,25 +42,36 @@
     // outras 13 telas (2 caches SEPARADOS, ver HANDOFF Parte DP): evita um
     // flash "pessoal → global → pessoal" quando os 2 fetches (brand global +
     // paleta pessoal) completam em momentos diferentes.
-    window.__applyPalette = function (b, prefix) {
+    //
+    // `skipVisual` (achado real, 2026-08-30 — esta página nunca tinha
+    // recebido o fix já aplicado nas outras 13-18 telas, ver HANDOFF Parte
+    // EO): quando true, grava o cache normalmente mas NUNCA toca
+    // document.documentElement.style — usado pelo fetch de brand GLOBAL
+    // mais abaixo quando já existe paleta PESSOAL em cache, pra não
+    // reaplicar visualmente a cor padrão por um instante antes do fetch da
+    // paleta pessoal confirmar de novo (era exatamente o "pisca... aparece
+    // a cor marrom padrão" reportado pelo usuário).
+    window.__applyPalette = function (b, prefix, skipVisual) {
       prefix = prefix || 'palette_';
       var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
-          document.documentElement.style.setProperty(MAP[k], values[k]);
+          if (!skipVisual) document.documentElement.style.setProperty(MAP[k], values[k]);
           localStorage.setItem(prefix + k, values[k]);
           if (RGB_MAP[k]) {
             var rgbStr = hexToRgbStr(values[k]);
-            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
+            if (!skipVisual) document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
             localStorage.setItem(prefix + k + '_rgb', rgbStr);
           }
           if (k === 'bg') {
             var surf = deriveSurfaces(values[k]);
-            document.documentElement.style.setProperty('--surface', surf.surface);
-            document.documentElement.style.setProperty('--surface-2', surf.surface2);
-            document.documentElement.style.setProperty('--surface-3', surf.surface3);
-            document.documentElement.style.setProperty('--border', surf.border);
-            document.documentElement.style.setProperty('--border-soft', surf.borderSoft);
+            if (!skipVisual) {
+              document.documentElement.style.setProperty('--surface', surf.surface);
+              document.documentElement.style.setProperty('--surface-2', surf.surface2);
+              document.documentElement.style.setProperty('--surface-3', surf.surface3);
+              document.documentElement.style.setProperty('--border', surf.border);
+              document.documentElement.style.setProperty('--border-soft', surf.borderSoft);
+            }
             localStorage.setItem(prefix + 'surface', surf.surface);
             localStorage.setItem(prefix + 'surface2', surf.surface2);
             localStorage.setItem(prefix + 'surface3', surf.surface3);
@@ -68,18 +79,20 @@
             localStorage.setItem(prefix + 'borderSoft', surf.borderSoft);
           }
         } else {
-          document.documentElement.style.removeProperty(MAP[k]);
+          if (!skipVisual) document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem(prefix + k);
           if (RGB_MAP[k]) {
-            document.documentElement.style.removeProperty(RGB_MAP[k]);
+            if (!skipVisual) document.documentElement.style.removeProperty(RGB_MAP[k]);
             localStorage.removeItem(prefix + k + '_rgb');
           }
           if (k === 'bg') {
-            document.documentElement.style.removeProperty('--surface');
-            document.documentElement.style.removeProperty('--surface-2');
-            document.documentElement.style.removeProperty('--surface-3');
-            document.documentElement.style.removeProperty('--border');
-            document.documentElement.style.removeProperty('--border-soft');
+            if (!skipVisual) {
+              document.documentElement.style.removeProperty('--surface');
+              document.documentElement.style.removeProperty('--surface-2');
+              document.documentElement.style.removeProperty('--surface-3');
+              document.documentElement.style.removeProperty('--border');
+              document.documentElement.style.removeProperty('--border-soft');
+            }
             localStorage.removeItem(prefix + 'surface');
             localStorage.removeItem(prefix + 'surface2');
             localStorage.removeItem(prefix + 'surface3');
@@ -1063,7 +1076,12 @@
   }
 
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
-    if (window.__applyPalette) window.__applyPalette(b);
+    // skipVisual = já existe paleta pessoal em cache (ver comentário em
+    // __applyPalette acima) — mesmo padrão de chat.html, achado real
+    // 2026-08-30: sem isso, o brand global reaplicava por cima da
+    // pessoal já certa, causando o flash reportado.
+    var hasPersonalPalette = !!localStorage.getItem('personalPalette_gold');
+    if (window.__applyPalette) window.__applyPalette(b, 'palette_', hasPersonalPalette);
   }).catch(function () {}).finally(function () { resolveBrandReady(); });
 })();
 </script>
