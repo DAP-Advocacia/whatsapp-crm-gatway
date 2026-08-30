@@ -190,6 +190,42 @@
      ====================================================== */
   :root{ --sidebar-w: 236px; --sidebar-w-collapsed: 68px; }
 
+  /* ---------- Modal "Atalhos e recursos" (2026-08-30) ----------
+     Mesmo componente .overlay/.modal já usado no resto do app, só mais
+     largo (o conteúdo é 2 listas de texto, não um formulário estreito).
+     Replicado nas 23 páginas — CONTEÚDO específico por tela
+     (SHORTCUTS_CONTENT), estrutura/comportamento idênticos: abre
+     sozinho na 1ª visita de cada tela (localStorage por página, nunca
+     incomoda de novo depois da 1ª vez, mesmo sem marcar o checkbox),
+     reaberto a qualquer momento pelo botão fixo no topo (ⓘ), e um
+     checkbox "Não mostrar automaticamente" (por página) controla só a
+     abertura AUTOMÁTICA futura — o botão manual sempre continua
+     funcionando independente do checkbox. */
+  .shortcuts-modal .modal{ max-width: 560px; }
+  .shortcuts-section{ margin-bottom: 18px; }
+  .shortcuts-section:last-of-type{ margin-bottom: 10px; }
+  .shortcuts-section-label{
+    font-size: 10.5px; font-weight:600; text-transform:uppercase; letter-spacing:.06em;
+    color: var(--gold-on-light); margin-bottom: 10px;
+  }
+  .shortcuts-list{ display:flex; flex-direction:column; gap: 10px; }
+  .shortcuts-item{ display:flex; gap: 10px; align-items:flex-start; }
+  .shortcuts-item-icon{
+    width: 28px; height: 28px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; color: var(--gold);
+  }
+  .shortcuts-item-icon svg{ width: 15px; height: 15px; }
+  .shortcuts-item-body{ min-width:0; }
+  .shortcuts-item-title{ font-size: 12.5px; font-weight:600; color: var(--text); margin-bottom: 2px; }
+  .shortcuts-item-desc{ font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+  .shortcuts-footer-check{
+    display:flex; align-items:center; gap: 8px; font-size: 12px; color: var(--text-muted);
+    padding-top: 14px; border-top: 1px solid var(--border); margin-top: 4px;
+  }
+  /* Botão fixo de reabrir na sidebar (#shortcutsReopenBtn) reaproveita
+     .nav-item/.theme-toggle-item já existentes (mesmo visual do botão
+     de tema logo acima) — sem classe própria nova. */
+
   .sidebar{
     position: fixed; top:0; left:0; bottom:0;
     width: var(--sidebar-w);
@@ -690,6 +726,12 @@
     <span class="nav-tip" id="themeToggleTip">Tema claro</span>
   </button>
 
+  <button type="button" id="shortcutsReopenBtn" class="nav-item theme-toggle-item">
+    <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+    <span class="nav-label">Atalhos e recursos</span>
+    <span class="nav-tip">Atalhos e recursos</span>
+  </button>
+
 
   <div class="sidebar-bottom">
     <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
@@ -895,6 +937,98 @@
     });
   }
 
+  // Modal "Atalhos e recursos" (2026-08-30, pedido do usuário replicando
+  // padrão visto em outro projeto) — SHORTCUTS_CONTENT é o único trecho
+  // que muda entre as 23 páginas; bindShortcutsModal() é o mecanismo
+  // genérico (abrir/fechar/checkbox/1ª-visita), idêntico em todas.
+  var SHORTCUTS_PAGE_KEY = 'agente-ia'; // usado nas chaves de localStorage — único por página
+  var SHORTCUTS_CONTENT = {
+    global: [
+      { icon: 'esc', title: "ESC fecha tudo", desc: "Fecha qualquer modal/popover aberto — sempre a ação mais imediata primeiro." },
+      { icon: 'bell', title: "Sino de notificações", desc: "Avisa (com um toast e um número no sino) sempre que chega mensagem nova, mesmo em outra tela — clique no sino leva ao histórico completo." },
+      { icon: 'theme', title: "Tema claro/escuro", desc: "O botão de sol/lua na sidebar troca o tema — sua escolha fica salva neste navegador." },
+      { icon: 'sidebar', title: "Sidebar retrátil", desc: "O botão redondo na borda da sidebar recolhe o menu pra só ícones — útil em telas menores." },
+    ],
+    page: [
+      { icon: 'ai', title: "Wizard de configuração", desc: "Configure o comportamento do agente em etapas — \"Voltar\"/\"Próximo\" navegam sem perder o que já foi preenchido." },
+      { icon: 'insight', title: "Playground de teste", desc: "Teste o agente numa conversa isolada (texto ou mídia) antes de ativar de verdade — \"Limpar conversa\" reinicia o teste." },
+      { icon: 'note', title: "Copiloto comercial", desc: "Ative separadamente do agente principal — sugere respostas ao atendente em vez de responder sozinho." },
+    ],
+  };
+  var SHORTCUTS_ICONS = {
+    esc: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 12h8"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    theme: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2"/>',
+    sidebar: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>',
+    dapinho: '<circle cx="12" cy="12" r="9"/><path d="M8 13.5s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+    note: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    insight: '<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/>',
+    panel: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/>',
+    keys: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h12"/>',
+    users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    export: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/>',
+    kanban: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
+    ai: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>',
+    drag: '<circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>',
+  };
+  function renderShortcutsSection(label, items) {
+    return `
+      <div class="shortcuts-section">
+        <div class="shortcuts-section-label">${label}</div>
+        <div class="shortcuts-list">
+          ${items.map((it) => `
+            <div class="shortcuts-item">
+              <span class="shortcuts-item-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SHORTCUTS_ICONS[it.icon] || ''}</svg></span>
+              <div class="shortcuts-item-body">
+                <div class="shortcuts-item-title">${it.title}</div>
+                <div class="shortcuts-item-desc">${it.desc}</div>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+  // Mecanismo genérico (idêntico nas 23 páginas) — abre sozinho na 1ª
+  // visita de CADA página (chave de localStorage própria por página, via
+  // SHORTCUTS_PAGE_KEY), nunca mais incomoda depois disso mesmo sem
+  // marcar o checkbox; reaberto a qualquer momento pelo botão fixo na
+  // sidebar, independente do checkbox.
+  function bindShortcutsModal() {
+    var modal = document.getElementById('shortcutsModal');
+    var body = document.getElementById('shortcutsBody');
+    var checkbox = document.getElementById('shortcutsNoAutoOpen');
+    var reopenBtn = document.getElementById('shortcutsReopenBtn');
+    var closeBtn = document.getElementById('shortcutsCloseBtn');
+    if (!modal || !body) return;
+    body.innerHTML = renderShortcutsSection('Em qualquer tela', SHORTCUTS_CONTENT.global) + renderShortcutsSection('Nesta tela', SHORTCUTS_CONTENT.page);
+    var seenKey = 'shortcutsSeen_' + SHORTCUTS_PAGE_KEY;
+    var noAutoKey = 'shortcutsNoAutoOpen_' + SHORTCUTS_PAGE_KEY;
+    if (checkbox) checkbox.checked = localStorage.getItem(noAutoKey) === '1';
+    function open() { modal.classList.add('open'); }
+    function close() {
+      modal.classList.remove('open');
+      if (checkbox) localStorage.setItem(noAutoKey, checkbox.checked ? '1' : '0');
+      localStorage.setItem(seenKey, '1');
+    }
+    if (reopenBtn) reopenBtn.addEventListener('click', open);
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    // 1ª visita desta página (nunca visto antes) — abre sozinho, a menos
+    // que o usuário já tenha marcado "não mostrar automaticamente" numa
+    // visita anterior (mesmo que essa marcação tenha sido feita ANTES da
+    // 1ª visita ser registrada — checa os dois independentemente).
+    if (localStorage.getItem(seenKey) !== '1' && localStorage.getItem(noAutoKey) !== '1') {
+      open();
+      // Grava "visto" já na ABERTURA automática (não só ao fechar pelo
+      // botão "Entendi") — o listener global de ESC (ver mais abaixo)
+      // só faz classList.remove('open') genérico em qualquer .overlay,
+      // sem saber gravar chaves específicas de cada modal; sem isso, ESC
+      // reabriria este modal sozinho de novo na próxima visita.
+      localStorage.setItem(seenKey, '1');
+    }
+  }
+  bindShortcutsModal();
+
   var lpGroup = document.getElementById('navGroupLP');
   var lpToggle = document.getElementById('navGroupLPToggle');
   if (lpGroup && lpToggle) {
@@ -986,6 +1120,21 @@
   });
 })();
 </script>
+
+<div class="overlay shortcuts-modal" id="shortcutsModal">
+  <div class="modal">
+    <h3>Atalhos e recursos — Agente de IA</h3>
+    <div id="shortcutsBody"></div>
+    <div class="shortcuts-footer-check">
+      <input type="checkbox" id="shortcutsNoAutoOpen">
+      <label for="shortcutsNoAutoOpen">Não mostrar automaticamente da próxima vez</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="shortcutsCloseBtn">Entendi</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://api.bitrix24.com/api/v1/"></script>
 <script>
 (function () {
@@ -1203,7 +1352,10 @@
       if (!res.ok) return;
       const p = await res.json();
       if (window.__applyPalette) {
-        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
+                // bg não é mais parte da paleta pessoal (ver comentário no <head>)
+        // — o backend pode continuar devolvendo p.bgColor por enquanto
+        // (campo legado, ver src/settings.js), simplesmente ignorado aqui.
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor }, 'personalPalette_');
       }
     } catch {}
   }
@@ -1700,13 +1852,13 @@
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
     if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
-    // Já existe paleta PESSOAL em cache? Então só atualiza o cache do
-    // brand GLOBAL em segundo plano (skipVisual) — sem isso, a cor
-    // padrão reaplicava visualmente por um instante a cada navegação,
-    // mesmo com a paleta pessoal já certa, até applyPersonalPalette()
-    // confirmar de novo (ver HANDOFF Parte EO).
-    var hasPersonalPalette = !!localStorage.getItem('personalPalette_gold');
-    if (window.__applyPalette) window.__applyPalette(b, 'palette_', hasPersonalPalette);
+    // __applyPalette (ver <head>) grava só o cache 'palette_' aqui e
+    // resolve a prioridade certa entre brand global e paleta pessoal por
+    // conta própria (personalPalette_ sempre vence quando presente) —
+    // não precisa mais avisar "já existe paleta pessoal, não pisa por
+    // cima" na hora da chamada (ver bug corrigido 2026-08-30 no <head>,
+    // mesmo fix de public/chat.html, HANDOFF Parte FL).
+    if (window.__applyPalette) window.__applyPalette(b, 'palette_');
   }).catch(function () {}).finally(function () { if (window.resolveBrandReady) window.resolveBrandReady(); });
 })();
 </script>

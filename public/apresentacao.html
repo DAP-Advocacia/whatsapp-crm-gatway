@@ -1090,7 +1090,10 @@
       if (!res.ok) return;
       const p = await res.json();
       if (window.__applyPalette) {
-        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
+                // bg não é mais parte da paleta pessoal (ver comentário no <head>)
+        // — o backend pode continuar devolvendo p.bgColor por enquanto
+        // (campo legado, ver src/settings.js), simplesmente ignorado aqui.
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor }, 'personalPalette_');
       }
     } catch {}
   }
@@ -1107,12 +1110,11 @@
   }
 
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
-    // skipVisual = já existe paleta pessoal em cache (ver comentário em
-    // __applyPalette acima) — mesmo padrão de chat.html, achado real
-    // 2026-08-30: sem isso, o brand global reaplicava por cima da
-    // pessoal já certa, causando o flash reportado.
-    var hasPersonalPalette = !!localStorage.getItem('personalPalette_gold');
-    if (window.__applyPalette) window.__applyPalette(b, 'palette_', hasPersonalPalette);
+    // __applyPalette (ver <head>) grava só o cache 'palette_' aqui e
+    // resolve a prioridade certa entre brand global e paleta pessoal por
+    // conta própria — não precisa mais de skipVisual (ver bug corrigido
+    // 2026-08-30 no <head>, mesmo fix de public/chat.html, HANDOFF Parte FL).
+    if (window.__applyPalette) window.__applyPalette(b, 'palette_');
   }).catch(function () {}).finally(function () { resolveBrandReady(); });
 })();
 </script>

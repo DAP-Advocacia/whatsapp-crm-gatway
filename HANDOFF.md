@@ -3,7 +3,42 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FM: **tema claro/escuro
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FN: **modal "Atalhos e
+> recursos" em 18 páginas + limpeza de resíduo de `skipVisual`**:
+>
+> (1) **Modal "Atalhos e recursos"** (pedido do usuário, replicando padrão visto
+> em outro projeto) — explica os recursos de cada tela em 2 seções: "Em qualquer
+> tela" (atalhos globais do app — ESC, sino, tema, sidebar retrátil) e "Nesta
+> tela" (recursos específicos, escritos a partir do mapeamento real de código de
+> cada página, nunca inventados). Abre AUTOMATICAMENTE na 1ª visita de cada
+> página (chave própria de `localStorage` por página, nunca mais incomoda depois
+> disso), reaberto a qualquer momento por um botão fixo na sidebar (logo abaixo
+> do switch de tema), com um checkbox "Não mostrar automaticamente" que controla
+> só a abertura futura. Construído primeiro em `chat.html` e revisado por
+> `design-system-checker-agent` (1 achado real corrigido: botão "Entendi" usava
+> `.btn` — reservado pra ação primária/commit — trocado por `.btn.secondary`,
+> mesmo padrão dos outros modais informativos do arquivo), depois replicado via
+> script Node nas 17 páginas com sidebar restantes (mesma técnica do tema:
+> marcador `if(themeToggleBtn){...}` já validado, testado em cópia isolada antes
+> de aplicar em massa). Amostragem de verificação em `dashboard.html` (2ª
+> revisão do checker, focada em confirmar a REPLICAÇÃO, não repetir a revisão
+> genérica) — sem achados. As 5 páginas sem sidebar completa (apresentacao/
+> index/lead-form/satisfaction-form/bridge) ficaram de fora desta leva — mesmo
+> tratamento manual que o tema recebeu, se o Daniel quiser o modal ali também.
+>
+> (2) **Limpeza de resíduo `skipVisual`/`bg` esquecido na leva do tema (Parte
+> FM)**: ao propagar o tema, só o script do `<head>` (onde `__applyPalette` é
+> REDEFINIDA sem o 3º parâmetro) foi corrigido em cada página — o script do FIM
+> do arquivo (fetch de `/api/brand`, que CHAMA `__applyPalette` com 3
+> argumentos) e a função `applyPersonalPalette()` (que ainda passava `bg:
+> p.bgColor` no objeto) ficaram com o padrão antigo em 16-17 páginas — o
+> 3º argumento/campo extra já era ignorado pela nova assinatura (não quebrava
+> nada), mas o código ficou incoerente/confuso por uma leva. Corrigido nas 17
+> páginas + `apresentacao.html` (que também tinha o resíduo, apesar de já ter
+> sido tratada manualmente na Parte FM) — mesmo texto de comentário já usado em
+> `chat.html`, sem invenção de padrão novo.
+>
+> Antes disso, sessão de 2026-08-30 — Parte FM: **tema claro/escuro
 > em todas as 23 páginas + navegação por abas refinada + 1 bug real corrigido**:
 >
 > (1) **Tema claro/escuro replicado nas 22 páginas restantes** (validado antes só em
