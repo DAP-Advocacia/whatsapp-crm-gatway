@@ -5,38 +5,34 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>WhatsApp · Negócio</title>
 <script>
+  // Tema claro/escuro (2026-08-30) — preferência POR NAVEGADOR (mesmo
+  // padrão de localStorage puro das outras 21 telas), aplicada ANTES do
+  // primeiro paint. Esta página não tem sidebar (é o mini-chat embutido
+  // no card do Negócio/Contato do Bitrix) — o switch fica no header do
+  // chat (ver #themeToggleBtn em renderChat()).
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
   // Paleta customizada (tela Configurações) — aplica do cache local ANTES
   // do primeiro paint, pra não piscar a cor padrão antes da de verdade
   // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
   // fetch atualiza o cache pra próxima navegação ficar sem flash também.
   (function () {
-    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
-    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
-    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
-    // versão "216,171,79" em variável à parte pra esses casos acompanharem
-    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
+    // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
+    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
+    // tema claro/escuro, nunca mais da paleta pessoal (mesmo fix já
+    // validado em public/chat.html, HANDOFF Parte FL). Nota: esta página
+    // só usa o prefixo 'palette_' (brand global) — nunca recebeu a
+    // paleta PESSOAL por usuário que as outras 21 telas têm (limitação
+    // pré-existente, fora do escopo desta correção de tema).
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
     var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
     function hexToRgbStr(hex) {
       var n = parseInt(hex.slice(1), 16);
       return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
     }
-    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
-    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
-    // escuro; multiplicar quase não move um valor perto de zero, por isso
-    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
-    function deriveSurfaces(hex) {
-      var n = parseInt(hex.slice(1), 16);
-      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
-      function lighten(amt) {
-        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
-        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
-        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
-        return '#' + rr + gg + bb;
-      }
-      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
-    }
     window.__applyPalette = function (b) {
-      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
           document.documentElement.style.setProperty(MAP[k], values[k]);
@@ -46,29 +42,12 @@
             document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
             localStorage.setItem('palette_' + k + '_rgb', rgbStr);
           }
-          if (k === 'bg') {
-            var surf = deriveSurfaces(values[k]);
-            document.documentElement.style.setProperty('--surface', surf.surface);
-            document.documentElement.style.setProperty('--surface-2', surf.surface2);
-            document.documentElement.style.setProperty('--border', surf.border);
-            localStorage.setItem('palette_surface', surf.surface);
-            localStorage.setItem('palette_surface2', surf.surface2);
-            localStorage.setItem('palette_border', surf.border);
-          }
         } else {
           document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem('palette_' + k);
           if (RGB_MAP[k]) {
             document.documentElement.style.removeProperty(RGB_MAP[k]);
             localStorage.removeItem('palette_' + k + '_rgb');
-          }
-          if (k === 'bg') {
-            document.documentElement.style.removeProperty('--surface');
-            document.documentElement.style.removeProperty('--surface-2');
-            document.documentElement.style.removeProperty('--border');
-            localStorage.removeItem('palette_surface');
-            localStorage.removeItem('palette_surface2');
-            localStorage.removeItem('palette_border');
           }
         }
       });
@@ -80,14 +59,11 @@
         var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
         if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
       }
-      if (k === 'bg' && cached) {
-        var cachedSurface = localStorage.getItem('palette_surface');
-        var cachedSurface2 = localStorage.getItem('palette_surface2');
-        var cachedBorder = localStorage.getItem('palette_border');
-        if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
-        if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
-        if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
-      }
+    });
+    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface2/border
+    // salvos antes do tema claro existir) — limpo aqui, uma vez.
+    ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
+      localStorage.removeItem('palette_' + k);
     });
   })();
 </script>
@@ -113,6 +89,22 @@
     --bubble-mine: var(--gold);
     --bubble-mine-text: #1a1408;
     --bubble-theirs: #261f16;
+    --gold-on-light: var(--gold);
+  }
+  /* Tema claro (2026-08-30) — mesmo bloco-base de public/chat.html
+     (HANDOFF Parte FL/FM), incluindo --bubble-theirs (bolha do contato)
+     e --gold-on-light (contraste de --gold como texto no tema claro). */
+  html[data-theme="light"]{
+    --bg: #f7f4ee;
+    --surface: #ffffff;
+    --surface-2: #eee8db;
+    --border: #ddd4c0;
+    --text: #2a2318;
+    --text-muted: #6b6152;
+    --text-faint: #9a8f7a;
+    --bubble-mine-text: #1a1408;
+    --bubble-theirs: #fbfaf7;
+    --gold-on-light: #8a6018;
   }
 
   *{ box-sizing: border-box; }
@@ -124,8 +116,13 @@
   html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
   html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
   html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
-  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
-  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  /* scrollbar-color/scrollbar-width (2026-08-30, bug real reportado com
+     print — scrollbar cinza do SO na aba "Fotos" do painel de detalhes
+     do Chat): estava só em html/body, mas essa propriedade NÃO é
+     herdada de forma confiável por todo elemento com overflow próprio
+     em navegadores Chromium — cada contêiner que rola precisa da
+     própria declaração. Aplicado via `*` pra cobrir universalmente. */
+  *{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
 
   html, body{
     margin: 0;
@@ -250,6 +247,12 @@
   .icon-btn svg{ width: 17px; height: 17px; }
   .icon-btn.recording{ background: var(--red); border-color: var(--red); color: #fff; animation: recPulse 1.2s ease-in-out infinite; }
   @keyframes recPulse{ 0%,100%{ opacity: 1; } 50%{ opacity: .6; } }
+  /* Ícones sol/lua do switch de tema (2026-08-30) — mesmo padrão das
+     outras telas: sol visível só no tema claro, lua só no escuro. */
+  .theme-icon-sun, .theme-icon-moon{ display:none; }
+  .theme-toggle-btn .theme-icon-moon{ display:block; }
+  .theme-toggle-btn.light-active .theme-icon-sun{ display:block; }
+  .theme-toggle-btn.light-active .theme-icon-moon{ display:none; }
 
   /* ---------- Messages ---------- */
   .messages{
@@ -948,6 +951,10 @@
               ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
             </select>
           ` : ''}
+          <button class="icon-btn theme-toggle-btn" id="themeToggleBtn" title="Alternar tema claro/escuro">
+            <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+            <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+          </button>
           <button class="icon-btn" id="refreshBtn" title="Atualizar conversa">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>
           </button>
@@ -1002,6 +1009,27 @@
     bindMessagesInteractions();
     renderReplyPreview();
 
+    // Toggle de tema claro/escuro (2026-08-30) — mesmo mecanismo das
+    // outras telas (localStorage puro, data-theme no <html>), botão no
+    // header do mini-chat em vez de sidebar (esta página não tem uma —
+    // é o card embutido no iframe do Bitrix). renderChat() recria o DOM
+    // inteiro a cada render, então o listener é religado aqui sempre,
+    // sem acumular (mesmo padrão de refreshBtn/openCrmBtn logo abaixo).
+    const themeToggleBtnEl = document.getElementById('themeToggleBtn');
+    if (themeToggleBtnEl) {
+      themeToggleBtnEl.classList.toggle('light-active', document.documentElement.getAttribute('data-theme') === 'light');
+      themeToggleBtnEl.addEventListener('click', () => {
+        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        if (isLight) {
+          document.documentElement.removeAttribute('data-theme');
+          localStorage.setItem('theme', 'dark');
+        } else {
+          document.documentElement.setAttribute('data-theme', 'light');
+          localStorage.setItem('theme', 'light');
+        }
+        themeToggleBtnEl.classList.toggle('light-active', !isLight);
+      });
+    }
     document.getElementById('refreshBtn').addEventListener('click', () => loadHistory());
     document.getElementById('openCrmBtn').addEventListener('click', () => {
       if (!window.BX24) return;
@@ -1722,11 +1750,45 @@
     return verifyAuth();
   }
 
-  async function loadInstances(ownerId) {
-    const res = await apiFetch(`${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}`);
+  // `phone` opcional — quando informado, cada instância retornada já vem
+  // com `hasHistory` (ver GET /instances no backend e getSessionsWithHistory
+  // em src/store.js), usado por pickBestInstance logo abaixo.
+  async function loadInstances(ownerId, phone) {
+    const url = `${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}${phone ? `&phone=${encodeURIComponent(phone)}` : ''}`;
+    const res = await apiFetch(url);
     if (!res.ok) throw new Error('falha ao carregar instâncias de WhatsApp');
     const data = await res.json();
     return data.instances || [];
+  }
+
+  // Escolhe qual instância abrir por padrão (2026-08-30, fix do bug real
+  // descrito em boot()) — ordem de prioridade:
+  // 1. Com histórico de conversa com este telefone E conectada agora.
+  // 2. Com histórico, mesmo que desconectada no momento (mostra QR, mas
+  //    é a instância CERTA pro contato — melhor que abrir a errada).
+  // 3. Lembrada NESTE navegador (localStorage) pra este card específico,
+  //    se ainda existir na lista (comportamento antigo, mantido como
+  //    prioridade abaixo do histórico real do servidor).
+  // 4. Qualquer instância CONECTADA (evita QR à toa quando não há
+  //    histórico nem lembrança prévia).
+  // 5. Fallback: a primeira da lista (comportamento antigo puro — só
+  //    chega aqui se nada acima resolveu, mostra QR sem alternativa
+  //    melhor disponível).
+  function pickBestInstance(instances, storageKey) {
+    if (!instances.length) return null;
+    const withHistory = instances.filter((i) => i.hasHistory);
+    const connectedWithHistory = withHistory.find((i) => i.status === 'online');
+    if (connectedWithHistory) return connectedWithHistory.id;
+    if (withHistory.length) return withHistory[0].id;
+
+    const remembered = localStorage.getItem(storageKey);
+    const rememberedStillValid = instances.find((i) => i.id === remembered);
+    if (rememberedStillValid) return rememberedStillValid.id;
+
+    const anyConnected = instances.find((i) => i.status === 'online');
+    if (anyConnected) return anyConnected.id;
+
+    return instances[0].id;
   }
 
   function callMethod(method, params) {
@@ -2327,18 +2389,23 @@
       state.contactId = entityType === 'contact' ? id : null;
 
       state.ownerId = await resolveOwner();
-      state.instances = await loadInstances(state.ownerId);
 
-      const remembered = localStorage.getItem(instanceStorageKey(entityType, id));
-      const rememberedStillValid = state.instances.find((i) => i.id === remembered);
-      state.session = rememberedStillValid ? remembered : state.instances[0]?.id || null;
-      if (!state.session) throw new Error('nenhuma instância de WhatsApp disponível');
-
+      // Telefone resolvido ANTES de carregar as instâncias (2026-08-30,
+      // fix de bug real reportado com print: o app abria sempre a 1ª
+      // instância do owner, mesmo com a conversa de verdade já existindo
+      // — e conectada — em OUTRA instância da mesma conta; se a 1ª
+      // estivesse offline, aparecia QR Code por engano). Precisa saber o
+      // telefone primeiro pra pedir `hasHistory` já resolvido em GET
+      // /instances (ver rota, e getSessionsWithHistory em src/store.js).
       const { phone, name } = entityType === 'deal' ? await loadDealContact(id) : await loadContactPhone(id);
       state.phone = phone;
       state.clientPhone = phone;
       state.contactName = name;
       fetchMyBitrixName(); // best-effort, só rótulo de autor em nota interna
+
+      state.instances = await loadInstances(state.ownerId, phone);
+      state.session = pickBestInstance(state.instances, instanceStorageKey(entityType, id));
+      if (!state.session) throw new Error('nenhuma instância de WhatsApp disponível');
 
       await ensureConnected();
     } catch (err) {

@@ -212,6 +212,32 @@ async function getDealForPhone(sessionId, phone) {
   return rows[0]?.deal_id || null;
 }
 
+// Dado um telefone e uma lista de instâncias (todas do mesmo owner, ver
+// GET /instances), retorna os session_id's onde já existe HISTÓRICO de
+// conversa com esse número — mais recente primeiro (updated_at desc, se
+// a coluna existir; senão pela ordem natural). Usado pelo mini-chat
+// embutido no card do Negócio/Contato (public/index.html, 2026-08-30):
+// antes disso, ao abrir um card, o app sempre escolhia a PRIMEIRA
+// instância do owner (ou a última lembrada NAQUELE navegador via
+// localStorage) sem checar se ela tinha conversa/estava conectada — se
+// essa 1ª instância estivesse offline, aparecia o QR Code mesmo com a
+// conversa de verdade esperando em outra instância já conectada da
+// mesma conta (bug real reportado com print, 2026-08-30). Combinado com
+// o `status` já retornado por GET /instances, o frontend agora prioriza:
+// (1) instância com histórico E conectada, (2) instância com histórico
+// mesmo offline, (3) fallback pra qualquer conectada, (4) primeira da
+// lista — só nesse último caso mostra QR sem alternativa melhor.
+async function getSessionsWithHistory(sessionIds, phone) {
+  if (!sessionIds || !sessionIds.length || !phone) return [];
+  const { rows } = await pool.query(
+    `select session_id as "sessionId" from conversations
+     where session_id = any($1) and phone = $2
+     order by (select max(created_at) from messages where conversation_id = conversations.id) desc nulls last`,
+    [sessionIds, phone]
+  );
+  return rows.map((r) => r.sessionId);
+}
+
 // Todas as conversas com negócio vinculado, cross-instância — usado por
 // src/dealStagePoller.js pra saber quais negócios varrer periodicamente
 // em busca de mudança de etapa (grupo automático no fechamento). Uma
@@ -1076,6 +1102,7 @@ module.exports = {
   getMessageForReply,
   setDealForPhone,
   getDealForPhone,
+  getSessionsWithHistory,
   listConversationsWithDeal,
   setConversationArchived,
   setConversationPendingManual,

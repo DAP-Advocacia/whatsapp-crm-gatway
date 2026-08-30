@@ -281,10 +281,32 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ---------------------------------------------------------------
   router.get('/instances', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
     const owner = req.query.owner;
+    // `phone` opcional (2026-08-30, mini-chat embutido no card do
+    // Negócio/Contato, public/index.html) — quando informado, cada
+    // instância retornada ganha `hasHistory: true/false` (já existe
+    // conversa com esse número nela). Sem esse parâmetro, comportamento
+    // idêntico a antes (chat.html/instances.html nunca passam `phone`
+    // aqui, sem custo extra pra eles). Ver getSessionsWithHistory —
+    // resolve o bug real onde o app sempre escolhia a 1ª instância do
+    // owner pra abrir um card, mesmo com a conversa de verdade já
+    // existindo (e conectada) em outra instância da mesma conta.
+    // `typeof === 'string'` rejeita array (`?phone=a&phone=b`) antes de
+    // chegar na query parametrizada (achado do security-reviewer-agent
+    // — sem isso, virava 502 por erro de tipo ao bindar array num
+    // parâmetro `text` do Postgres); `.slice(0, 30)` é um teto de
+    // tamanho generoso (E.164 real tem no máximo 15 dígitos) — não é
+    // proteção contra injeção (a query já é parametrizada, imune a
+    // isso), só um limite de robustez consistente com a falta de
+    // validação de formato de `phone` já presente em outras rotas deste
+    // arquivo.
+    const phone = typeof req.query.phone === 'string' ? req.query.phone.slice(0, 30) || null : null;
     try {
       await instancesStore.ensureDefault(owner); // garante que o próprio dono tem ao menos 1
       const list = await instancesStore.listAccessible(owner); // próprias + delegadas (ver instance_delegates)
       const ownNumbers = getOwnNumbersBySession();
+      const sessionsWithHistory = phone
+        ? new Set(await store.getSessionsWithHistory(list.map((i) => i.id), phone))
+        : null;
       // Nome do dono (pelo ID do Bitrix) — só resolvido/exibido pra
       // instância DELEGADA (i.delegated), onde "de quem é" é informação
       // nova pra quem está olhando; a própria instância já é óbvio de
@@ -316,7 +338,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // instância visível na tela.
         const openConnectionEvent = await instanceHealthStore.getOpenConnectionEvent(i.id);
         const ownerName = i.delegated ? (nameByOwnerId.get(i.ownerId) || null) : null;
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent, ownerName };
+        const hasHistory = sessionsWithHistory ? sessionsWithHistory.has(i.id) : undefined;
+        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent, ownerName, hasHistory };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {

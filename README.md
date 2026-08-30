@@ -329,21 +329,35 @@ mudança — ver a tabela de rotas mais abaixo). Cache local
 SEPARADAS (`palette_*` vs `personalPalette_*`, HANDOFF Parte DP,
 2026-08-18) — antes usava as mesmas chaves pras duas, o que causava
 um flash visível "cor pessoal → cor global → cor pessoal" a cada
-navegação pra quem tinha paleta pessoal configurada. O
-cache-antes-do-paint resolveu o flash entre PÁGINAS (recarregando do
-zero); uma janela residual DENTRO da mesma carga (`window.
-__applyPalette` sempre reaplicando a cor global visualmente antes do
-fetch da paleta pessoal confirmar de novo) ficou documentada como
-limitação conhecida por mais de uma semana até ser corrigida de vez
-na Parte EO (2026-08-26): `__applyPalette(b, prefix, skipVisual)`
-ganhou um 3º parâmetro — com paleta pessoal já em cache, o fetch de
-`/api/brand` só atualiza o cache global em segundo plano
-(`skipVisual=true`), sem tocar `document.documentElement.style`
-nenhuma vez; sem paleta pessoal, nada muda. A
-sidebar é duplicada em cada um dos 13 arquivos HTML (não há componente/
-template compartilhado — vanilla JS/HTML, sem build step), então qualquer
-mudança nela (item novo, reordenar, mudar seção) precisa ser replicada
-manualmente nas 13 cópias.
+navegação pra quem tinha paleta pessoal configurada.
+
+A paleta pessoal controla só a cor de DESTAQUE (`--gold`/`--gold-dim`/
+`--green`/`--red`) — fundo/superfície/texto são responsabilidade
+EXCLUSIVA do **tema claro/escuro** (switch por navegador, `localStorage`
+puro, `data-theme` no `<html>`, presente nas 23 páginas desde a HANDOFF
+Parte FL/FM, 2026-08-30). Essa separação existe porque os dois
+mecanismos ANTES escreviam a mesma variável `--bg` em momentos
+diferentes — uma corrida real (`window.__applyPalette` aplicando/
+removendo `--bg` sem saber se o OUTRO prefixo de cache também tinha
+valor salvo, fazendo a cor "não mudar" ou reverter sozinha dependendo
+da ordem de chegada dos fetches de `/api/brand` e `/api/settings`) que
+só piorou quando o tema também precisaria escrever ali. `__applyPalette`
+hoje NUNCA toca `document.documentElement.style` diretamente — grava só
+o cache do prefixo certo (`palette_*` ou `personalPalette_*`) e delega
+toda aplicação visual pra `applyCachedPalette()`, que sempre resolve os
+2 prefixos juntos (pessoal vence quando presente) antes de tocar o DOM;
+um listener do evento `storage` reaplica o cache quando outra aba grava
+uma chave de paleta, pra uma aba já aberta refletir uma mudança feita em
+Configurações sem precisar de F5 (o parâmetro `skipVisual` da geração
+anterior deste mecanismo, Parte EO, ficou obsoleto e foi removido — a
+resolução por prefixos já cobre o mesmo caso melhor). A
+sidebar é duplicada em cada um dos ~18 arquivos HTML que têm navegação
+completa (não há componente/template compartilhado — vanilla JS/HTML,
+sem build step), então qualquer mudança nela (item novo, reordenar,
+mudar seção) precisa ser replicada manualmente nessas cópias — o projeto
+tem 23 páginas HTML no total em `public/`, contando também as sem
+sidebar (formulários públicos, apresentação institucional, mini-chat
+embutido no card do Bitrix, página-ponte de redirecionamento).
 
 ### Uso normal (depois de instalado)
 

@@ -4,6 +4,19 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Abrindo conversa…</title>
+<script>
+  // Tema claro/escuro (2026-08-30) — só HERDA a escolha já feita noutra
+  // tela (localStorage compartilhado), sem switch próprio aqui: esta
+  // página é um redirecionamento automático (dealId -> Chat), a pessoa
+  // fica nela por menos de 1s — não há tempo/contexto de uso real que
+  // justifique um controle interativo novo, só evitar que ela sempre
+  // renderize escura mesmo se o usuário já escolheu claro em outro
+  // lugar (o "flash de tema errado" que o cache-antes-do-paint evita
+  // nas outras 21 telas).
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+</script>
 <style>
   :root{
     --bg: #15120d;
@@ -13,6 +26,10 @@
     --text: #f3ede2;
     --text-muted: #a89a83;
     --red: #d9685f;
+  }
+  html[data-theme="light"]{
+    --bg: #f7f4ee; --surface: #ffffff; --border: #ddd4c0;
+    --text: #2a2318; --text-muted: #6b6152;
   }
   html, body{
     margin: 0; min-height: 100vh;
@@ -100,13 +117,41 @@
     return normalizePhone(phoneEntry.VALUE);
   }
 
-  async function loadInstances(ownerId) {
-    const res = await fetch(`${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}`, {
+  // `phone` opcional — quando informado, cada instância já vem com
+  // `hasHistory` (ver GET /instances no backend e getSessionsWithHistory
+  // em src/store.js), usado por pickBestInstance logo abaixo.
+  async function loadInstances(ownerId, phone) {
+    const url = `${API_BASE}/instances?owner=${encodeURIComponent(ownerId)}${phone ? `&phone=${encodeURIComponent(phone)}` : ''}`;
+    const res = await fetch(url, {
       headers: Object.assign({}, FETCH_HEADERS, { Authorization: `Bearer ${appToken}` }),
     });
     if (!res.ok) throw new Error('falha ao carregar instâncias de WhatsApp');
     const data = await res.json();
     return data.instances || [];
+  }
+
+  // Escolhe qual instância abrir (2026-08-30, mesmo fix de public/index.html
+  // — bug real reportado com print: antes sempre pegava a 1ª instância do
+  // owner, mesmo com a conversa de verdade existindo — e conectada — em
+  // OUTRA instância da mesma conta). Ordem: (1) histórico com este
+  // telefone + conectada, (2) histórico mesmo offline, (3) lembrada
+  // neste navegador pra este negócio, (4) qualquer conectada, (5) 1ª da
+  // lista.
+  function pickBestInstance(instances, dealId) {
+    const withHistory = instances.filter((i) => i.hasHistory);
+    const connectedWithHistory = withHistory.find((i) => i.status === 'online');
+    if (connectedWithHistory) return connectedWithHistory.id;
+    if (withHistory.length) return withHistory[0].id;
+
+    try {
+      const remembered = localStorage.getItem(`wa-instance-deal-${dealId}`);
+      if (remembered && instances.some((i) => i.id === remembered)) return remembered;
+    } catch (e) { /* localStorage indisponível no iframe: segue pro fallback */ }
+
+    const anyConnected = instances.find((i) => i.status === 'online');
+    if (anyConnected) return anyConnected.id;
+
+    return instances[0].id;
   }
 
   BX24.init(async () => {
@@ -127,20 +172,13 @@
         verifyAuth(),
       ]);
 
-      const instances = await loadInstances(ownerId);
+      const instances = await loadInstances(ownerId, phone);
       if (!instances.length) {
         showError('Nenhuma instância', 'Conecte um número de WhatsApp em Instâncias antes de abrir conversas.');
         return;
       }
 
-      // Mesma memória por-negócio da aba do card (index.html): reabre na
-      // instância que o usuário já usava nesse negócio, senão a primeira.
-      let session = null;
-      try {
-        const remembered = localStorage.getItem(`wa-instance-deal-${dealId}`);
-        if (remembered && instances.some((i) => i.id === remembered)) session = remembered;
-      } catch (e) { /* localStorage indisponível no iframe: segue pro fallback */ }
-      if (!session) session = instances[0].id;
+      const session = pickBestInstance(instances, dealId);
 
       // Preserva os query params atuais (DOMAIN/APP_SID etc. que o Bitrix
       // anexa ao abrir o iframe) pro SDK BX24 continuar funcionando no Chat.

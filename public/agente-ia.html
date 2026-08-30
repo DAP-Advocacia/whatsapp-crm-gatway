@@ -8,100 +8,100 @@
   if (localStorage.getItem('sidebarCollapsed') === '1') {
     document.documentElement.classList.add('sidebar-collapsed');
   }
+  // Tema claro/escuro (2026-08-30) — preferência POR NAVEGADOR (mesmo
+  // padrão de sidebarCollapsed acima, localStorage puro, sem round-trip
+  // ao servidor), aplicada ANTES do primeiro paint pra nunca piscar o
+  // tema errado. Padrão 'dark' se nunca escolhido. Mesmo mecanismo já
+  // validado em public/chat.html (HANDOFF Parte FL/FM).
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
   // Paleta customizada (tela Configurações) — aplica do cache local ANTES
   // do primeiro paint, pra não piscar a cor padrão antes da de verdade
   // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
   // fetch atualiza o cache pra próxima navegação ficar sem flash também.
   (function () {
-    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
+    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
+    // tema claro/escuro (ver html[data-theme="light"] no <style> e o
+    // switch no rodapé), nunca mais da paleta pessoal. Antes disso, os
+    // dois mecanismos escreviam a MESMA variável --bg em momentos
+    // diferentes — uma corrida real que só piorou quando um 3º
+    // concorrente (tema) também precisaria escrever ali. Cor de DESTAQUE
+    // (gold/green/red) continua igual nos dois temas, por decisão de
+    // produto — só isso a paleta pessoal ainda controla. Mesmo fix já
+    // validado em public/chat.html (HANDOFF Parte FL).
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
+    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
+    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
+    // versão "216,171,79" em variável à parte pra esses casos acompanharem
+    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
     var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
     function hexToRgbStr(hex) {
       var n = parseInt(hex.slice(1), 16);
       return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
     }
-    function deriveSurfaces(hex) {
-      var n = parseInt(hex.slice(1), 16);
-      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
-      function lighten(amt) {
-        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
-        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
-        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
-        return '#' + rr + gg + bb;
-      }
-      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
+    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
+    // 'personalPalette_' pra paleta por usuário. 'personalPalette_' tem
+    // PRIORIDADE sobre 'palette_' (pessoal sobre brand global) — resolve
+    // os DOIS prefixos juntos pra cada variável, nunca aplica um prefixo
+    // isoladamente no style (ver bug corrigido em chat.html, Parte FL).
+    // Ausência dos DOIS caches é tratada como remoção explícita (não só
+    // "não mexe") — sem isso, "Restaurar padrão" em Configurações nunca
+    // revertia a cor numa aba já aberta.
+    function applyCachedPalette() {
+      Object.keys(MAP).forEach(function (k) {
+        var cached = localStorage.getItem('personalPalette_' + k) || localStorage.getItem('palette_' + k);
+        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+        else document.documentElement.style.removeProperty(MAP[k]);
+        if (RGB_MAP[k]) {
+          var cachedRgb = localStorage.getItem('personalPalette_' + k + '_rgb') || localStorage.getItem('palette_' + k + '_rgb');
+          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+          else document.documentElement.style.removeProperty(RGB_MAP[k]);
+        }
+      });
     }
-    // `skipVisual` (HANDOFF Parte EO — janela residual deixada em aberto
-    // desde a Parte DP): quando true, grava o cache normalmente mas NUNCA
-    // toca document.documentElement.style — usado pelo fetch de brand
-    // GLOBAL mais abaixo quando já existe paleta PESSOAL em cache, pra não
-    // reaplicar visualmente a cor padrão por um instante antes do fetch da
-    // paleta pessoal confirmar de novo (o "pisca"/"screen updating rápido"
-    // reportado, mesmo com o cache-antes-do-paint da Parte DP já em vigor).
-    window.__applyPalette = function (b, prefix, skipVisual) {
+    // `skipVisual` (parâmetro histórico, HANDOFF Parte EO): MANTIDO só
+    // pela assinatura (chamadores antigos ainda passam esse 3º argumento),
+    // mas não tem mais efeito — __applyPalette nunca mais toca
+    // document.documentElement.style diretamente: grava só o cache do
+    // prefixo certo e delega toda aplicação visual pra
+    // applyCachedPalette() acima, que sempre resolve a prioridade entre
+    // os dois prefixos corretamente antes de tocar o DOM.
+    window.__applyPalette = function (b, prefix) {
       prefix = prefix || 'palette_';
-      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
-          if (!skipVisual) document.documentElement.style.setProperty(MAP[k], values[k]);
           localStorage.setItem(prefix + k, values[k]);
-          if (RGB_MAP[k]) {
-            var rgbStr = hexToRgbStr(values[k]);
-            if (!skipVisual) document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
-            localStorage.setItem(prefix + k + '_rgb', rgbStr);
-          }
-          if (k === 'bg') {
-            var surf = deriveSurfaces(values[k]);
-            if (!skipVisual) {
-              document.documentElement.style.setProperty('--surface', surf.surface);
-              document.documentElement.style.setProperty('--surface-2', surf.surface2);
-              document.documentElement.style.setProperty('--border', surf.border);
-            }
-            localStorage.setItem(prefix + 'surface', surf.surface);
-            localStorage.setItem(prefix + 'surface2', surf.surface2);
-            localStorage.setItem(prefix + 'border', surf.border);
-          }
+          if (RGB_MAP[k]) localStorage.setItem(prefix + k + '_rgb', hexToRgbStr(values[k]));
         } else {
-          if (!skipVisual) document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem(prefix + k);
-          if (RGB_MAP[k]) {
-            if (!skipVisual) document.documentElement.style.removeProperty(RGB_MAP[k]);
-            localStorage.removeItem(prefix + k + '_rgb');
-          }
-          if (k === 'bg') {
-            if (!skipVisual) {
-              document.documentElement.style.removeProperty('--surface');
-              document.documentElement.style.removeProperty('--surface-2');
-              document.documentElement.style.removeProperty('--border');
-            }
-            localStorage.removeItem(prefix + 'surface');
-            localStorage.removeItem(prefix + 'surface2');
-            localStorage.removeItem(prefix + 'border');
-          }
+          if (RGB_MAP[k]) localStorage.removeItem(prefix + k + '_rgb');
         }
       });
+      applyCachedPalette();
     };
-    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
-    // 'personalPalette_' pra paleta por usuário.
-    function applyCachedPalette(prefix) {
-      Object.keys(MAP).forEach(function (k) {
-        var cached = localStorage.getItem(prefix + k);
-        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-        if (RGB_MAP[k]) {
-          var cachedRgb = localStorage.getItem(prefix + k + '_rgb');
-          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-        }
-        if (k === 'bg' && cached) {
-          var cachedSurface = localStorage.getItem(prefix + 'surface');
-          var cachedSurface2 = localStorage.getItem(prefix + 'surface2');
-          var cachedBorder = localStorage.getItem(prefix + 'border');
-          if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
-          if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
-          if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
-        }
+    applyCachedPalette();
+    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
+    // salvos por usuários que customizaram fundo antes do tema claro
+    // existir) — limpo aqui, uma vez, pra não competir silenciosamente
+    // com o tema nem ficar lixo morto em localStorage pra sempre. Nunca
+    // escreve nada nessas chaves de novo depois desta versão.
+    ['palette_', 'personalPalette_'].forEach(function (prefix) {
+      ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
+        localStorage.removeItem(prefix + k);
       });
-    }
-    applyCachedPalette('palette_');
-    applyCachedPalette('personalPalette_');
+    });
+    // Sincronia entre abas (2026-08-30, bug real corrigido primeiro em
+    // chat.html): o evento 'storage' só dispara em OUTRAS abas da mesma
+    // origem, nunca na que fez a escrita — sem isso, uma aba desta página
+    // já aberta nunca refletia uma mudança de paleta salva por Configurações
+    // noutra aba, só via F5.
+    window.addEventListener('storage', function (e) {
+      if (!e.key || (e.key.indexOf('palette_') !== 0 && e.key.indexOf('personalPalette_') !== 0)) return;
+      applyCachedPalette();
+    });
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -126,14 +126,49 @@
     --footer-h: 46px;
     --header-h: 90px;
   }
+  /* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito
+     ANTES do primeiro paint (ver script no <head>). Só
+     FUNDO/SUPERFÍCIE/TEXTO mudam entre os dois temas — a cor de DESTAQUE
+     (--gold/--gold-dim/--green/--red, incl. presets de Configurações)
+     continua IGUAL nos dois, por decisão de produto. Mesmo bloco-base já
+     validado em public/chat.html (HANDOFF Parte FL/FM).
+     ATENÇÃO se --gold for usado como cor de TEXTO nesta página (não só
+     decoração/ícone): considerar --gold-on-light (ver chat.html) se o
+     contraste ficar insuficiente no tema claro — não replicado
+     automaticamente aqui, avaliar por página. */
+  html[data-theme="light"]{
+    --bg: #f7f4ee;
+    --surface: #ffffff;
+    --surface-2: #eee8db;
+    --border: #ddd4c0;
+    --text: #2a2318;
+    --text-muted: #6b6152;
+    --text-faint: #9a8f7a;
+  }
+  /* Ícones sol/lua do switch de tema (ver botão #themeToggleBtn na
+     sidebar e o JS de toggle mais abaixo) — mesmo padrão de
+     public/chat.html: sol visível só no tema claro, lua só no escuro,
+     nunca os dois ao mesmo tempo (JS troca via classe .light-active). */
+  .theme-icon-sun, .theme-icon-moon{ display:none; }
+  .theme-toggle-item .theme-icon-moon{ display:block; }
+  .theme-toggle-item.light-active .theme-icon-sun{ display:block; }
+  .theme-toggle-item.light-active .theme-icon-moon{ display:none; }
+  /* .theme-toggle-item fica FORA de .sidebar-nav (não rola com o resto da
+     navegação, sempre visível) — filho direto de .sidebar. */
+  .theme-toggle-item{ margin: 0 10px 8px; width: calc(100% - 20px); }
   *{ box-sizing: border-box; }
 
   html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
   html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
   html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
   html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
-  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
-  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  /* scrollbar-color/scrollbar-width (2026-08-30, bug real reportado com
+     print — scrollbar cinza do SO na aba "Fotos" do painel de detalhes
+     do Chat): estava só em html/body, mas essa propriedade NÃO é
+     herdada de forma confiável por todo elemento com overflow próprio
+     em navegadores Chromium — cada contêiner que rola precisa da
+     própria declaração. Aplicado via `*` pra cobrir universalmente. */
+  *{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
   html, body{
     margin: 0;
     min-height: 100%;
@@ -646,6 +681,15 @@
     </a>
    </div>
   </nav>
+  <button type="button" id="themeToggleBtn" class="nav-item theme-toggle-item">
+    <span class="nav-icon">
+      <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+    </span>
+    <span class="nav-label" id="themeToggleLabel">Tema claro</span>
+    <span class="nav-tip" id="themeToggleTip">Tema claro</span>
+  </button>
+
 
   <div class="sidebar-bottom">
     <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
@@ -819,6 +863,35 @@
     sidebarToggle.addEventListener('click', function () {
       var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
       localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  // Toggle de tema claro/escuro (2026-08-30) — mesma preferência POR
+  // NAVEGADOR de sidebarCollapsed (localStorage puro), aplicada já antes
+  // do primeiro paint (ver script no <head>, data-theme). Aqui só
+  // sincroniza a APARÊNCIA do botão com o estado já ativo e liga o clique.
+  var themeToggleBtn = document.getElementById('themeToggleBtn');
+  var themeToggleLabel = document.getElementById('themeToggleLabel');
+  var themeToggleTip = document.getElementById('themeToggleTip');
+  function syncThemeToggleUI() {
+    var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (themeToggleBtn) themeToggleBtn.classList.toggle('light-active', isLight);
+    var label = isLight ? 'Tema escuro' : 'Tema claro';
+    if (themeToggleLabel) themeToggleLabel.textContent = label;
+    if (themeToggleTip) themeToggleTip.textContent = label;
+  }
+  syncThemeToggleUI();
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', function () {
+      var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      if (isLight) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'dark');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+      }
+      syncThemeToggleUI();
     });
   }
 

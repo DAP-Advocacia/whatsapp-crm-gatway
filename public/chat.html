@@ -202,13 +202,21 @@
 
   /* Barra de rolagem com as cores do tema (em vez do cinza padrão do SO) —
      regra global; os seletores mais específicos abaixo (.conv-list,
-     .messages, .composer textarea) continuam valendo por cima dela. */
+     .messages, .composer textarea) continuam valendo por cima dela.
+     `scrollbar-color`/`scrollbar-width` (2026-08-30, bug real reportado
+     com print — scrollbar cinza do SO na aba "Fotos" do painel de
+     detalhes): estavam só em html/body, mas essa propriedade NÃO é
+     herdada de forma confiável por todo elemento com `overflow` próprio
+     em navegadores baseados em Chromium — cada contêiner que rola
+     (`.contact-panel-body` e qualquer outro atual/futuro) precisa da
+     própria declaração. Aplicado via `*` pra cobrir universalmente sem
+     precisar listar cada `.classe-com-scroll` manualmente daqui pra
+     frente. */
   html::-webkit-scrollbar, body::-webkit-scrollbar, ::-webkit-scrollbar{ width:10px; height:10px; }
   html::-webkit-scrollbar-track, body::-webkit-scrollbar-track, ::-webkit-scrollbar-track{ background:var(--bg); }
   html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb, ::-webkit-scrollbar-thumb{ background:var(--border); border-radius:100px; border:2px solid var(--bg); }
   html::-webkit-scrollbar-thumb:hover, body::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:hover{ background:var(--gold-dim); }
-  html{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
-  body{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
+  *{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
   html, body{
     margin: 0;
     height: 100%;

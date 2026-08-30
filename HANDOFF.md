@@ -3,7 +3,70 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FL: **3 mudanças no
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FM: **tema claro/escuro
+> em todas as 23 páginas + navegação por abas refinada + 1 bug real corrigido**:
+>
+> (1) **Tema claro/escuro replicado nas 22 páginas restantes** (validado antes só em
+> `chat.html`, Parte FL) — pedido do usuário: "o tema dar white deve funcionar em
+> todas as telas, inclusive na apresentação". Descoberta importante ao propagar:
+> todas as 17 páginas com sidebar AINDA tinham o mecanismo ANTIGO de `bg`/
+> `deriveSurfaces` controlado pela paleta pessoal (a mesma causa raiz do bug de
+> paleta corrigido em `chat.html` na Parte FL) — replicar o tema exigiu primeiro
+> replicar essa correção em cada uma (removido `bg` do mapa de paleta pessoal,
+> `applyCachedPalette()` resolvendo os 2 prefixos juntos, listener de `storage`),
+> senão o mesmo bug se espalharia pras 22 telas junto do tema. Aplicado via script
+> Node (`apply-theme.js`, scratchpad) que substitui o bloco `<script>` inteiro do
+> `<head>` + insere CSS/HTML/JS do switch — 2 bugs do próprio script pegos em teste
+> isolado ANTES de aplicar em massa (nunca chegaram a tocar os arquivos reais):
+> (a) um comentário CSS que mencionava a string `</nav>` fez o `indexOf` errar o
+> alvo de inserção do botão HTML; (b) o JS do toggle foi inserido usando o 1º `;`
+> do statement de `sidebarCollapsed`, que fica DENTRO de 2 níveis de função —
+> prendia o toggle de tema dentro do listener de clique do `sidebarToggle`, nunca
+> rodando no carregamento normal da página. As 4 páginas sem sidebar (`apresentacao
+> .html`, `index.html`, `lead-form.html`, `satisfaction-form.html`) e a de puro
+> redirecionamento (`bridge.html`, só HERDA o tema já escolhido, sem switch próprio
+> — não há tempo de uso real que justifique um controle ali) foram tratadas
+> manualmente, cada uma com o switch num lugar adequado à própria estrutura
+> (`.top-actions` na Apresentação, rodapé/canto discreto nas 2 LPs públicas,
+> header do mini-chat em `index.html`).
+>
+> (2) **Bug real corrigido — scrollbar cinza do SO** (print do usuário): `scrollbar-
+> color`/`scrollbar-width` estavam só em `html`/`body`, mas essa propriedade NÃO é
+> herdada de forma confiável por todo elemento com `overflow` próprio em
+> navegadores Chromium — `.contact-panel-body` (painel de detalhes do contato)
+> renderizava com a scrollbar cinza padrão do sistema em vez da dourada do
+> projeto. Fix: trocado por `*{ scrollbar-color: ...; scrollbar-width: thin; }`
+> (aplicado nas 23 páginas), cobrindo qualquer contêiner com scroll próprio atual
+> ou futuro sem precisar listar cada `.classe-com-scroll` manualmente.
+>
+> (3) **Navegação por abas do painel de detalhes refinada** (pedidos do usuário
+> após a Parte FL): "Dados do cliente" virou a 1ª aba (era a última — é o que o
+> atendente mais busca de relance); cada aba ganhou um ícone SVG animado
+> (`CONTACT_TAB_ICONS`/`contactTabIcon()`); nova aba "Fotos" (imagens da conversa
+> em grade de 3 colunas, paginada 9 por página, clique abre a imagem original) —
+> paginação generalizada num helper compartilhado (`renderPagerHtml`) entre
+> "Documentos anexados" e "Fotos". Passou por `design-system-checker-agent` sem
+> achados reais.
+>
+> (4) **Bug real corrigido — mini-chat do card do Negócio abrindo QR Code por
+> engano** (print do usuário, "não abre a conversa no negócios"): `public/
+> index.html`/`public/bridge.html` sempre escolhiam a PRIMEIRA instância WhatsApp
+> do owner (ou a última lembrada NAQUELE navegador via `localStorage`) — nunca
+> verificavam se essa instância estava conectada, nem se já existia conversa com
+> aquele telefone em OUTRA instância da mesma conta. Se a 1ª estivesse offline,
+> aparecia QR Code mesmo com a conversa de verdade esperando em outra instância
+> já conectada. Fix: nova função `getSessionsWithHistory(sessionIds, phone)` em
+> `src/store.js` + `GET /instances` (`src/routes/whatsapp.js`) ganhou um parâmetro
+> OPCIONAL `phone` que, quando presente, retorna `hasHistory` por instância —
+> mudança estritamente aditiva (sem `phone` na query, comportamento idêntico a
+> antes). Frontend (`pickBestInstance`, index.html/bridge.html) prioriza: (a)
+> histórico + conectada, (b) histórico mesmo offline, (c) lembrada no navegador,
+> (d) qualquer conectada, (e) fallback pra 1ª da lista (comportamento antigo
+> puro, só chega aqui sem nenhuma alternativa melhor). Passou por
+> `security-reviewer-agent` (vazamento entre owners, SQL injection, retro-
+> compatibilidade da rota, reordenação de `boot()`).
+>
+> Antes disso, sessão de 2026-08-30 — Parte FL: **3 mudanças no
 > painel de detalhes do contato + 1 bug real corrigido**:
 >
 > (1) **Rosto de sentimento** — a mesma chamada de IA que já gera o resumo da
