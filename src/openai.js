@@ -61,13 +61,18 @@ async function callOpenAIRaw(systemPrompt, userPrompt, maxTokens, jsonMode) {
   return _callOpenAI(systemPrompt, userPrompt, maxTokens, jsonMode);
 }
 
+const SENTIMENT_VALUES = ['positive', 'neutral', 'negative'];
+
 // Resumo de uma conversa de WhatsApp (últimas até 80 mensagens, pra manter
 // o prompt num tamanho razoável) — usado pelo painel de detalhes do
 // contato na tela Chat. `messages`: mesmo formato de store.getHistory()
 // (direction 'in'/'out', text, type, createdAt). Baseado SOMENTE no texto
 // das mensagens; mídia sem legenda vira só "[tipo de mídia]" no prompt.
-// Retorna {title, subtitle, summary} — pedido em JSON (response_format)
-// pra vir sempre nesses 3 campos, sem parsing frágil de texto livre.
+// Retorna {title, subtitle, summary, sentiment} — pedido em JSON
+// (response_format) pra vir sempre nesses 4 campos, sem parsing frágil de
+// texto livre. `sentiment` (2026-08-30): ânimo geral do CONTATO na
+// conversa (não da empresa) — enum fechado, mesma chamada de IA, sem
+// custo extra — vira rosto feliz/neutro/triste no painel de detalhes.
 async function summarizeConversation({ contactName, messages }) {
   const recent = messages.slice(-80);
   if (!recent.length) throw new Error('não há mensagens nessa conversa ainda');
@@ -82,11 +87,15 @@ async function summarizeConversation({ contactName, messages }) {
 
   const { text: raw, tokensUsed } = await _callOpenAI(
     'Você resume conversas de atendimento via WhatsApp entre uma empresa e um contato/cliente. ' +
-      'Responda em JSON com exatamente 3 campos: ' +
+      'Responda em JSON com exatamente 4 campos: ' +
       '"title" (bem curto, até 6 palavras, o assunto principal da conversa — ex: "Dúvida sobre atestado médico"), ' +
-      '"subtitle" (uma frase curta com o status atual — ex: "Aguardando retorno da empresa") e ' +
+      '"subtitle" (uma frase curta com o status atual — ex: "Aguardando retorno da empresa"), ' +
       '"summary" (resumo detalhado, 3 a 6 frases, cobrindo o que o contato quer/precisa, o histórico ' +
-      'da conversa até aqui e o status atual — respondido, pendente, resolvido, aguardando o quê). ' +
+      'da conversa até aqui e o status atual — respondido, pendente, resolvido, aguardando o quê) e ' +
+      '"sentiment" (o ÂNIMO GERAL DO CONTATO na conversa, não da empresa — exatamente um destes 3 valores: ' +
+      '"positive" (satisfeito, cordial, resolvido bem), "neutral" (neutro, factual, sem sinal claro de ' +
+      'satisfação/insatisfação, ou conversa muito curta pra avaliar) ou "negative" (frustrado, insatisfeito, ' +
+      'reclamando, impaciente)). ' +
       'Baseie-se SOMENTE no texto da conversa — nunca invente informação que não apareceu nela. ' +
       'Responda em português do Brasil, direto, sem saudação nem introdução.',
     `Conversa com ${contactName || 'o contato'}:\n\n${transcript}`,
@@ -105,6 +114,7 @@ async function summarizeConversation({ contactName, messages }) {
     title: parsed.title || null,
     subtitle: parsed.subtitle || null,
     summary: parsed.summary,
+    sentiment: SENTIMENT_VALUES.includes(parsed.sentiment) ? parsed.sentiment : null,
     tokensUsed,
   };
 }

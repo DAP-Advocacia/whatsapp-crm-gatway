@@ -3,7 +3,64 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FK: **paginação em
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FL: **3 mudanças no
+> painel de detalhes do contato + 1 bug real corrigido**:
+>
+> (1) **Rosto de sentimento** — a mesma chamada de IA que já gera o resumo da
+> conversa (`summarizeConversation`, `src/openai.js`) agora também classifica
+> o ânimo do CONTATO em `positive`/`neutral`/`negative` (sem custo de chamada
+> extra), persistido junto do resumo (`ai_summary`/`conversation_summaries`,
+> coluna nova `sentiment`, migração ainda **pendente de aplicar em produção**
+> — ver `db/schema.sql`). Renderizado como ícone SVG (feliz/neutro/triste,
+> nunca emoji cru) ao lado do rótulo "Resumo da conversa". Resumos gerados
+> ANTES desta coluna existir ficam sem rosto (sentiment `null`) — não há
+> reclassificação retroativa sem re-chamar a IA sobre cada conversa antiga.
+>
+> (2) **Navegação por abas animada** no painel de detalhes (pedido do
+> usuário) — as 4 seções que antes ficavam empilhadas numa rolagem só
+> (campos do CRM, Atendente/Labels, Grupos em comum, Documentos anexados,
+> Insights de IA, Resumo) viraram 4 abas ("Resumo", "Documentos", "Labels",
+> "Dados do cliente") com indicador dourado deslizante (`transform:
+> translateX`, recalculado via `getBoundingClientRect`) e transição de
+> entrada no conteúdo. Mudança de fluxo deliberada: Atendente/Labels
+> deixaram de estar sempre visíveis, agora exigem 1 clique — decisão de
+> produto do próprio pedido, não uma regressão acidental.
+>
+> (3) **1º componente de tooltip customizado do Chat** (`.app-tooltip` +
+> `bindAppTooltip()`) — resolve um débito documentado 4x em ROADMAP §3.5
+> (todo elemento novo repetindo `title` nativo por não ter alternativa no
+> arquivo). Delegado no `document`, posicionado via `getBoundingClientRect`,
+> paleta do projeto (seguindo tema claro/escuro), fecha junto do ESC global.
+> Usado pela 1ª vez no rosto de sentimento (`data-tooltip`, nunca `title`).
+> Migrar os `title=` PRÉ-EXISTENTES de `chat.html`/`admin.html` continua
+> pendente — só o elemento novo nasceu correto (ver ROADMAP §3.5).
+>
+> **(4) Bug real corrigido — "a cor da paleta não está mudando"**: o usuário
+> mudava a cor em Configurações, salvava, mas uma aba do Chat já aberta
+> continuava com a cor antiga. Duas causas reais em `window.__applyPalette`/
+> cache de paleta (`chat.html`, `<head>`): (a) a função aplicava/removia a
+> variável CSS olhando só UM prefixo (`palette_` OU `personalPalette_`) por
+> vez — quando a paleta pessoal vinha vazia (usuário nunca customizou), essa
+> chamada REMOVIA a cor do brand global que já estava aplicada, uma corrida
+> real dependendo da ordem de chegada dos 2 fetches; (b) nenhuma página
+> ouvia o evento `storage`, então uma aba já aberta nunca refletia uma
+> mudança salva por OUTRA aba da mesma origem, só via F5. Fix: `
+> __applyPalette` agora só grava cache (nunca toca o DOM diretamente);
+> `applyCachedPalette()` (sem parâmetro de prefixo) sempre resolve os 2
+> prefixos juntos (`personalPalette_ || palette_`, com remoção explícita
+> quando nenhum dos 2 tem valor) antes de aplicar no DOM; um listener de
+> `storage` reaplica o cache sempre que outra aba grava uma chave de
+> paleta. Replicar esse padrão (função separada resolvendo prioridade entre
+> prefixos + listener de `storage`) ainda **não foi feito** nas outras 22
+> páginas — só validado no Chat por ora (ver `licoes-tecnicas.md`, seção
+> "Frontend / estado compartilhado entre telas", pro detalhe técnico
+> completo). As duas correções de UI (rosto de sentimento, navegação por
+> abas) passaram por `design-system-checker-agent` — 2 achados reais
+> corrigidos (contraste `--gold`→`--gold-on-light` no indicador de aba
+> ativa; `title` nativo no rosto de sentimento, resolvido criando o
+> componente do item (3) acima).
+>
+> Antes disso, sessão de 2026-08-30 — Parte FK: **paginação em
 > "Documentos anexados"** (painel de detalhes do contato, Chat) — conversa com
 > muitos documentos enchia o painel lateral numa lista só sem fim (print do
 > usuário com 6+ documentos visíveis de uma vez); agora pagina de 5 em 5

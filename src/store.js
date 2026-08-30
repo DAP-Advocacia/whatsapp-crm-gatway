@@ -342,20 +342,29 @@ async function getConversationNotifPrefs(sessionId, phone) {
 // Resumo da conversa gerado por IA (painel de detalhes do contato, tela
 // Chat) — lido junto do histórico (GET /history) pra já vir pronto sem
 // round-trip extra; `null` se nunca foi gerado. Guardado como JSON
-// ({title, subtitle, summary}) na mesma coluna texto `ai_summary` — sem
-// precisar de migração de schema. Resumos antigos (de antes desse formato
-// estruturado, texto puro) viram {title: null, subtitle: null, summary: <texto>}.
+// ({title, subtitle, summary, sentiment}) na mesma coluna texto `ai_summary`
+// — sem precisar de migração de schema. Resumos antigos (de antes desse
+// formato estruturado, texto puro) viram
+// {title: null, subtitle: null, summary: <texto>, sentiment: null}.
+// `sentiment` (2026-08-30): ânimo do contato — 'positive'/'neutral'/
+// 'negative' ou null (resumo gerado antes desse campo existir, ou a IA não
+// retornou um valor do enum) — vira rosto feliz/neutro/triste no painel.
 function parseStoredSummary(raw) {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && parsed.summary) {
-      return { title: parsed.title || null, subtitle: parsed.subtitle || null, summary: parsed.summary };
+      return {
+        title: parsed.title || null,
+        subtitle: parsed.subtitle || null,
+        summary: parsed.summary,
+        sentiment: parsed.sentiment || null,
+      };
     }
   } catch {
     // não era JSON — formato antigo (texto puro), cai no fallback abaixo
   }
-  return { title: null, subtitle: null, summary: raw };
+  return { title: null, subtitle: null, summary: raw, sentiment: null };
 }
 
 async function getConversationSummary(sessionId, phone) {
@@ -378,16 +387,25 @@ async function getConversationSummary(sessionId, phone) {
 // generateConversationSummary em chat.html), então isso vira um registro de
 // como o caso foi evoluindo ao longo do atendimento, não só o snapshot mais
 // recente.
-async function setConversationSummary(sessionId, phone, { title, subtitle, summary, tokensUsed }) {
+async function setConversationSummary(sessionId, phone, { title, subtitle, summary, sentiment, tokensUsed }) {
   await pool.query(
     `with updated as (
        update conversations set ai_summary = $1, ai_summary_updated_at = now()
        where session_id = $2 and phone = $3
        returning id
      )
-     insert into conversation_summaries (conversation_id, title, subtitle, summary, tokens_used)
-     select id, $4, $5, $6, $7 from updated`,
-    [JSON.stringify({ title, subtitle, summary }), sessionId, phone, title || null, subtitle || null, summary, tokensUsed ?? null]
+     insert into conversation_summaries (conversation_id, title, subtitle, summary, sentiment, tokens_used)
+     select id, $4, $5, $6, $7, $8 from updated`,
+    [
+      JSON.stringify({ title, subtitle, summary, sentiment: sentiment || null }),
+      sessionId,
+      phone,
+      title || null,
+      subtitle || null,
+      summary,
+      sentiment || null,
+      tokensUsed ?? null,
+    ]
   );
 }
 

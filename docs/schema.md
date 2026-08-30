@@ -36,7 +36,7 @@ erDiagram
         boolean notifications_enabled
         boolean pending_manual "pendente MARCADO À MÃO, independente de unreadCount (2026-08-30)"
         text assigned_to "owner_id do atendente atual"
-        text ai_summary "resumo gerado sob demanda"
+        text ai_summary "resumo gerado sob demanda — JSON {title,subtitle,summary,sentiment}"
     }
     messages {
         bigserial id PK

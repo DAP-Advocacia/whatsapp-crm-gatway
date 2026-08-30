@@ -165,17 +165,31 @@ descuido pontual. Reforça que isso não vai se resolver sozinho "na
 próxima vez que alguém tocar o arquivo" — precisa ser priorizado
 deliberadamente.
 
-- **Critério de validação**: nenhum `title=` sobrando em
+**Componente criado em 2026-08-30** (checker apontou o mesmo padrão pela
+4ª vez, agora no rosto de sentimento da navegação por abas): `.app-tooltip`
++ `bindAppTooltip()` em `public/chat.html` — 1 elemento reaproveitado no
+DOM, delegado no `document` (`mouseenter`/`mouseleave`/`focus`/`blur` em
+capture), posicionado via `getBoundingClientRect()` com clamp contra a
+viewport, paleta do projeto (`--surface-2`/`--border`/`--text`, segue
+tema claro/escuro automaticamente por já usar variáveis CSS), fecha
+junto do ESC global. Qualquer elemento com `data-tooltip="texto"` ganha
+o tooltip automaticamente — usado pela primeira vez no rosto de
+sentimento (`.contact-sentiment-face`).
+
+- **Critério de validação (ainda pendente)**: nenhum `title=` sobrando em
   `public/chat.html`/`public/admin.html` explicando algo pro usuário
-  (crachá, ícone de ação, etc.) — todos usando o mesmo componente de
-  tooltip customizado novo, com a paleta do projeto (claro/escuro),
-  delegado no `document` (mesmo padrão já usado em
-  `negocios-fechados-408`).
-- **Escopo**: baixo risco, ação isolada (criar 1 componente + trocar N
-  atributos `title` por `data-tooltip`) — não decisão arquitetural,
-  cabe resolver na próxima sessão que tocar qualquer um dos dois
-  arquivos. Se o componente for genérico o bastante, reaproveitar entre
-  as duas páginas em vez de duplicar.
+  (crachá, ícone de ação, etc.) — todos usando `.app-tooltip`/
+  `data-tooltip` em vez de `title` nativo. O componente já existe e
+  funciona (1 uso real confirmado); falta migrar os `title=`
+  PRÉ-EXISTENTES (badge de não-lidas dos itens de conversa, botões de
+  ação `data-mute-toggle`/`data-archive-toggle`/`data-pending-toggle`
+  citados acima, e tudo em `admin.html`) — nenhum deles foi tocado nesta
+  sessão, só o elemento novo nasceu já correto.
+- **Escopo**: baixo risco, ação mecânica (trocar N atributos `title` por
+  `data-tooltip` em 2 arquivos, sem mudar comportamento) — componente já
+  existe em `public/chat.html`; `public/admin.html` pode importar a
+  mesma função/CSS (copiar, já que os arquivos não compartilham módulo
+  JS) na hora de migrar.
 
 ## 3.6. Flash residual de cor padrão → cor pessoal — RESOLVIDO (2026-08-30)
 

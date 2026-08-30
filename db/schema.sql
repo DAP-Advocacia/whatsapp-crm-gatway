@@ -77,6 +77,16 @@ create index if not exists idx_conversation_summaries_conversation
 -- usuário). Nulo = "não medido" — nunca 0 de verdade.
 alter table conversation_summaries add column if not exists tokens_used int;
 
+-- Ânimo/sentimento da conversa (2026-08-30) — a MESMA chamada de IA que já
+-- gera title/subtitle/summary (src/openai.js::summarizeConversation)
+-- também classifica o clima geral em 3 valores fechados, sem custo de
+-- chamada extra. Enum fechado (não texto livre) pra o front decidir o
+-- rosto/emoji com certeza, sem parsing frágil de linguagem natural.
+-- Resumos gerados ANTES desta coluna existir ficam null pra sempre (não
+-- há como reclassificar retroativamente sem re-chamar a IA sobre cada
+-- conversa antiga — mesma decisão já tomada pra tokens_used acima).
+alter table conversation_summaries add column if not exists sentiment text check (sentiment in ('positive', 'neutral', 'negative'));
+
 create table if not exists messages (
   id bigserial primary key,
   conversation_id bigint not null references conversations(id) on delete cascade,

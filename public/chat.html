@@ -40,53 +40,55 @@
       var n = parseInt(hex.slice(1), 16);
       return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
     }
-    // `skipVisual` (HANDOFF Parte EO — janela residual deixada em aberto
-    // desde a Parte DP): quando true, grava o cache normalmente mas NUNCA
-    // toca document.documentElement.style — usado pelo fetch de brand
-    // GLOBAL mais abaixo quando já existe paleta PESSOAL em cache, pra não
-    // reaplicar visualmente a cor padrão por um instante antes do fetch da
-    // paleta pessoal confirmar de novo (o "pisca"/"screen updating rápido"
-    // reportado, mesmo com o cache-antes-do-paint da Parte DP já em vigor).
-    window.__applyPalette = function (b, prefix, skipVisual) {
+    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
+    // 'personalPalette_' pra paleta por usuário. 'personalPalette_' tem
+    // PRIORIDADE sobre 'palette_' (pessoal sobre brand global) — resolve
+    // os DOIS prefixos juntos pra cada variável, nunca aplica um prefixo
+    // isoladamente no style (ver bug corrigido abaixo). Ausência dos DOIS
+    // caches é tratada como remoção explícita (não só "não mexe") — sem
+    // isso, "Restaurar padrão" em Configurações (grava null →
+    // localStorage.removeItem) nunca revertia a cor numa aba do Chat já
+    // aberta, e o evento 'storage' mais abaixo não teria como corrigir.
+    function applyCachedPalette() {
+      Object.keys(MAP).forEach(function (k) {
+        var cached = localStorage.getItem('personalPalette_' + k) || localStorage.getItem('palette_' + k);
+        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
+        else document.documentElement.style.removeProperty(MAP[k]);
+        if (RGB_MAP[k]) {
+          var cachedRgb = localStorage.getItem('personalPalette_' + k + '_rgb') || localStorage.getItem('palette_' + k + '_rgb');
+          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
+          else document.documentElement.style.removeProperty(RGB_MAP[k]);
+        }
+      });
+    }
+    // `skipVisual` (parâmetro histórico, HANDOFF Parte EO): MANTIDO só
+    // pela assinatura (chamadores antigos ainda passam esse 3º argumento),
+    // mas não tem mais efeito — a razão de existir (evitar a cor global
+    // "piscar" por cima da pessoal por um instante) já é resolvida melhor
+    // agora, já que __applyPalette NUNCA mais toca document.documentElement
+    // .style diretamente: grava só o cache do prefixo certo e delega toda
+    // aplicação visual pra applyCachedPalette() acima, que sempre resolve
+    // a prioridade entre os dois prefixos corretamente antes de tocar o
+    // DOM — eliminando de vez a corrida real que existia aqui (bug
+    // encontrado 2026-08-30: um prefixo aplicando/removendo a variável no
+    // style sem saber se o OUTRO prefixo também tinha valor salvo, fazendo
+    // a cor "não mudar" ou reverter sozinha dependendo da ordem de chegada
+    // dos fetches de /api/brand e /api/settings).
+    window.__applyPalette = function (b, prefix) {
       prefix = prefix || 'palette_';
       var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
-          if (!skipVisual) document.documentElement.style.setProperty(MAP[k], values[k]);
           localStorage.setItem(prefix + k, values[k]);
-          if (RGB_MAP[k]) {
-            var rgbStr = hexToRgbStr(values[k]);
-            if (!skipVisual) document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
-            localStorage.setItem(prefix + k + '_rgb', rgbStr);
-          }
+          if (RGB_MAP[k]) localStorage.setItem(prefix + k + '_rgb', hexToRgbStr(values[k]));
         } else {
-          if (!skipVisual) document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem(prefix + k);
-          if (RGB_MAP[k]) {
-            if (!skipVisual) document.documentElement.style.removeProperty(RGB_MAP[k]);
-            localStorage.removeItem(prefix + k + '_rgb');
-          }
+          if (RGB_MAP[k]) localStorage.removeItem(prefix + k + '_rgb');
         }
       });
+      applyCachedPalette();
     };
-    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
-    // 'personalPalette_' pra paleta por usuário. Antes os dois escreviam nas
-    // MESMAS chaves: o cache já mostrava a cor pessoal certa, mas o fetch de
-    // /api/brand (sempre roda) reaplicava a cor GLOBAL por cima antes do
-    // fetch da paleta pessoal completar — um flash "pessoal → global →
-    // pessoal" visível a cada navegação, é o "pisca" que o usuário reportou.
-    function applyCachedPalette(prefix) {
-      Object.keys(MAP).forEach(function (k) {
-        var cached = localStorage.getItem(prefix + k);
-        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-        if (RGB_MAP[k]) {
-          var cachedRgb = localStorage.getItem(prefix + k + '_rgb');
-          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-        }
-      });
-    }
-    applyCachedPalette('palette_');
-    applyCachedPalette('personalPalette_');
+    applyCachedPalette();
     // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
     // salvos por usuários que customizaram fundo antes do tema claro
     // existir) — limpo aqui, uma vez, pra não competir silenciosamente
@@ -96,6 +98,19 @@
       ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
         localStorage.removeItem(prefix + k);
       });
+    });
+    // Sincronia entre abas (2026-08-30, bug real reportado: usuário mudava
+    // a cor em Configurações, salvava, mas o Chat já aberto noutra aba
+    // continuava com a cor antiga até um F5 manual). O evento 'storage' só
+    // dispara em OUTRAS abas da mesma origem, nunca na que fez a escrita —
+    // é exatamente o caso de Configurações (grava) → Chat (só reflete se
+    // ouvir). Não usa e.newValue direto — só relê o localStorage inteiro
+    // via applyCachedPalette (já trata escrita E remoção de cada chave
+    // corretamente), reaproveitando a mesma função em vez de duplicar a
+    // lógica de aplicar/remover por chave individual.
+    window.addEventListener('storage', function (e) {
+      if (!e.key || (e.key.indexOf('palette_') !== 0 && e.key.indexOf('personalPalette_') !== 0)) return;
+      applyCachedPalette();
     });
   })();
 </script>
@@ -768,6 +783,42 @@
   .contact-stat:first-child{ border-left:none; }
   .contact-stat-value{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; color:var(--gold); }
   .contact-stat-label{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+
+  /* Navegação por seções do painel de detalhes (abaixo dos KPIs de
+     mensagens) — divide o painel em "Resumo", "Documentos", "Labels" e
+     "Dados do cliente" em vez de empilhar tudo numa rolagem só. O
+     indicador (.contact-tabs-indicator) desliza por transform (calculado
+     em JS a partir do offsetLeft/offsetWidth do botão ativo — mesma
+     técnica de popover posicionado via getBoundingClientRect já usada em
+     outros lugares do projeto) em vez de trocar de largura/margem, então
+     a transição fica suave mesmo com abas de largura diferente. O
+     conteúdo troca com fade+slide leve (.contact-tab-panel.entering) pra
+     reforçar que é uma navegação, não só um recorte estático. */
+  .contact-tabs{ position:relative; display:flex; border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; scrollbar-width:none; }
+  .contact-tabs::-webkit-scrollbar{ display:none; }
+  .contact-tab-btn{
+    background:none; border:none; color:var(--text-faint); font-size:11.5px; font-weight:600;
+    padding:11px 13px; cursor:pointer; font-family:inherit; white-space:nowrap; flex-shrink:0;
+    transition: color .15s ease;
+  }
+  .contact-tab-btn:hover{ color:var(--text); }
+  /* --gold-on-light (não --gold puro) — mesmo cuidado já aplicado em
+     .nav-item.active/.painel-kpi-card .value: --gold sozinho rende só
+     ~2.1:1 de contraste no tema claro (abaixo do AA 4.5:1), e "texto de
+     item ativo numa navegação" é exatamente um dos 2 casos citados no
+     comentário original de --gold-on-light (achado do
+     design-system-checker-agent, 2026-08-30). */
+  .contact-tab-btn.active{ color:var(--gold-on-light); }
+  .contact-tabs-indicator{
+    position:absolute; bottom:-1px; height:2px; background:var(--gold-on-light); border-radius:2px 2px 0 0;
+    transition: transform .25s cubic-bezier(.4,0,.2,1), width .25s cubic-bezier(.4,0,.2,1);
+    will-change: transform, width;
+  }
+  .contact-tab-panel{ animation: contactTabIn .18s ease; }
+  @keyframes contactTabIn{
+    from{ opacity:0; transform: translateY(4px); }
+    to{ opacity:1; transform: translateY(0); }
+  }
   /* "Atendente"/"Labels" no painel — mesmo dado já visível no topo da
      conversa (.assignment-row/.tags-row), mostrado TAMBÉM aqui (estilo
      Chatwoot "Assigned Agent"/"Conversation Labels") — só exibição, sem
@@ -835,7 +886,32 @@
     transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
   .contact-summary:hover{ transform: translateY(-2px); border-color: var(--gold-dim); box-shadow: 0 6px 16px rgba(0,0,0,.28); }
-  .contact-summary-head{ display:flex; align-items:center; margin-bottom:6px; }
+  .contact-summary-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  /* Rosto de sentimento (ver renderSentimentFace) — ícone SVG pequeno ao
+     lado do rótulo "Resumo da conversa", cor conforme o ânimo do contato
+     (verde/neutro/vermelho, mesmas variáveis de --green/--red já usadas
+     em badges do resto do app). tabindex + data-tooltip (nunca title
+     nativo, ver .app-tooltip abaixo) dão acesso ao tooltip por teclado
+     também, não só hover do mouse. */
+  .contact-sentiment-face{ display:inline-flex; flex-shrink:0; cursor:default; }
+  .contact-sentiment-face svg{ width:17px; height:17px; }
+
+  /* Tooltip customizado compartilhado (2026-08-30) — 1º componente desse
+     tipo no Chat (débito documentado em ROADMAP.md §3.5: o projeto só
+     tinha .chart-tooltip, específico de gráfico/posição do mouse, nunca
+     um tooltip genérico "ⓘ hover explica"). Qualquer elemento com
+     data-tooltip="texto" ganha esse tooltip automaticamente — delegado
+     no document (bindAppTooltip), um único elemento reaproveitado no
+     DOM, nunca title nativo (que não segue tema/paleta). Novo código
+     deve usar data-tooltip; migrar os title= pré-existentes de
+     chat.html/admin.html fica pro próximo passo (mesmo ROADMAP). */
+  .app-tooltip{
+    position:fixed; z-index:400; max-width:240px; padding:6px 10px; border-radius:7px;
+    background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; line-height:1.4; pointer-events:none; opacity:0; transform:translateY(2px);
+    transition: opacity .12s ease, transform .12s ease; box-shadow:0 6px 16px rgba(0,0,0,.28);
+  }
+  .app-tooltip.visible{ opacity:1; transform:translateY(0); }
   /* Rótulo fixo da seção ("Resumo da conversa") — não confundir com
      .contact-summary-headline, que é o título GERADO pela IA pra essa
      conversa específica. */
@@ -1672,6 +1748,71 @@
     }
   };
 
+  // Tooltip customizado compartilhado (ver .app-tooltip no CSS) — 1º
+  // elemento criado sob demanda, reaproveitado pra qualquer
+  // [data-tooltip] da página (delegado no document, capture:true porque
+  // mouseenter/mouseleave/focus/blur não fazem bubble sozinhos — só
+  // 'mouseover'/'mouseout'/'focusin'/'focusout' fariam, mas capture nos
+  // 4 eventos originais é mais simples que trocar de família de evento).
+  // Nunca usa title nativo (regra global) — todo tooltip explicativo
+  // NOVO em qualquer tela deve usar data-tooltip="texto", não title.
+  (function bindAppTooltip() {
+    var el = null;
+    var current = null;
+    function ensure() {
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'app-tooltip';
+        document.body.appendChild(el);
+      }
+      return el;
+    }
+    function show(target) {
+      var text = target.getAttribute('data-tooltip');
+      if (!text) return;
+      current = target;
+      var tip = ensure();
+      tip.textContent = text;
+      tip.classList.add('visible');
+      position(target, tip);
+    }
+    function position(target, tip) {
+      var r = target.getBoundingClientRect();
+      var tipRect = tip.getBoundingClientRect();
+      var left = r.left + r.width / 2 - tipRect.width / 2;
+      left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+      var top = r.top - tipRect.height - 8;
+      // sem espaço acima (elemento perto do topo da viewport) — mostra abaixo
+      if (top < 8) top = r.bottom + 8;
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    }
+    function hide() {
+      current = null;
+      if (el) el.classList.remove('visible');
+    }
+    document.addEventListener('mouseenter', function (e) {
+      var target = e.target.closest && e.target.closest('[data-tooltip]');
+      if (target) show(target);
+    }, true);
+    document.addEventListener('mouseleave', function (e) {
+      var target = e.target.closest && e.target.closest('[data-tooltip]');
+      if (target && target === current) hide();
+    }, true);
+    document.addEventListener('focus', function (e) {
+      var target = e.target.closest && e.target.closest('[data-tooltip]');
+      if (target) show(target);
+    }, true);
+    document.addEventListener('blur', function (e) {
+      var target = e.target.closest && e.target.closest('[data-tooltip]');
+      if (target && target === current) hide();
+    }, true);
+    // Some junto com o resto (ESC fecha modal/popover, ver listener global
+    // de Escape mais abaixo) — sem isso um tooltip focado por teclado
+    // ficaria preso na tela depois do ESC mudar o foco de lugar.
+    window.__hideAppTooltip = hide;
+  })();
+
   // Badge de não lidas no sino da sidebar (agora um link pra /notifications.html,
   // não mais um dropdown) — window.updateNotifBadge é chamado com a contagem
   // vinda de GET /notifications/unread-count assim que o login terminar (ver
@@ -1726,11 +1867,13 @@
   }
 
   // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o confirmDialog,
-  // que conta como "Cancelar".
+  // que conta como "Cancelar" — e também qualquer tooltip customizado preso
+  // na tela por foco de teclado (ver bindAppTooltip acima).
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
     document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
     if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+    if (window.__hideAppTooltip) window.__hideAppTooltip();
   });
 })();
 </script>
@@ -2156,19 +2299,8 @@
           <div class="contact-stat"><div class="contact-stat-value">${totalIn}</div><div class="contact-stat-label">Recebidas</div></div>
           <div class="contact-stat"><div class="contact-stat-value">${totalOut}</div><div class="contact-stat-label">Enviadas</div></div>
         </div>
-        <div class="contact-fields">
-          ${contactField('mail', 'E-mail', info.email, info.email ? `mailto:${info.email}` : null)}
-          ${contactField('phone', 'Telefone', phone, phone ? `tel:${phone}` : null)}
-          ${contactField('building', 'Empresa', info.companyName)}
-          ${contactField('pin', 'Endereço', info.address)}
-          ${contactField('globe', 'Site', info.web, webHref)}
-        </div>
-        ${renderContactPanelAssignee()}
-        ${renderContactPanelLabels()}
-        ${renderCommonGroupsSection()}
-        ${renderDocumentsSection()}
-        ${renderInsightsSection()}
-        ${renderSummarySection()}
+        ${renderContactTabsNav()}
+        <div class="contact-tab-panel" id="contactTabPanel">${renderContactTabPanel(contactActiveTab, { info, phone, webHref })}</div>
       </div>
       <div class="contact-panel-footer">
         ${contactInfo
@@ -2181,6 +2313,59 @@
       if (!window.BX24) return;
       BX24.openPath(info.kind === 'lead' ? `/crm/lead/details/${info.id}/` : `/crm/contact/details/${info.id}/`);
     });
+    bindContactTabsNav({ info, phone, webHref });
+    bindContactTabPanelEvents();
+    positionContactTabsIndicator();
+  }
+
+  // As 4 seções do painel viraram abas (pedido do usuário, 2026-08-30) —
+  // antes tudo ficava empilhado numa rolagem só. "summary" agrupa Resumo
+  // da conversa + Insights de IA (mesma origem: análise por IA da
+  // conversa); "client" agrupa os campos do CRM + Grupos em comum (tudo
+  // que é "sobre a pessoa", não sobre o atendimento em si).
+  const CONTACT_TABS = [
+    { id: 'summary', label: 'Resumo' },
+    { id: 'documents', label: 'Documentos' },
+    { id: 'labels', label: 'Labels' },
+    { id: 'client', label: 'Dados do cliente' },
+  ];
+
+  function renderContactTabsNav() {
+    return `
+      <div class="contact-tabs" id="contactTabsNav" role="tablist">
+        ${CONTACT_TABS.map((t) => `
+          <button type="button" class="contact-tab-btn${t.id === contactActiveTab ? ' active' : ''}" data-tab="${t.id}" role="tab" aria-selected="${t.id === contactActiveTab}">${t.label}</button>
+        `).join('')}
+        <span class="contact-tabs-indicator" id="contactTabsIndicator"></span>
+      </div>
+    `;
+  }
+
+  function renderContactTabPanel(tabId, { info, phone, webHref }) {
+    if (tabId === 'documents') return renderDocumentsSection();
+    if (tabId === 'labels') return `${renderContactPanelAssignee()}${renderContactPanelLabels()}`;
+    if (tabId === 'client') {
+      return `
+        <div class="contact-fields">
+          ${contactField('mail', 'E-mail', info.email, info.email ? `mailto:${info.email}` : null)}
+          ${contactField('phone', 'Telefone', phone, phone ? `tel:${phone}` : null)}
+          ${contactField('building', 'Empresa', info.companyName)}
+          ${contactField('pin', 'Endereço', info.address)}
+          ${contactField('globe', 'Site', info.web, webHref)}
+        </div>
+        ${renderCommonGroupsSection()}
+      `;
+    }
+    // 'summary' (default)
+    return `${renderInsightsSection()}${renderSummarySection()}`;
+  }
+
+  // Reaplica os listeners que dependem do conteúdo da aba ativa (cada aba
+  // rebind na hora em que é renderizada, não uma vez só — os elementos são
+  // recriados a cada troca de aba). Delegado a partir do próprio
+  // #contactTabPanel pra não precisar re-registrar o listener do zero a
+  // cada render dentro da MESMA aba (ex: paginar Documentos).
+  function bindContactTabPanelEvents() {
     const historyBtn = document.getElementById('summaryHistoryBtn');
     if (historyBtn) historyBtn.addEventListener('click', openSummaryHistoryModal);
     const markExampleBtn = document.getElementById('markAsExampleBtn');
@@ -2188,6 +2373,45 @@
     bindDocumentsPager();
     hydrateMedia(contactPanel); // resolve os href="#" dos documentos anexados pra URL de verdade
   }
+
+  function bindContactTabsNav(ctx) {
+    const nav = document.getElementById('contactTabsNav');
+    if (!nav) return;
+    nav.querySelectorAll('.contact-tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.tab === contactActiveTab) return;
+        contactActiveTab = btn.dataset.tab;
+        nav.querySelectorAll('.contact-tab-btn').forEach((b) => {
+          b.classList.toggle('active', b === btn);
+          b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+        });
+        positionContactTabsIndicator();
+        const panel = document.getElementById('contactTabPanel');
+        // reinicia a animação de entrada (CSS @keyframes não replaya
+        // sozinha sem isso, já que o elemento não é recriado do zero)
+        panel.classList.remove('contact-tab-panel');
+        void panel.offsetWidth;
+        panel.classList.add('contact-tab-panel');
+        panel.innerHTML = renderContactTabPanel(contactActiveTab, ctx);
+        bindContactTabPanelEvents();
+      });
+    });
+  }
+
+  // Indicador deslizante (ver .contact-tabs-indicator) — recalculado via
+  // getBoundingClientRect a cada troca de aba e também no resize da janela
+  // (a sidebar retrátil muda a largura do painel sem trocar de aba).
+  function positionContactTabsIndicator() {
+    const nav = document.getElementById('contactTabsNav');
+    const indicator = document.getElementById('contactTabsIndicator');
+    const active = nav && nav.querySelector('.contact-tab-btn.active');
+    if (!nav || !indicator || !active) return;
+    indicator.style.width = `${active.offsetWidth}px`;
+    indicator.style.transform = `translateX(${active.offsetLeft}px)`;
+  }
+  window.addEventListener('resize', () => {
+    if (contactPanel.classList.contains('open')) positionContactTabsIndicator();
+  });
 
   // Insights de IA ativos (Copiloto Comercial), agrupados por tópico —
   // espelho compacto da bolha no feed (ver combined/_kind==='insight'
@@ -2233,6 +2457,41 @@
   // existe (ver loadHistory) — sem botão de regenerar manual (removido a
   // pedido do usuário), então uma vez gerado o resumo não se atualiza
   // sozinho com mensagens novas.
+  // Rosto de sentimento (2026-08-30) — SVG próprio (mesmo padrão de ícone
+  // do resto do projeto, ver CONTACT_ICONS/MEDIA_TYPE_ICONS, nunca emoji
+  // cru) espelhando o ânimo do CONTATO na conversa (aiSummary.sentiment,
+  // gerado pela mesma chamada de IA do resumo — ver summarizeConversation
+  // em src/openai.js). `null` (resumo gerado antes desse campo existir, ou
+  // a IA não retornou um valor do enum) não mostra rosto nenhum — nunca
+  // inventa um "neutro" que a IA não disse.
+  const SENTIMENT_META = {
+    positive: {
+      label: 'Contato satisfeito',
+      color: 'var(--green)',
+      svg: '<circle cx="12" cy="12" r="9"/><path d="M8 13.5s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+    },
+    neutral: {
+      label: 'Contato neutro',
+      color: 'var(--text-faint)',
+      svg: '<circle cx="12" cy="12" r="9"/><path d="M8 14h8"/><path d="M9 9h.01M15 9h.01"/>',
+    },
+    negative: {
+      label: 'Contato insatisfeito',
+      color: 'var(--red)',
+      svg: '<circle cx="12" cy="12" r="9"/><path d="M8 15.5s1.5-2 4-2 4 2 4 2"/><path d="M9 9h.01M15 9h.01"/>',
+    },
+  };
+
+  function renderSentimentFace(sentiment) {
+    const meta = SENTIMENT_META[sentiment];
+    if (!meta) return '';
+    return `
+      <span class="contact-sentiment-face" style="color:${meta.color}" data-tooltip="${escapeHtml(meta.label)}" tabindex="0">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${meta.svg}</svg>
+      </span>
+    `;
+  }
+
   function renderSummarySection() {
     const isLoading = aiSummary === 'loading';
     const hasSummary = aiSummary && aiSummary !== 'loading';
@@ -2240,6 +2499,7 @@
       <div class="contact-summary">
         <div class="contact-summary-head">
           <span class="contact-summary-label">Resumo da conversa</span>
+          ${hasSummary && aiSummary.sentiment ? renderSentimentFace(aiSummary.sentiment) : ''}
         </div>
         ${
           isLoading
@@ -2358,7 +2618,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'falha ao gerar resumo');
-      aiSummary = { title: data.title || null, subtitle: data.subtitle || null, summary: data.summary };
+      aiSummary = { title: data.title || null, subtitle: data.subtitle || null, summary: data.summary, sentiment: data.sentiment || null };
       aiSummaryUpdatedAt = data.updatedAt;
     } catch (err) {
       aiSummary = previousSummary;
@@ -2712,6 +2972,11 @@
   // página 3 da próxima conversa aberta.
   const DOCS_PAGE_SIZE = 5;
   let docsPage = 1;
+  // Aba ativa da navegação do painel de detalhes (abaixo dos KPIs de
+  // mensagens) — ver renderContactPanel/CONTACT_TABS. Resetada ao trocar
+  // de conversa (mesmo ponto que zera docsPage/contactInfo), senão a aba
+  // "Documentos" aberta numa conversa vazaria pra próxima.
+  let contactActiveTab = 'summary';
   // Resumo da conversa gerado por IA (painel de detalhes) — `null` = nunca
   // gerado; `'loading'` = gerando agora; string = resumo pronto. Vem
   // persistido junto do histórico (GET /history) e é regenerado sob demanda
@@ -3763,6 +4028,7 @@
     clearTimeout(state.peerPresenceTimer);
     contactInfo = undefined; // "carregando" — evita mostrar o contato da conversa anterior por um instante
     docsPage = 1; // reseta a paginação de "Documentos anexados" ao trocar de conversa
+    contactActiveTab = 'summary'; // volta pra 1ª aba do painel de detalhes ao trocar de conversa
     appEl.classList.add('chat-open'); // em telas estreitas, esconde a lista e mostra só a conversa
     renderConvList();
     renderConversationView();
@@ -5604,13 +5870,12 @@
   fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
     if (b.name) document.querySelectorAll('.firm-name').forEach(function (el) { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach(function (el) { el.textContent = b.subtitle; });
-    // Já existe paleta PESSOAL em cache? Então só atualiza o cache do
-    // brand GLOBAL em segundo plano (skipVisual) — sem isso, a cor
-    // padrão reaplicava visualmente por um instante a cada navegação,
-    // mesmo com a paleta pessoal já certa, até applyPersonalPalette()
-    // confirmar de novo (ver HANDOFF Parte EO).
-    var hasPersonalPalette = !!localStorage.getItem('personalPalette_gold');
-    if (window.__applyPalette) window.__applyPalette(b, 'palette_', hasPersonalPalette);
+    // __applyPalette (ver <head>) grava só o cache 'palette_' aqui e
+    // resolve a prioridade certa entre brand global e paleta pessoal por
+    // conta própria (personalPalette_ sempre vence quando presente) —
+    // não precisa mais avisar "já existe paleta pessoal, não pisa por
+    // cima" na hora da chamada (ver bug corrigido 2026-08-30 no <head>).
+    if (window.__applyPalette) window.__applyPalette(b, 'palette_');
   }).catch(function () {}).finally(function () { if (window.resolveBrandReady) window.resolveBrandReady(); });
 })();
 </script>
