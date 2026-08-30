@@ -7,9 +7,19 @@ const { pool } = require('./db');
  * lida/escrita por aqui). Nome/subtítulo da marca (GET /api/brand,
  * pública) continuam globais de propósito — isto aqui é só a paleta:
  * `accentColor` (dourado padrão), `accentColorDim` (tom secundário —
- * hovers/bordas), `greenColor`/`redColor` (sucesso/erro), `bgColor`
- * (fundo). Qualquer campo `null` mantém a cor padrão do app pra aquele
- * papel — cada usuário sem linha salva ainda usa o padrão de fábrica.
+ * hovers/bordas), `greenColor`/`redColor` (sucesso/erro). Qualquer campo
+ * `null` mantém a cor padrão do app pra aquele papel — cada usuário sem
+ * linha salva ainda usa o padrão de fábrica.
+ *
+ * `bgColor` (2026-08-30): coluna `bg_color` MANTIDA no schema/aqui por
+ * compatibilidade, mas `public/settings.html` não envia mais esse campo
+ * — fundo agora é responsabilidade exclusiva do tema claro/escuro
+ * (switch na sidebar, `data-theme` no `<html>`, localStorage puro, nunca
+ * salvo no banco), eliminando a corrida real que existia entre a paleta
+ * pessoal e o brand global escrevendo a mesma variável `--bg`. Qualquer
+ * valor de `bg_color` já salvo antes desta mudança fica congelado sem
+ * uso — `update()` abaixo é genérico o bastante (só toca campos que
+ * vierem em `patch`) pra não precisar de mudança de código aqui.
  */
 
 const FIELDS = {

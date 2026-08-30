@@ -638,13 +638,6 @@
       <input type="text" id="redHex" placeholder="#d9685f">
     </div>
 
-    <label class="field-label">Cor de fundo</label>
-    <div class="color-row">
-      <input type="color" id="bgPicker" value="#15120d">
-      <input type="text" id="bgHex" placeholder="#15120d">
-    </div>
-    <p class="hint">O fundo dos cards/painéis (as "superfícies") clareia sozinho a partir dessa cor — não precisa escolher à parte.</p>
-
     <label class="field-label">Prévia</label>
     <div class="preview-row" id="previewRow">
       <button type="button" class="preview-btn" disabled>Botão de exemplo</button>
@@ -779,20 +772,23 @@
 <script>
 (function () {
   const API_BASE = window.location.origin + '/api';
-  const DEFAULTS = { accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#15120d' };
+  const DEFAULTS = { accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f' };
   const SWATCHES = ['#d8ab4f', '#4caf6e', '#5b8dd8', '#c05c8f', '#d9685f', '#2e6b52', '#8a6b32', '#7d5ba6'];
 
-  // Modelos prontos — paleta inteira de um clique, incluindo o fundo (cada
-  // um com um tom de fundo próprio, não só a cor de destaque). "WhatsApp"
-  // usa as cores reais da marca (verde #25D366 / teal #128C7E) e o fundo bem
-  // escuro do WhatsApp Web no modo escuro; os demais são combinações
-  // próprias, todos com "dim" escolhido à mão (não pela derivação automática
-  // de 63%), pra ficar fiel ao visual de referência de cada um.
+  // Modelos prontos — cor de destaque de um clique. Até 2026-08-30 cada um
+  // também trazia um tom de FUNDO próprio (o preset "WhatsApp" usava o
+  // fundo bem escuro do WhatsApp Web, por exemplo) — isso saiu junto da
+  // remoção geral de bgColor da paleta pessoal (fundo agora é só do tema
+  // claro/escuro, nunca mais de um preset ou cor customizada; ver
+  // comentário em FIELD_DEFS mais abaixo). "WhatsApp" continua usando as
+  // cores reais da marca (verde #25D366 / teal #128C7E), só sem o fundo
+  // próprio — aplica sobre o fundo do tema ativo no momento (claro ou
+  // escuro, o que o usuário já tiver escolhido na sidebar).
   const TEMPLATES = [
-    { id: 'default', name: 'Padrão', accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#15120d' },
-    { id: 'whatsapp', name: 'WhatsApp', accentColor: '#25D366', accentColorDim: '#128C7E', greenColor: '#25D366', redColor: '#d9685f', bgColor: '#0b141a' },
-    { id: 'blue', name: 'Azul Corporativo', accentColor: '#5b8dd8', accentColorDim: '#3a5f96', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#0f1420' },
-    { id: 'wine', name: 'Bordô', accentColor: '#c05c8f', accentColorDim: '#7d3a5a', greenColor: '#4caf6e', redColor: '#d9685f', bgColor: '#180f12' },
+    { id: 'default', name: 'Padrão', accentColor: '#d8ab4f', accentColorDim: '#8a6b32', greenColor: '#4caf6e', redColor: '#d9685f' },
+    { id: 'whatsapp', name: 'WhatsApp', accentColor: '#25D366', accentColorDim: '#128C7E', greenColor: '#25D366', redColor: '#d9685f' },
+    { id: 'blue', name: 'Azul Corporativo', accentColor: '#5b8dd8', accentColorDim: '#3a5f96', greenColor: '#4caf6e', redColor: '#d9685f' },
+    { id: 'wine', name: 'Bordô', accentColor: '#c05c8f', accentColorDim: '#7d3a5a', greenColor: '#4caf6e', redColor: '#d9685f' },
   ];
 
   // Mesma proporção real entre --gold (#d8ab4f) e --gold-dim (#8a6b32) já
@@ -1035,21 +1031,23 @@
   const greenHex = document.getElementById('greenHex');
   const redPicker = document.getElementById('redPicker');
   const redHex = document.getElementById('redHex');
-  const bgPicker = document.getElementById('bgPicker');
-  const bgHex = document.getElementById('bgHex');
   const swatchesWrap = document.getElementById('swatches');
   const previewRow = document.getElementById('previewRow');
   const saveBtn = document.getElementById('saveBtn');
   const resetBtn = document.getElementById('resetBtn');
 
-  // Cada campo é {picker, hex, cssVar, previewVar} — trata os 5 de forma
-  // genérica pra não repetir a mesma lógica em cada um.
+  // Cada campo é {picker, hex, cssVar, previewVar} — trata os 4 de forma
+  // genérica pra não repetir a mesma lógica em cada um. `bgColor` SAIU
+  // daqui em 2026-08-30 — fundo agora é responsabilidade exclusiva do
+  // tema claro/escuro (switch na sidebar), nunca mais da paleta pessoal
+  // (eliminava uma corrida real entre os dois mecanismos escrevendo a
+  // mesma variável --bg, ver public/chat.html). Campo mantido no backend
+  // (src/settings.js) por enquanto, só não é mais editável por aqui.
   const FIELD_DEFS = [
     { key: 'accentColor', picker: colorPicker, hex: colorHex, cssVar: '--gold', rgbVar: '--gold-rgb', previewVar: '--preview-color' },
     { key: 'accentColorDim', picker: colorDimPicker, hex: colorDimHex, cssVar: '--gold-dim', rgbVar: null, previewVar: null },
     { key: 'greenColor', picker: greenPicker, hex: greenHex, cssVar: '--green', rgbVar: '--green-rgb', previewVar: '--preview-green' },
     { key: 'redColor', picker: redPicker, hex: redHex, cssVar: '--red', rgbVar: '--red-rgb', previewVar: '--preview-red' },
-    { key: 'bgColor', picker: bgPicker, hex: bgHex, cssVar: '--bg', rgbVar: null, previewVar: null, isBg: true },
   ];
 
   // rgba() não aceita hex direto — mantém a versão "216,171,79" à parte pra
@@ -1060,33 +1058,12 @@
     return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
   }
 
-  // --surface/--surface-2 não são campo à parte — derivam do fundo
-  // clareando um pouco cada canal (mesma lógica usada em __applyPalette,
-  // ver o script no <head>).
-  function deriveSurfaces(hex) {
-    const n = parseInt(hex.slice(1), 16);
-    const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    const lighten = (amt) => {
-      const rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
-      const gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
-      const bb = Math.min(255, b + amt).toString(16).padStart(2, '0');
-      return '#' + rr + gg + bb;
-    };
-    return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
-  }
-
   function setField(def, color) {
     def.picker.value = color;
     def.hex.value = color;
     document.documentElement.style.setProperty(def.cssVar, color);
     if (def.rgbVar) document.documentElement.style.setProperty(def.rgbVar, hexToRgbStr(color));
     if (def.previewVar) previewRow.style.setProperty(def.previewVar, color);
-    if (def.isBg) {
-      const surf = deriveSurfaces(color);
-      document.documentElement.style.setProperty('--surface', surf.surface);
-      document.documentElement.style.setProperty('--surface-2', surf.surface2);
-      document.documentElement.style.setProperty('--border', surf.border);
-    }
     // Ponto único por onde toda mudança de cor passa (swatch, input manual,
     // modelo pronto, load() e reset) — atualiza o destaque do card de
     // modelo ativo aqui em vez de espalhar a chamada em cada handler.
@@ -1120,7 +1097,7 @@
   function currentColors() {
     return {
       accentColor: colorHex.value.trim(), accentColorDim: colorDimHex.value.trim(),
-      greenColor: greenHex.value.trim(), redColor: redHex.value.trim(), bgColor: bgHex.value.trim(),
+      greenColor: greenHex.value.trim(), redColor: redHex.value.trim(),
     };
   }
 
@@ -1131,8 +1108,7 @@
       const match = t && t.accentColor.toLowerCase() === cur.accentColor.toLowerCase()
         && t.accentColorDim.toLowerCase() === cur.accentColorDim.toLowerCase()
         && t.greenColor.toLowerCase() === cur.greenColor.toLowerCase()
-        && t.redColor.toLowerCase() === cur.redColor.toLowerCase()
-        && t.bgColor.toLowerCase() === cur.bgColor.toLowerCase();
+        && t.redColor.toLowerCase() === cur.redColor.toLowerCase();
       el.classList.toggle('active', !!match);
     });
   }
@@ -1142,7 +1118,6 @@
     setField(FIELD_DEFS[1], t.accentColorDim);
     setField(FIELD_DEFS[2], t.greenColor);
     setField(FIELD_DEFS[3], t.redColor);
-    setField(FIELD_DEFS[4], t.bgColor);
     // O modelo já traz uma cor secundária pensada pra combinar (não é a
     // derivada automática de 63%) — desmarca o "automático" pra não
     // sobrescrever na próxima vez que a principal mudar.
@@ -1156,7 +1131,6 @@
   templateGrid.innerHTML = TEMPLATES.map((t) => `
     <button type="button" class="template-card" data-id="${t.id}">
       <div class="template-swatches">
-        <span style="background:${t.bgColor}"></span>
         <span style="background:${t.accentColor}"></span>
         <span style="background:${t.accentColorDim}"></span>
         <span style="background:${t.greenColor}"></span>
@@ -1198,11 +1172,6 @@
     const v = redHex.value.trim();
     if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[3], v);
   });
-  bgPicker.addEventListener('input', () => setField(FIELD_DEFS[4], bgPicker.value));
-  bgHex.addEventListener('input', () => {
-    const v = bgHex.value.trim();
-    if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[4], v);
-  });
 
   autoDimCheck.addEventListener('change', () => {
     const auto = autoDimCheck.checked;
@@ -1220,7 +1189,6 @@
       setField(FIELD_DEFS[0], data.accentColor || DEFAULTS.accentColor);
       setField(FIELD_DEFS[2], data.greenColor || DEFAULTS.greenColor);
       setField(FIELD_DEFS[3], data.redColor || DEFAULTS.redColor);
-      setField(FIELD_DEFS[4], data.bgColor || DEFAULTS.bgColor);
       // Se o dono nunca customizou a secundária à mão (não é exatamente a
       // derivada da principal salva), assume "automática" — melhor
       // suposição possível sem guardar um booleano à parte no banco.
@@ -1237,7 +1205,6 @@
         colorDim: data.accentColorDim || null,
         green: data.greenColor || null,
         red: data.redColor || null,
-        bg: data.bgColor || null,
       });
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
@@ -1250,7 +1217,6 @@
       accentColorDim: colorDimHex.value.trim(),
       greenColor: greenHex.value.trim(),
       redColor: redHex.value.trim(),
-      bgColor: bgHex.value.trim(),
     };
     for (const [field, value] of Object.entries(patch)) {
       if (!/^#[0-9a-f]{6}$/i.test(value)) {
@@ -1267,7 +1233,7 @@
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'falha ao salvar');
-      syncPaletteCache({ color: patch.accentColor, colorDim: patch.accentColorDim, green: patch.greenColor, red: patch.redColor, bg: patch.bgColor });
+      syncPaletteCache({ color: patch.accentColor, colorDim: patch.accentColorDim, green: patch.greenColor, red: patch.redColor });
       if (window.showToast) window.showToast('Paleta salva — já vale em todas as telas.', 'success');
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
@@ -1282,14 +1248,13 @@
       const res = await apiFetch(`${API_BASE}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accentColor: null, accentColorDim: null, greenColor: null, redColor: null, bgColor: null }),
+        body: JSON.stringify({ accentColor: null, accentColorDim: null, greenColor: null, redColor: null }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'falha ao restaurar');
       setField(FIELD_DEFS[0], DEFAULTS.accentColor);
       setField(FIELD_DEFS[1], DEFAULTS.accentColorDim);
       setField(FIELD_DEFS[2], DEFAULTS.greenColor);
       setField(FIELD_DEFS[3], DEFAULTS.redColor);
-      setField(FIELD_DEFS[4], DEFAULTS.bgColor);
       autoDimCheck.checked = true;
       colorDimPicker.disabled = true;
       colorDimHex.disabled = true;

@@ -8,12 +8,29 @@
   if (localStorage.getItem('sidebarCollapsed') === '1') {
     document.documentElement.classList.add('sidebar-collapsed');
   }
+  // Tema claro/escuro (2026-08-30) — preferência POR NAVEGADOR (mesmo
+  // padrão de sidebarCollapsed acima, localStorage puro, sem round-trip
+  // ao servidor), aplicada ANTES do primeiro paint pra nunca piscar o
+  // tema errado. Padrão 'dark' se nunca escolhido (comportamento atual
+  // do projeto, sem mudança pra quem não mexer no switch novo).
+  if (localStorage.getItem('theme') === 'light') {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
   // Paleta customizada (tela Configurações) — aplica do cache local ANTES
   // do primeiro paint, pra não piscar a cor padrão antes da de verdade
   // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
   // fetch atualiza o cache pra próxima navegação ficar sem flash também.
   (function () {
-    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red', bg: '--bg' };
+    // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
+    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
+    // tema claro/escuro (ver html[data-theme="light"] no <style> e o
+    // switch no rodapé), nunca mais da paleta pessoal. Antes disso, os
+    // dois mecanismos escreviam a MESMA variável --bg em momentos
+    // diferentes — uma corrida real que só piorou quando um 3º
+    // concorrente (tema) também precisaria escrever ali. Cor de DESTAQUE
+    // (gold/green/red) continua igual nos dois temas, por decisão de
+    // produto — só isso a paleta pessoal ainda controla.
+    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
     // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
     // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
     // versão "216,171,79" em variável à parte pra esses casos acompanharem
@@ -22,21 +39,6 @@
     function hexToRgbStr(hex) {
       var n = parseInt(hex.slice(1), 16);
       return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
-    }
-    // --surface/--surface-2 (fundo dos cards/painéis) não são campos à parte
-    // — derivam do fundo clareando um pouco cada canal (o fundo é sempre bem
-    // escuro; multiplicar quase não move um valor perto de zero, por isso
-    // soma em vez de multiplicar, igual a lógica já usada pro dourado).
-    function deriveSurfaces(hex) {
-      var n = parseInt(hex.slice(1), 16);
-      var r = (n >> 16) & 255, g = (n >> 8) & 255, bch = n & 255;
-      function lighten(amt) {
-        var rr = Math.min(255, r + amt).toString(16).padStart(2, '0');
-        var gg = Math.min(255, g + amt).toString(16).padStart(2, '0');
-        var bb = Math.min(255, bch + amt).toString(16).padStart(2, '0');
-        return '#' + rr + gg + bb;
-      }
-      return { surface: lighten(8), surface2: lighten(15), border: lighten(26) };
     }
     // `skipVisual` (HANDOFF Parte EO — janela residual deixada em aberto
     // desde a Parte DP): quando true, grava o cache normalmente mas NUNCA
@@ -47,7 +49,7 @@
     // reportado, mesmo com o cache-antes-do-paint da Parte DP já em vigor).
     window.__applyPalette = function (b, prefix, skipVisual) {
       prefix = prefix || 'palette_';
-      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red, bg: b.bg };
+      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
       Object.keys(MAP).forEach(function (k) {
         if (values[k]) {
           if (!skipVisual) document.documentElement.style.setProperty(MAP[k], values[k]);
@@ -57,33 +59,12 @@
             if (!skipVisual) document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
             localStorage.setItem(prefix + k + '_rgb', rgbStr);
           }
-          if (k === 'bg') {
-            var surf = deriveSurfaces(values[k]);
-            if (!skipVisual) {
-              document.documentElement.style.setProperty('--surface', surf.surface);
-              document.documentElement.style.setProperty('--surface-2', surf.surface2);
-              document.documentElement.style.setProperty('--border', surf.border);
-            }
-            localStorage.setItem(prefix + 'surface', surf.surface);
-            localStorage.setItem(prefix + 'surface2', surf.surface2);
-            localStorage.setItem(prefix + 'border', surf.border);
-          }
         } else {
           if (!skipVisual) document.documentElement.style.removeProperty(MAP[k]);
           localStorage.removeItem(prefix + k);
           if (RGB_MAP[k]) {
             if (!skipVisual) document.documentElement.style.removeProperty(RGB_MAP[k]);
             localStorage.removeItem(prefix + k + '_rgb');
-          }
-          if (k === 'bg') {
-            if (!skipVisual) {
-              document.documentElement.style.removeProperty('--surface');
-              document.documentElement.style.removeProperty('--surface-2');
-              document.documentElement.style.removeProperty('--border');
-            }
-            localStorage.removeItem(prefix + 'surface');
-            localStorage.removeItem(prefix + 'surface2');
-            localStorage.removeItem(prefix + 'border');
           }
         }
       });
@@ -102,18 +83,20 @@
           var cachedRgb = localStorage.getItem(prefix + k + '_rgb');
           if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
         }
-        if (k === 'bg' && cached) {
-          var cachedSurface = localStorage.getItem(prefix + 'surface');
-          var cachedSurface2 = localStorage.getItem(prefix + 'surface2');
-          var cachedBorder = localStorage.getItem(prefix + 'border');
-          if (cachedSurface) document.documentElement.style.setProperty('--surface', cachedSurface);
-          if (cachedSurface2) document.documentElement.style.setProperty('--surface-2', cachedSurface2);
-          if (cachedBorder) document.documentElement.style.setProperty('--border', cachedBorder);
-        }
       });
     }
     applyCachedPalette('palette_');
     applyCachedPalette('personalPalette_');
+    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
+    // salvos por usuários que customizaram fundo antes do tema claro
+    // existir) — limpo aqui, uma vez, pra não competir silenciosamente
+    // com o tema nem ficar lixo morto em localStorage pra sempre. Nunca
+    // escreve nada nessas chaves de novo depois desta versão.
+    ['palette_', 'personalPalette_'].forEach(function (prefix) {
+      ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
+        localStorage.removeItem(prefix + k);
+      });
+    });
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -148,6 +131,57 @@
     --footer-h: 46px;
     --header-h: 90px;
     --chat-tabs-h: 0px; /* vira 33px via body.has-chat-tabs — ver #chatTabs no JS */
+    /* Textura de pontos do fundo do feed de mensagens (.messages) — RGB
+       puro pra usar em rgba() com opacidade baixa; branco destaca sobre
+       fundo escuro, precisa virar preto no tema claro (ver
+       html[data-theme="light"] abaixo) senão fica invisível sobre um
+       fundo já quase branco. */
+    --dots-rgb: 255,255,255;
+    /* --gold já tem contraste de sobra contra fundo escuro (~8.8:1) — só
+       existe pra o tema claro precisar de um tom mais escuro pro mesmo
+       papel (ver --gold-on-light em html[data-theme="light"] abaixo).
+       Aqui aponta pro próprio --gold, pra código que usa
+       var(--gold-on-light) funcionar igual nos dois temas sem duplicar
+       seletor. */
+    --gold-on-light: var(--gold);
+  }
+  /* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito por
+     applyTheme() antes do primeiro paint (ver script no <head>, mesmo
+     padrão de cache-antes-do-paint já usado pra paleta pessoal). Só
+     FUNDO/SUPERFÍCIE/TEXTO mudam entre os dois temas — a cor de DESTAQUE
+     (--gold/--gold-dim/--green/--red, incl. presets de Configurações)
+     continua IGUAL nos dois, por decisão de produto (nunca mais controla
+     --bg: essa responsabilidade é só do tema agora, elimina a corrida real
+     que existia entre paleta pessoal e brand global escrevendo a mesma
+     variável, ver comentário em applyPersonalPalette mais abaixo).
+     --bubble-theirs/--bubble-mine-text também mudam (bolha do contato e
+     texto sobre a bolha própria dependem do contraste de fundo). */
+  html[data-theme="light"]{
+    --bg: #f7f4ee;
+    --surface: #ffffff;
+    --surface-2: #eee8db;
+    --border: #ddd4c0;
+    --text: #2a2318;
+    --text-muted: #6b6152;
+    --text-faint: #9a8f7a;
+    --bubble-mine-text: #1a1408;
+    --bubble-theirs: #fbfaf7;
+    --dots-rgb: 0,0,0;
+    /* Achado real do design-system-checker-agent (2026-08-30): --gold
+       (#d8ab4f, IGUAL nos dois temas por decisão de produto) rende só
+       ~2.1:1 de contraste contra superfície clara — abaixo do mínimo AA
+       (4.5:1) pra TEXTO. --gold continua valendo como acento decorativo
+       (borda fina, ícone, fundo translúcido, nunca lido como texto) nos
+       dois temas; --gold-on-light é só pra onde --gold vira COR DE TEXTO
+       de leitura (valor de KPI, item de nav ativo) — ~5.6:1, dentro do
+       AA com folga. Sem equivalente no tema escuro (--gold já tem
+       contraste de sobra ali, ~8.8:1). */
+    --gold-on-light: #8a6018;
+    /* Bolha do contato ficava com contraste fraco contra --bg (~8-17
+       pontos por canal, achado real do checker) — tom levemente
+       off-white em vez de branco puro aumenta essa diferença sem
+       comprometer o "quase branco" pretendido; --border reforça com uma
+       borda sutil (ver .bubble-row.theirs .bubble mais abaixo). */
   }
   *{ box-sizing: border-box; }
 
@@ -288,13 +322,35 @@
     transition: background .15s, color .15s;
   }
   .nav-item:hover{ background: var(--surface-2); color: var(--text); }
-  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
+  /* color no texto usa --gold-on-light (achado real do checker: --gold
+     puro rende só ~1.8:1 aqui no tema claro, o rótulo do item ATIVO da
+     sidebar — pior legibilidade da tela) — o ícone abaixo continua com
+     --gold original de propósito (decorativo, maior, tolera contraste
+     menor; ver mesmo raciocínio em .painel-kpi-card .value). */
+  .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold-on-light); }
   .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
   .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
   .nav-item.active .nav-icon{ color: var(--gold); }
   .nav-label{ overflow:hidden; text-overflow:ellipsis; }
   html.sidebar-collapsed .nav-label{ display:none; }
   html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
+
+  /* Toggle de tema claro/escuro (2026-08-30) — mesmo formato de .nav-item
+     dos demais itens de navegação (regra global: preferência pessoal só
+     vira painel de config à parte quando não tem contexto visual óbvio;
+     aqui o contexto É a sidebar, mesmo lugar de sidebarCollapsed). Sol
+     visível só no tema claro, lua só no escuro — nunca os dois ao mesmo
+     tempo (o JS troca via classe .light-active no <button>, refletindo
+     data-theme do <html>). */
+  .theme-icon-sun, .theme-icon-moon{ display:none; }
+  .theme-toggle-item .theme-icon-moon{ display:block; }
+  .theme-toggle-item.light-active .theme-icon-sun{ display:block; }
+  .theme-toggle-item.light-active .theme-icon-moon{ display:none; }
+  /* .theme-toggle-item fica FORA de .sidebar-nav (não rola com o resto da
+     navegação, sempre visível — mesmo espírito de .sidebar-bottom logo
+     abaixo dele) — filho direto de .sidebar, que não tem padding próprio
+     (só .sidebar-nav tem), por isso reaplica aqui. */
+  .theme-toggle-item{ margin: 0 10px 8px; width: calc(100% - 20px); }
 
   .nav-tip{
     position:absolute; left: calc(100% + 10px); top:50%; transform:translateY(-50%) translateX(-4px);
@@ -610,7 +666,7 @@
   .painel-head p{ font-size:12.5px; color:var(--text-muted); margin:4px 0 0; }
   .painel-kpi-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:22px; }
   .painel-kpi-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
-  .painel-kpi-card .value{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--gold); }
+  .painel-kpi-card .value{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--gold-on-light); }
   .painel-kpi-card .label{ font-size:12px; color:var(--text-muted); margin-top:4px; }
   .painel-panel{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:20px; }
   .painel-panel h3{ font-family:'Fraunces',serif; font-weight:600; font-size:14.5px; margin:0 0 14px; }
@@ -847,7 +903,7 @@
        normalmente quando há muitas mensagens (o conteúdo já preenche a
        altura e cresce pra cima com o scroll, como sempre). */
     justify-content: flex-end;
-    background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+    background-image: radial-gradient(circle at 1px 1px, rgba(var(--dots-rgb),0.025) 1px, transparent 0);
     background-size: 22px 22px;
   }
   .messages::-webkit-scrollbar{ width: 8px; }
@@ -895,7 +951,7 @@
     border-left: 3px solid var(--gold-dim); background: rgba(0,0,0,.14); border-radius: 6px;
     padding: 5px 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; cursor: pointer;
   }
-  .bubble-row.theirs .quoted-block{ background: rgba(255,255,255,.06); border-left-color: var(--gold); }
+  .bubble-row.theirs .quoted-block{ background: rgba(var(--dots-rgb),.06); border-left-color: var(--gold); }
   .quoted-author{ font-weight: 600; color: var(--gold); margin-bottom: 1px; font-size: 11.5px; }
   .quoted-text{
     opacity: .8; overflow: hidden; text-overflow: ellipsis;
@@ -928,7 +984,19 @@
     position: relative; box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16);
   }
   .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 4px; color: var(--text); }
-  .bubble code{ background:rgba(255,255,255,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
+  /* Borda sutil só no tema claro — achado real do checker: --bubble-theirs
+     (quase branco) contra --bg (bege bem claro) tem diferença de contraste
+     bem mais sutil que no tema escuro; --border já existe e separa a
+     bolha do fundo sem precisar escurecer mais o branco pretendido. */
+  html[data-theme="light"] .bubble-row.theirs .bubble{ border: 1px solid var(--border); }
+  /* Base fixa em preto (escurece) — está SEMPRE dentro da bolha própria
+     dourada por padrão (só muda pra --dots-rgb dentro de .theirs, ver
+     override abaixo), mesmo padrão de .quoted-block acima. Achado real do
+     checker (2026-08-30): tinha virado rgba(var(--dots-rgb)) incondicional,
+     o que clareava certo em .theirs mas ESCURECIA ERRADO dentro da bolha
+     própria no tema claro (a bolha dourada nunca muda de fundo). */
+  .bubble code{ background:rgba(0,0,0,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
+  .bubble-row.theirs .bubble code{ background:rgba(var(--dots-rgb),.08); }
   .bubble-row.mine .bubble{
     background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 4px;
     box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.25);
@@ -994,7 +1062,16 @@
     background: rgba(0,0,0,.16); border-radius: 9px; padding: 9px 10px; min-width: 190px; max-width: 260px;
   }
   .doc-attachment:hover{ background: rgba(0,0,0,.24); }
-  .doc-icon{ flex-shrink: 0; width: 30px; height: 30px; border-radius: 7px; background: rgba(255,255,255,.12); color: currentColor; display: flex; align-items: center; justify-content: center; }
+  /* Diferente de .bubble code/.quoted-block acima: aqui o --dots-rgb
+     incondicional está CERTO, não errado — .doc-attachment (pai) já
+     escurece com preto fixo em AMBAS as bolhas (própria dourada e
+     .theirs) independente de tema, então .doc-icon precisa CLAREAR contra
+     esse fundo escuro nos dois casos no tema escuro, e ESCURECER nos dois
+     casos no tema claro (a bolha própria continua dourada/clara, e
+     .theirs também fica clara com --bubble-theirs claro) — depende do
+     TEMA da página, não do tipo de bolha, diferente do code/quoted-block
+     que dependem de qual bolha especificamente. */
+  .doc-icon{ flex-shrink: 0; width: 30px; height: 30px; border-radius: 7px; background: rgba(var(--dots-rgb),.12); color: currentColor; display: flex; align-items: center; justify-content: center; }
   .doc-icon svg{ width: 16px; height: 16px; }
   .doc-info{ min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .doc-name{ font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1334,6 +1411,15 @@
    </div>
   </nav>
 
+  <button type="button" id="themeToggleBtn" class="nav-item theme-toggle-item">
+    <span class="nav-icon">
+      <svg class="theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+    </span>
+    <span class="nav-label" id="themeToggleLabel">Tema claro</span>
+    <span class="nav-tip" id="themeToggleTip">Tema claro</span>
+  </button>
+
   <div class="sidebar-bottom">
     <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg></span>
@@ -1502,6 +1588,35 @@
     sidebarToggle.addEventListener('click', function () {
       var collapsed = document.documentElement.classList.toggle('sidebar-collapsed');
       localStorage.setItem('sidebarCollapsed', collapsed ? '1' : '0');
+    });
+  }
+
+  // Toggle de tema claro/escuro (2026-08-30) — mesma preferência POR
+  // NAVEGADOR de sidebarCollapsed acima (localStorage puro), aplicada já
+  // antes do primeiro paint (ver script no <head>, data-theme). Aqui só
+  // sincroniza a APARÊNCIA do botão com o estado já ativo e liga o clique.
+  var themeToggleBtn = document.getElementById('themeToggleBtn');
+  var themeToggleLabel = document.getElementById('themeToggleLabel');
+  var themeToggleTip = document.getElementById('themeToggleTip');
+  function syncThemeToggleUI() {
+    var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+    if (themeToggleBtn) themeToggleBtn.classList.toggle('light-active', isLight);
+    var label = isLight ? 'Tema escuro' : 'Tema claro';
+    if (themeToggleLabel) themeToggleLabel.textContent = label;
+    if (themeToggleTip) themeToggleTip.textContent = label;
+  }
+  syncThemeToggleUI();
+  if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', function () {
+      var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      if (isLight) {
+        document.documentElement.removeAttribute('data-theme');
+        localStorage.setItem('theme', 'dark');
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        localStorage.setItem('theme', 'light');
+      }
+      syncThemeToggleUI();
     });
   }
 
@@ -2640,7 +2755,10 @@
       if (!res.ok) return;
       const p = await res.json();
       if (window.__applyPalette) {
-        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor, bg: p.bgColor }, 'personalPalette_');
+        // bg não é mais parte da paleta pessoal (ver comentário no <head>)
+        // — o backend pode continuar devolvendo p.bgColor por enquanto
+        // (campo legado, ver src/settings.js), simplesmente ignorado aqui.
+        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor }, 'personalPalette_');
       }
     } catch {}
   }
