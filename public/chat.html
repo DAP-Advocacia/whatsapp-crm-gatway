@@ -527,6 +527,10 @@
   .conv-item:hover .conv-item-action-btn{ opacity:1; }
   .conv-item-action-btn:hover{ background:var(--surface); color:var(--gold); }
   .conv-item-action-btn.muted{ opacity:1; color:var(--text-muted); }
+  /* Pendente MANUAL (ver db/schema.sql, pending_manual) — cor dourada
+     pra diferenciar do badge automático abaixo (.conv-item-pending, sem
+     --manual, vermelho — deriva de mensagem não lida, não é setável). */
+  .conv-item-action-btn.pending-active{ opacity:1; color:var(--gold); }
   .conv-item-action-btn svg{ width:14px; height:14px; display:block; }
 
   .tag-chip{
@@ -550,6 +554,13 @@
     font-size:10.5px; padding:2px 8px; border-radius:100px;
     border:1px solid var(--red); color:var(--red); background:rgba(var(--red-rgb),.1);
     white-space:nowrap;
+  }
+  /* Pendente MANUAL — mesmo formato do badge automático acima, cor
+     dourada (mesmo tom de "marcação manual do atendente" já usado em
+     nota interna/Dapinho neste projeto) pra nunca ser confundido com o
+     indicador automático de não-lida. */
+  .conv-item-pending--manual{
+    border-color: var(--gold); color: var(--gold); background: rgba(var(--gold-rgb),.1);
   }
 
   .assignee-filter{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -1120,6 +1131,20 @@
   .insight-action-btn:disabled{ opacity:.4; cursor:not-allowed; }
   .insight-action-btn--active{ background:rgba(var(--insight-rgb),.3); color:var(--text); }
   .insight-sent-tag{ font-size:11px; color:var(--text-faint); }
+
+  /* Ação dentro de bolha do Dapinho (ex: "Baixar relatório") — mesmo
+     espírito compacto de .insight-action-btn acima (ação secundária
+     inline, não um .btn genérico de modal/formulário), mas em tom
+     dourado (cor do Dapinho no resto do app) em vez do azul --insight
+     (esse é específico do Copiloto Comercial). Achado do
+     design-system-checker-agent (2026-08-30): o botão de relatório
+     usava .btn.secondary, visualmente "grande demais" dentro do fluxo
+     compacto de uma bolha de chat. */
+  .dapinho-action-btn{
+    background:rgba(var(--gold-rgb),.12); border:1px solid rgba(var(--gold-rgb),.35); color:var(--text-muted);
+    border-radius:6px; cursor:pointer; font-size:11px; padding:4px 10px; font-family:inherit; margin-top:6px;
+  }
+  .dapinho-action-btn:hover{ color:var(--gold); border-color:rgba(var(--gold-rgb),.6); }
 
   /* Painel lateral — seção "Insights de IA" agrupada por tópico
      (renderInsightsSection), mesmo padrão visual compacto de
@@ -2821,6 +2846,24 @@
     }
   }
 
+  async function setConversationPendingManual(sessionId, phone, pending) {
+    try {
+      const res = await apiFetch(`${API_BASE}/conversations/pending`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: sessionId, phone, pending }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao atualizar');
+      // otimista: só troca o estado na hora, a conversa continua na lista do mesmo jeito
+      const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+      if (conv) conv.pendingManual = pending;
+      renderConvList();
+      if (window.showToast) window.showToast(pending ? 'Marcada como pendente.' : 'Pendência removida.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast('Erro ao atualizar: ' + err.message, 'error');
+    }
+  }
+
   async function setConversationNotifications(sessionId, phone, enabled) {
     try {
       const res = await apiFetch(`${API_BASE}/conversations/notifications`, {
@@ -3193,6 +3236,9 @@
                     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.7 3A6 6 0 0 1 18 8c0 2 .3 3.4.8 4.4"/><path d="M17 17H3s3-2 3-9c0-.3 0-.6.1-.9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M2 2l20 20"/></svg>'
                     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'}
                 </button>
+                <button class="conv-item-action-btn ${c.pendingManual ? 'pending-active' : ''}" data-pending-toggle title="${c.pendingManual ? 'Remover marcação de pendente' : 'Marcar como pendente'}" type="button">
+                  <svg viewBox="0 0 24 24" fill="${c.pendingManual ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22V15"/></svg>
+                </button>
                 <button class="conv-item-action-btn" data-archive-toggle title="${state.archivedView ? 'Restaurar conversa' : 'Arquivar conversa'}" type="button">
                   ${state.archivedView
                     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8h18"/><path d="M5 8V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>'
@@ -3201,8 +3247,9 @@
               </span>
             </div>
             <div class="conv-item-snippet">${mine ? 'Você: ' : ''}${escapeHtml(snippet)}</div>
-            ${(c.tags && c.tags.length) || c.assignedToName || c.unreadCount > 0 ? `<div class="conv-item-tags">
+            ${(c.tags && c.tags.length) || c.assignedToName || c.unreadCount > 0 || c.pendingManual ? `<div class="conv-item-tags">
               ${c.unreadCount > 0 ? `<span class="conv-item-pending" title="${c.unreadCount} mensagem(ns) não lida(s)">Pendente</span>` : ''}
+              ${c.pendingManual ? `<span class="conv-item-pending conv-item-pending--manual" title="Marcada manualmente como pendente">Marcada como pendente</span>` : ''}
               ${c.assignedToName ? `<span class="conv-item-assignee" title="Atendida por ${escapeHtml(c.assignedToName)}"><span class="avatar xs">${escapeHtml(initials(c.assignedToName))}</span>${escapeHtml(c.assignedToName)}</span>` : ''}
               ${(c.tags || []).map((t) => tagChip(t, false)).join('')}
             </div>` : ''}
@@ -3213,10 +3260,18 @@
 
     convList.querySelectorAll('.conv-item[data-session]').forEach((el) => {
       el.addEventListener('click', (e) => {
-        if (e.target.closest('[data-archive-toggle], [data-mute-toggle]')) return; // tratado abaixo, não abre a conversa
+        if (e.target.closest('[data-archive-toggle], [data-mute-toggle], [data-pending-toggle]')) return; // tratado abaixo, não abre a conversa
         const conv = state.conversations.find((c) => c.sessionId === el.dataset.session && c.phone === el.dataset.phone);
         if (conv) openConversation(conv);
       });
+      const pendingBtn = el.querySelector('[data-pending-toggle]');
+      if (pendingBtn) {
+        pendingBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const conv = state.conversations.find((c) => c.sessionId === el.dataset.session && c.phone === el.dataset.phone);
+          setConversationPendingManual(el.dataset.session, el.dataset.phone, !conv?.pendingManual);
+        });
+      }
       const archiveBtn = el.querySelector('[data-archive-toggle]');
       if (archiveBtn) {
         archiveBtn.addEventListener('click', (e) => {
@@ -3766,10 +3821,18 @@
     }
     const html = state.dapinho.messages.map((msg) => {
       const mine = msg.direction === 'out';
+      // Relatório (ver dapinho.ask, generate_report): botão de download em
+      // vez de só texto — a rota é sempre a mesma (/api/dapinho/report,
+      // sem :id), então não precisa vir persistida na mensagem (ver
+      // comentário em src/dapinho.js sobre isso).
+      const reportButtonHtml = msg.type === 'report'
+        ? `<button type="button" class="dapinho-action-btn" data-dapinho-report-btn>Baixar relatório (PDF)</button>`
+        : '';
       return `
         <div class="bubble-row ${mine ? 'mine' : 'theirs'}">
           <div class="bubble">
             <p>${escapeHtml(msg.text)}</p>
+            ${reportButtonHtml}
             <span class="timestamp">${formatTime(msg.createdAt)}</span>
           </div>
         </div>
@@ -3781,6 +3844,33 @@
       ` : '');
     el.innerHTML = compactHtml(html);
     el.scrollTop = el.scrollHeight;
+    el.querySelectorAll('[data-dapinho-report-btn]').forEach((btn) => {
+      btn.addEventListener('click', downloadDapinhoReport);
+    });
+  }
+
+  // Mesmo padrão de download client-side já usado em exportAsPdf (blob +
+  // link temporário) — rota protegida por requireAuth, então precisa de
+  // apiFetch (leva o Bearer token), um <a href> direto não funcionaria.
+  async function downloadDapinhoReport() {
+    try {
+      const res = await apiFetch(`${DAPINHO_API_BASE}/report`);
+      if (!res.ok) {
+        // Erro (ex: 429 do rate limit) vem como JSON, não PDF — nunca
+        // tratar o corpo como blob binário nesse caso.
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Falha ao gerar relatório');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `relatorio-dapinho-${Date.now()}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
   }
 
   function renderConversationView() {

@@ -237,6 +237,18 @@ async function setConversationArchived(sessionId, phone, archived) {
   );
 }
 
+// Marcar/desmarcar "pendente" MANUALMENTE (ver db/schema.sql,
+// pending_manual) — diferente do indicador automático (unreadCount > 0),
+// este é um estado explícito que só o próprio atendente liga/desliga
+// (ou o Dapinho, a pedido dele — ver src/dapinho.js). Mesmo padrão de
+// update direto de setConversationArchived acima.
+async function setConversationPendingManual(sessionId, phone, pending) {
+  await pool.query(
+    `update conversations set pending_manual = $1, updated_at = now() where session_id = $2 and phone = $3`,
+    [pending, sessionId, phone]
+  );
+}
+
 // Atribui (assignedTo preenchido) ou desatribui (null) o atendimento de uma
 // conversa — ver POST /conversations/assign. `assignedToName` só faz
 // sentido junto de um assignedTo; desatribuir sempre limpa os dois.
@@ -663,7 +675,8 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        coalesce(un.count, 0)::int as "unreadCount",
        c.assigned_to as "assignedTo",
        c.assigned_to_name as "assignedToName",
-       c.agent_enabled as "agentEnabled"
+       c.agent_enabled as "agentEnabled",
+       c.pending_manual as "pendingManual"
      from conversations c
      left join instances i on i.id = c.session_id
      left join contacts ct on ct.owner_id = coalesce(i.owner_id, c.session_id) and ct.phone = c.phone
@@ -1047,6 +1060,7 @@ module.exports = {
   getDealForPhone,
   listConversationsWithDeal,
   setConversationArchived,
+  setConversationPendingManual,
   assignConversation,
   getAssignmentPeriods,
   getUsabilityStatsByOwner,

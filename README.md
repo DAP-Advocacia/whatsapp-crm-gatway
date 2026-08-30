@@ -1837,6 +1837,38 @@ Dois papéis no mesmo canal:
    (`instancesStore.listAllOwnerIds`). Sempre manual (mesma decisão de
    produto já usada no Feed do Bitrix), com botão **"Testar comigo"** que
    manda só pro próprio super admin antes do disparo real pra todos.
+3. **Ações de execução real** (`src/dapinhoActions.js`, 2026-08-30): o
+   Dapinho consegue AGIR, não só responder — enviar mensagem de WhatsApp
+   real, gerar relatório em PDF, arquivar/desarquivar ou marcar/desmarcar
+   uma conversa como pendente, tudo por comando em linguagem natural (ex:
+   "manda um oi pro Daniel Costa", "arquiva a conversa da Maria"). Fluxo:
+   - `detectIntent(question)`: uma chamada à OpenAI (`response_format:
+     json_object`) classifica a mensagem em `chat` | `send_message` |
+     `generate_report` | `archive` | `unarchive` | `mark_pending` |
+     `unmark_pending`, extraindo `contactName`/`text`. Fallback seguro pra
+     `chat` em qualquer erro/tipo desconhecido.
+   - `resolveAndDescribe`: acha a conversa real pelo nome, reaproveitando
+     a MESMA busca já usada no campo de texto do Chat
+     (`store.listConversations(sessionIds, term, ...)`, `ILIKE`) — 0
+     resultados pede confirmação do nome, 2+ lista as opções pra
+     desambiguar, 1 resultado monta uma descrição legível do que vai ser
+     feito.
+   - **Toda ação que grava/envia algo real exige confirmação explícita**
+     (decisão de produto — nunca agir direto a partir do primeiro
+     comando): a ação resolvida fica em `dapinho_state.pending_action`
+     (jsonb), expira em 5min se não confirmada. A resposta seguinte do
+     usuário é checada primeiro contra sim/não (`parseConfirmation`,
+     regex determinística — nunca outra chamada de IA nessa etapa) antes
+     de qualquer outra coisa. `executeAction` só lê os parâmetros JÁ
+     RESOLVIDOS do `pendingAction` salvo — nunca reinterpreta a mensagem
+     de confirmação em texto livre (garante que o que é executado é
+     exatamente o que foi descrito e confirmado, não uma reinterpretação
+     nova).
+   - **"Gerar relatório" é a única ação SEM confirmação** — só leitura
+     (PDF de resumo de todas as conversas ativas, uma linha por contato:
+     nome, telefone, última mensagem, se está aguardando resposta), não
+     grava/envia nada. `GET /api/dapinho/report`, sempre gerado sob
+     demanda (nunca uma versão salva).
 
 **Modelagem** — reaproveita as tabelas `conversations`/`messages` já
 existentes (não uma tabela nova): a "conversa" do Dapinho é uma linha
@@ -1864,12 +1896,26 @@ message do Dapinho tem uma guarda explícita contra prompt injection
 texto como `[mensagem do contato]`, nunca instrução. Anti-flood por dono
 (`dapinho_state`, 15s) é uma única query atômica (`INSERT ... ON
 CONFLICT ... WHERE`), não select-depois-insert — evita bypass por
-paralelismo.
+paralelismo. `GET /api/dapinho/report` tem cooldown PRÓPRIO
+(`checkReportRateLimit`, 15s, coluna `last_report_at` — não acoplado ao
+cooldown do chat) — achado real do `security-reviewer-agent`: a rota não
+tinha nenhum rate limit, permitindo geração repetida de PDF (I/O+CPU por
+request) sem teto. `intent.text` (texto extraído pra `send_message`) tem
+teto explícito `MAX_SEND_TEXT_LENGTH = 1000` — outro achado real: um
+campo DERIVADO da resposta da IA não tinha validação de tamanho antes de
+`gateway.sendMessage`, diferente de `MAX_QUESTION_LENGTH`/
+`MAX_BROADCAST_LENGTH` já usados no resto do módulo.
 
 **Schema**: `dapinho_examples` (few-shot: `owner_id`, `question`,
 `answer`, `embedding vector(1536)`, índice IVFFlat), `dapinho_state`
-(anti-flood, PK `owner_id`), `dapinho_broadcasts` (histórico local de
-avisos manuais disparados, nunca a fonte de verdade de "quem já viu").
+(anti-flood por dono — `last_generated_at` pro chat, `last_report_at`
+pro relatório, `pending_action jsonb` pra ação aguardando confirmação —
+todas PK `owner_id`), `dapinho_broadcasts` (histórico local de avisos
+manuais disparados, nunca a fonte de verdade de "quem já viu").
+`conversations.pending_manual` (novo, 2026-08-30): "pendente" MARCADO À
+MÃO pelo atendente (ou pelo Dapinho, a pedido dele) — independente do
+indicador automático que já existia (`unreadCount > 0`), setável via
+`POST /conversations/pending` ou botão próprio na lista do Chat.
 
 ---
 
@@ -2142,6 +2188,7 @@ revelar que o recurso existe).
 | `avatar?session=&phone=` | GET | `{ url }` — foto de perfil do contato/grupo (cache em `conversations.avatar_url`; busca no WhatsApp só se ainda não tiver nada salvo) — ver §9. |
 | `conversations?session=&search=&archived=` | GET | Lista as conversas (tela Chat) — nome, prévia da última mensagem, tags. `archived` (`true`/`false`, padrão `false`) filtra arquivadas vs ativas — ver §9. |
 | `conversations/archive` | POST | Body `{ session, phone, archived }`. Arquiva/desarquiva uma conversa — só organiza a lista, não afeta envio/recebimento. |
+| `conversations/pending` | POST | Body `{ session, phone, pending }`. Marca/desmarca "pendente" MANUALMENTE (`conversations.pending_manual`, 2026-08-30) — independente do indicador automático (`unreadCount > 0`), setável pelo atendente ou pelo Dapinho a pedido dele (§14.11). |
 | `conversations/notifications` | POST | Body `{ session, phone, enabled }`. Silencia/dessilencia notificações de uma conversa — notifica por padrão (§9). |
 | `conversations/summary` | POST | Body `{ session, phone, contactName? }`. Gera (OpenAI) e persiste o resumo estruturado da conversa (até as últimas 80 mensagens), devolve `{title, subtitle, summary, updatedAt}` — ver §9. |
 | `conversations/summary-history?session=&phone=` | GET | Devolve `{history: [{title,subtitle,summary,createdAt}, ...]}`, mais recente primeiro — toda versão de resumo já gerada pra essa conversa, não só a atual (§9, HANDOFF Parte DY). |
@@ -2345,7 +2392,8 @@ recebem `session`/`owner` alheio pra checar.
 |---|---|---|---|
 | `/` (raiz) | GET | `requireAuth` | A "conversa" fixa do Dapinho pro dono autenticado (mesmo formato de uma linha de `store.listConversations`), pra injetar no topo da lista do Chat. |
 | `/history` | GET | `requireAuth` | Histórico completo (`store.getHistory`), sem tocar status de conexão/presença (não existe pra uma conversa de sistema). |
-| `/ask` | POST | `requireAuth` | Body `{ question, ownerName? }`. Gera e grava a resposta da IA (snapshot de conversas + few-shot), grava o par pergunta+resposta em `dapinho_examples`. Anti-flood de 15s por dono (`dapinho_state`). |
+| `/report` | GET | `requireAuth` | PDF de resumo das conversas ativas do dono (`dapinhoActions.generateReportPdf`) — sempre gerado sob demanda. Rate limit próprio de 15s (`checkReportRateLimit`, `dapinho_state.last_report_at`). |
+| `/ask` | POST | `requireAuth` | Body `{ question, ownerName? }`. Detecta intenção primeiro (chat vs. ação — ver §14.11) — chat gera e grava a resposta da IA (snapshot de conversas + few-shot), grava o par pergunta+resposta em `dapinho_examples`; ação resolve o contato por nome e pede confirmação (fica em `dapinho_state.pending_action`, expira em 5min) antes de executar de verdade. Anti-flood de 15s por dono (`dapinho_state.last_generated_at`). |
 | `/mark-read` | POST | `requireAuth` | Marca como lidas as notificações da conversa do Dapinho — chamado ao abrir. |
 | `/admin/broadcast` | POST | `requireSuperAdmin` | Body `{ title?, message, testOnly? }`. Dispara o aviso de feature nova pra todo `owner_id` já cadastrado (`instancesStore.listAllOwnerIds`) — sempre manual. `testOnly:true` manda só pro próprio super admin, sem registrar em `dapinho_broadcasts`. |
 | `/admin/broadcasts` | GET | `requireSuperAdmin` | Histórico local de avisos já disparados. |
@@ -2449,7 +2497,8 @@ src/
   exampleAnonymizer.js     # anonymizeTranscript (regex+IA+reverificação) + findPiiLeaks reusada 3x (pós-regex/pós-IA/pós-edição-humana) (§14.8)
   exampleApproval.js       # orquestra os 2 passos de aprovação (reviewCandidate/confirmApproval), grava embedding + agent_examples (§14.8)
   agentExamples.js         # searchRelevantExamples — busca semântica de exemplos aprovados, espelha agentKnowledge.js (§14.8)
-  dapinho.js             # Dapinho: ask/broadcastFeatureAnnouncement/getConversationSummary, snapshot de conversas + few-shot + anti-flood (§14.11)
+  dapinho.js             # Dapinho: ask/broadcastFeatureAnnouncement/getConversationSummary, snapshot de conversas + few-shot + anti-flood + fluxo de confirmação de ação (§14.11)
+  dapinhoActions.js       # detectIntent/resolveAndDescribe/executeAction/generateReportPdf — ações de execução real do Dapinho (§14.11)
   dapinhoExamples.js      # saveExample/searchRelevantExamples — few-shot POR DONO do Dapinho (dapinho_examples), espelha agentExamples.js (§14.11)
   auth.js               # verifica access_token contra o Bitrix de verdade + emite/valida o token de app (sessão + API)
   authz.js              # confere que session/owner de cada request pertence ao dono autenticado; isDapinhoSession reconhece o session_id virtual `dapinho::<ownerId>` (§14.11)

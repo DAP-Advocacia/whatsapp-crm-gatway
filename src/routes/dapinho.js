@@ -1,6 +1,7 @@
 const express = require('express');
 const store = require('../store');
 const dapinho = require('../dapinho');
+const dapinhoActions = require('../dapinhoActions');
 const { requireSuperAdmin } = require('../adminAuth');
 
 /**
@@ -48,6 +49,26 @@ function createDapinhoRouter() {
     } catch (err) {
       console.error('[dapinho] erro ao buscar histórico:', err.message);
       res.status(502).json({ error: err.message });
+    }
+  });
+
+  // GET /report — PDF de resumo das conversas ATIVAS do dono autenticado
+  // (uma linha por contato: nome, telefone, última mensagem, se está
+  // aguardando resposta) — ver dapinhoActions.generateReportPdf. Sempre
+  // gerado sob demanda a partir do estado atual, nunca uma versão salva —
+  // por isso o link é sempre o mesmo (/api/dapinho/report), sem :id.
+  // Rate limit próprio (dapinho.checkReportRateLimit, 15s) — achado real
+  // do security-reviewer-agent (2026-08-28): sem isso, geração de PDF
+  // (I/O+CPU por request) não tinha nenhum teto de taxa.
+  router.get('/report', async (req, res) => {
+    try {
+      if (!(await dapinho.checkReportRateLimit(req.ownerId))) {
+        return res.status(429).json({ error: 'Aguarde alguns segundos antes de gerar outro relatório.' });
+      }
+      await dapinhoActions.generateReportPdf(req.ownerId, res);
+    } catch (err) {
+      console.error('[dapinho] erro ao gerar relatório:', err.message);
+      if (!res.headersSent) res.status(502).json({ error: err.message });
     }
   });
 

@@ -24,6 +24,17 @@ alter table conversations add column if not exists avatar_url text;
 -- acessível na aba "Arquivadas"; mensagem nova NÃO desarquiva sozinha.
 alter table conversations add column if not exists archived boolean not null default false;
 
+-- "Pendente" MANUAL (tela Chat, 2026-08-28) — diferente do indicador
+-- automático de "Pendente" que já existia (derivado de unreadCount > 0,
+-- ver store.listConversations), este é um marcador explícito que o
+-- atendente liga/desliga na mão, independente de ter mensagem não lida
+-- ou não. Motivação: dar ao Dapinho (assistente de IA) uma ação real de
+-- "marcar esta conversa como pendente" — o indicador automático não
+-- serve pra isso (não é setável, só reflete estado de leitura). Nunca
+-- desliga sozinho (nem ao ler a conversa, nem ao responder) — só o
+-- próprio atendente desmarca, mesmo espírito de `archived` acima.
+alter table conversations add column if not exists pending_manual boolean not null default false;
+
 -- Silenciar notificações por conversa (tela Chat) — notifica por padrão;
 -- silenciar é exceção manual, como no próprio WhatsApp.
 alter table conversations add column if not exists notifications_enabled boolean not null default true;
@@ -1346,6 +1357,27 @@ create table if not exists dapinho_state (
   owner_id text primary key,
   last_generated_at timestamptz
 );
+
+-- Ação de execução real (enviar mensagem, gerar relatório, arquivar,
+-- marcar pendente — 2026-08-28) aguardando CONFIRMAÇÃO explícita do
+-- usuário antes de rodar de verdade. Sempre nula/limpa fora de uma
+-- janela de confirmação — nunca fica pendente indefinidamente (ver
+-- PENDING_ACTION_TTL_MS em src/dapinho.js, expira sozinha). Formato de
+-- `pending_action`: {type, params, expiresAt, description} — `type` é
+-- um dos valores fechados que o detector de intenção pode produzir
+-- (ver DapinhoIntent em src/dapinho.js).
+alter table dapinho_state add column if not exists pending_action jsonb;
+
+-- Cooldown SEPARADO pra geração de relatório (GET /api/dapinho/report,
+-- src/dapinhoActions.js::generateReportPdf) — achado real do
+-- security-reviewer-agent (2026-08-28): essa rota não tinha NENHUM rate
+-- limit, permitindo geração repetida ilimitada de PDF (I/O + CPU por
+-- request, sem custo de IA envolvido, mas ainda assim um vetor de DoS
+-- local). Coluna própria (não last_generated_at) porque o relatório é uma
+-- ação "clique explícito pra baixar", com um ritmo de uso natural bem
+-- diferente do chat conversacional — acoplar os dois cooldowns faria o
+-- usuário esperar sem necessidade ao alternar entre perguntar e baixar.
+alter table dapinho_state add column if not exists last_report_at timestamptz;
 
 -- Histórico LOCAL de avisos de feature nova disparados pelo super
 -- admin (mesmo espírito de feed_posts) — nunca é a fonte de verdade

@@ -1015,8 +1015,10 @@ app.use('/api/card-group', requireAuth, createCardGroupRouter({ sessions }));
 app.use('/api/internal-notes', requireAuth, createInternalNotesRouter({ broadcast }));
 // Dapinho (assistente de IA por dono + avisos de feature nova, ver
 // src/dapinho.js) — mesma injeção de broadcast que internalNotes/
-// agentDispatch/insightGenerator acima.
-dapinho.configure({ broadcast });
+// agentDispatch/insightGenerator acima. `sessions` também injetado desde
+// 2026-08-28 (ações reais: enviar mensagem via dapinhoActions.executeAction
+// precisa do SessionManager pra pegar o gateway Baileys real).
+dapinho.configure({ broadcast, sessions });
 app.use('/api/dapinho', requireAuth, createDapinhoRouter());
 // agentDispatch precisa de `sessions`/`broadcast` (pra enviar a resposta
 // gerada e persistir/broadcastar como qualquer mensagem de saída) — módulo

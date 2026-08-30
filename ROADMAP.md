@@ -154,6 +154,17 @@ pré-existente em várias linhas (601, 630, 657, 742, 1650, 1765, 2408) —
 mesmo padrão de débito, mesma causa (nenhum tooltip customizado nesse
 arquivo ainda).
 
+**Propagado de novo em 2026-08-30** (checker rodado na feature de
+"pendente manual"): o botão novo de toggle (`data-pending-toggle`,
+`public/chat.html:3225`) copiou o `title` nativo dos dois botões vizinhos
+pré-existentes (`data-mute-toggle`/`data-archive-toggle`, mesma linha de
+ações) — confirma o padrão descrito acima: **enquanto o componente de
+tooltip custom não existir**, todo botão novo na mesma família visual
+vai continuar herdando `title` nativo por replicar o vizinho, não por
+descuido pontual. Reforça que isso não vai se resolver sozinho "na
+próxima vez que alguém tocar o arquivo" — precisa ser priorizado
+deliberadamente.
+
 - **Critério de validação**: nenhum `title=` sobrando em
   `public/chat.html`/`public/admin.html` explicando algo pro usuário
   (crachá, ícone de ação, etc.) — todos usando o mesmo componente de
@@ -165,6 +176,35 @@ arquivo ainda).
   cabe resolver na próxima sessão que tocar qualquer um dos dois
   arquivos. Se o componente for genérico o bastante, reaproveitar entre
   as duas páginas em vez de duplicar.
+
+## 3.6. Débito de UX pendente — flash residual de cor padrão → cor pessoal
+
+Reportado de novo pelo usuário (2026-08-28): "a tela dá uma piscada,
+aparece a cor marrom padrão e depois muda para a cor selecionada no
+config" — confirmado por ele como comportamento **pré-existente**, não
+introduzido pelas mudanças do Dapinho/deploy desta sessão. Já houve
+pelo menos 2 rodadas de correção documentadas no histórico de commits
+(`68ca6de` "Elimina o flash residual... (18 telas)" e o mecanismo de 2
+caches separados `palette_`/`personalPalette_` + `skipVisual`, ver
+comentário em `public/chat.html:41-47` citando HANDOFF Partes DP/EO) —
+nenhuma eliminou o problema por completo, só reduziu.
+
+- **Critério de validação**: nenhum flash perceptível de cor padrão ao
+  navegar entre telas ou ao carregar uma tela pela primeira vez, com
+  paleta pessoal já configurada — em qualquer uma das 18 telas com
+  sidebar.
+- **Investigação necessária**: como já foi mexido 2x sem eliminar de
+  vez, a próxima tentativa deveria PRIMEIRO reproduzir o cenário exato
+  (qual tela, F5 vs. navegação via link, cache frio vs. quente,
+  velocidade de rede) antes de tentar outro fix — evitar uma 3ª rodada
+  de correção parcial no escuro. Considerar logar timestamps do fetch
+  de `/api/brand` vs. `/api/settings` (paleta pessoal) pra confirmar se
+  ainda é a mesma corrida entre os dois já documentada, ou uma causa
+  nova.
+- **Escopo**: não decisão arquitetural grande, mas histórico de 2
+  tentativas sem sucesso sugere que precisa de uma sessão dedicada só a
+  isso (reproduzir + instrumentar + corrigir), não um fix de 5 minutos
+  no meio de outra tarefa.
 
 ## 4. Teto de escala já documentado em outras áreas do projeto
 

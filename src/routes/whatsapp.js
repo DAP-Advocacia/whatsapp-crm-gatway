@@ -1153,6 +1153,26 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
+  // POST /conversations/pending  { session, phone, pending }
+  // Marca/desmarca "pendente" MANUALMENTE (ver db/schema.sql,
+  // pending_manual) — diferente do indicador automático (unreadCount > 0),
+  // este é setável pelo próprio atendente (ou pelo Dapinho, a pedido dele
+  // — ver src/dapinho.js), mesmo padrão de POST /conversations/archive
+  // acima.
+  // ---------------------------------------------------------------
+  router.post('/conversations/pending', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone, pending } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    try {
+      await store.setConversationPendingManual(session, phone, !!pending);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[conversations:pending] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
   // POST /conversations/move-instance  { session, phone, newSessionId }
   // "Resgata" uma conversa presa numa instância que caiu/desconectou —
   // Baileys não é a API oficial do WhatsApp, então a sessão pode cair a

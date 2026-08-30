@@ -34,6 +34,7 @@ erDiagram
         text avatar_url "cache da foto de perfil"
         boolean archived
         boolean notifications_enabled
+        boolean pending_manual "pendente MARCADO À MÃO, independente de unreadCount (2026-08-30)"
         text assigned_to "owner_id do atendente atual"
         text ai_summary "resumo gerado sob demanda"
     }
@@ -247,7 +248,7 @@ histórico (`internal_note_revisions`) que um insight não tem. Misturar
 forçaria coluna nula nos dois sentidos (ver comentário original em
 `db/schema.sql`).
 
-## 5.5. Dapinho (`dapinho_examples`, `dapinho_state`, `dapinho_broadcasts`) — NOVAS, 2026-08-27
+## 5.5. Dapinho (`dapinho_examples`, `dapinho_state`, `dapinho_broadcasts`) — NOVAS, 2026-08-27, ações reais 2026-08-30
 
 Assistente de IA conversacional **por DONO** (não por instância/conversa,
 diferente do Copiloto Comercial acima) — a "conversa" do Dapinho em si
@@ -270,7 +271,9 @@ erDiagram
     }
     dapinho_state {
         text owner_id PK
-        timestamptz last_generated_at "anti-flood, 15s por dono"
+        timestamptz last_generated_at "anti-flood do CHAT, 15s por dono"
+        timestamptz last_report_at "rate limit do RELATÓRIO, 15s, SEPARADO do chat (2026-08-30)"
+        jsonb pending_action "ação de execução real aguardando confirmação, expira em 5min (2026-08-30)"
     }
     dapinho_broadcasts {
         bigserial id PK
@@ -286,6 +289,23 @@ erDiagram
 (dado de terceiro, exige revisão humana antes de reutilizar); aqui é o
 próprio dono conversando sobre os próprios dados — a interação já nasce
 reutilizável, sem intermediário.
+
+**`pending_action` (2026-08-30)** — formato
+`{type, params: {sessionId, phone, contactName, text}, description,
+expiresAt}`. `type` é um dos valores fechados que
+`dapinhoActions.detectIntent` pode produzir (`send_message`/`archive`/
+`unarchive`/`mark_pending`/`unmark_pending` — `chat`/`generate_report`
+nunca viram `pending_action`, o primeiro não é ação e o segundo não
+precisa de confirmação). Sempre resolvido (nome→conversa real) ANTES de
+ser salvo aqui — `executeAction` nunca reinterpreta a mensagem de
+confirmação em si, só lê os `params` já concretos (ver
+`security-reviewer-agent`, README §14.11).
+
+**`last_report_at` separado de `last_generated_at`** (2026-08-30, achado
+real do `security-reviewer-agent`): `GET /api/dapinho/report` não tinha
+nenhum rate limit — coluna própria em vez de reaproveitar o cooldown do
+chat, pra não fazer o usuário esperar sem necessidade ao alternar entre
+perguntar e baixar relatório.
 
 ## 6. Notificações, notas e outras tabelas de suporte
 

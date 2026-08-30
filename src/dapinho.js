@@ -3,6 +3,7 @@ const instancesStore = require('./instances');
 const { pool } = require('./db');
 const { callOpenAIRaw } = require('./openai');
 const { searchRelevantExamples, saveExample } = require('./dapinhoExamples');
+const dapinhoActions = require('./dapinhoActions');
 
 /**
  * Dapinho — assistente de IA conversacional POR DONO (não por instância/
@@ -33,8 +34,10 @@ function sessionIdFor(ownerId) {
 }
 
 let _broadcast = () => {};
-function configure({ broadcast }) {
+let _sessions = null;
+function configure({ broadcast, sessions }) {
   _broadcast = broadcast;
+  _sessions = sessions;
 }
 
 const SYSTEM_MESSAGE =
@@ -116,6 +119,58 @@ async function checkAntiFlood(ownerId) {
   return rowCount > 0;
 }
 
+// Cooldown SEPARADO do anti-flood do chat (achado real do
+// security-reviewer-agent, 2026-08-28 — ver db/schema.sql,
+// last_report_at) — GET /api/dapinho/report não tinha nenhum rate limit,
+// permitindo geração repetida ilimitada de PDF (I/O+CPU por request).
+// Mesmo padrão atômico de checkAntiFlood acima, coluna própria.
+const REPORT_RATE_LIMIT_MS = 15 * 1000;
+async function checkReportRateLimit(ownerId) {
+  const { rowCount } = await pool.query(
+    `insert into dapinho_state (owner_id, last_report_at) values ($1, now())
+     on conflict (owner_id) do update
+       set last_report_at = now()
+       where dapinho_state.last_report_at is null
+          or now() - dapinho_state.last_report_at >= (${REPORT_RATE_LIMIT_MS} || ' milliseconds')::interval`,
+    [ownerId]
+  );
+  return rowCount > 0;
+}
+
+// Ação de execução real aguardando confirmação (ver src/dapinhoActions.js)
+// — expira sozinha (nunca fica pendente indefinidamente esperando um "sim"
+// que talvez nunca venha, ex: o usuário mudou de assunto sem responder).
+const PENDING_ACTION_TTL_MS = 5 * 60 * 1000;
+
+async function getPendingAction(ownerId) {
+  const { rows } = await pool.query(`select pending_action as "pendingAction" from dapinho_state where owner_id = $1`, [ownerId]);
+  const action = rows[0]?.pendingAction;
+  if (!action || !action.expiresAt || new Date(action.expiresAt).getTime() < Date.now()) return null;
+  return action;
+}
+
+async function setPendingAction(ownerId, action) {
+  const value = action ? JSON.stringify({ ...action, expiresAt: new Date(Date.now() + PENDING_ACTION_TTL_MS).toISOString() }) : null;
+  await pool.query(
+    `insert into dapinho_state (owner_id, pending_action) values ($1, $2)
+     on conflict (owner_id) do update set pending_action = $2`,
+    [ownerId, value]
+  );
+}
+
+// Detecção de sim/não simples e determinística (regex, não IA — mais
+// barato e mais previsível pra um universo pequeno de respostas comuns em
+// português). Fora desse universo, devolve null (quem chama trata como
+// "não reconheci, pergunta de novo").
+const CONFIRM_WORDS = /^(sim|s|confirma|confirmo|ok|pode|manda|vai|isso|correto|certo)\b/i;
+const DENY_WORDS = /^(n[ãa]o|n|cancela|cancelar|deixa|esquece|para)\b/i;
+function parseConfirmation(text) {
+  const trimmed = text.trim();
+  if (CONFIRM_WORDS.test(trimmed)) return true;
+  if (DENY_WORDS.test(trimmed)) return false;
+  return null;
+}
+
 async function nextMessageId() {
   return `dapinho_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -142,6 +197,12 @@ async function persistAndBroadcast(ownerId, message) {
 // o par pergunta+resposta em dapinho_examples pra few-shot futuro.
 const MAX_QUESTION_LENGTH = 1000;
 
+async function replyAndReturn(ownerId, questionId, text) {
+  const answerMsg = { id: await nextMessageId(), direction: 'in', type: 'text', text, createdAt: new Date().toISOString() };
+  await persistAndBroadcast(ownerId, answerMsg);
+  return { questionId, answer: answerMsg };
+}
+
 async function ask(ownerId, questionText, { ownerName } = {}) {
   const question = String(questionText || '').trim();
   if (!question) throw new Error('a pergunta não pode ficar vazia');
@@ -158,11 +219,79 @@ async function ask(ownerId, questionText, { ownerName } = {}) {
     sentByName: ownerName || null,
   });
 
+  // Fluxo de AÇÃO (ver src/dapinhoActions.js) — checado ANTES de qualquer
+  // chamada de IA/anti-flood: se há uma ação esperando confirmação, esta
+  // mensagem é tratada primeiro como resposta sim/não a ela, nunca como
+  // pergunta nova. Decisão de produto confirmada: nunca executar uma ação
+  // real (enviar WhatsApp, arquivar, marcar pendente) sem esse "sim"
+  // explícito do usuário.
+  const pendingAction = await getPendingAction(ownerId);
+  if (pendingAction) {
+    const confirmed = parseConfirmation(question);
+    if (confirmed === true) {
+      await setPendingAction(ownerId, null);
+      try {
+        const resultText = await dapinhoActions.executeAction(ownerId, pendingAction, { sessions: _sessions, broadcast: _broadcast, ownerName });
+        return replyAndReturn(ownerId, questionId, resultText);
+      } catch (err) {
+        console.error('[dapinho] falha ao executar ação confirmada:', err.message);
+        return replyAndReturn(ownerId, questionId, `Não consegui concluir: ${err.message}`);
+      }
+    }
+    if (confirmed === false) {
+      await setPendingAction(ownerId, null);
+      return replyAndReturn(ownerId, questionId, 'Ok, cancelado.');
+    }
+    // Nem sim nem não reconhecido — mantém a ação pendente (não reseta o
+    // TTL) e pede de novo, em vez de silenciosamente descartar o que o
+    // usuário já tinha pedido.
+    return replyAndReturn(ownerId, questionId, `Ainda aguardando confirmação: ${pendingAction.description} Responda "sim" ou "não".`);
+  }
+
   if (!(await checkAntiFlood(ownerId))) {
     const busyText = 'Calma aí, já estou processando sua última pergunta — aguarde alguns segundos antes de mandar outra.';
-    const busyMsg = { id: await nextMessageId(), direction: 'in', type: 'text', text: busyText, createdAt: new Date().toISOString() };
-    await persistAndBroadcast(ownerId, busyMsg);
-    return { questionId, answer: busyMsg };
+    return replyAndReturn(ownerId, questionId, busyText);
+  }
+
+  // Detecção de intenção (ver src/dapinhoActions.js) — decide se isto é
+  // uma pergunta normal ou um pedido de ação, ANTES de gastar a chamada
+  // mais cara (snapshot + resposta em texto livre). Ações resolvidas
+  // (nome achado, sem ambiguidade) viram pending_action aguardando
+  // confirmação; qualquer erro nesta etapa cai pro fluxo de chat normal
+  // (fallback seguro, nunca trava o usuário numa ação mal-entendida).
+  let intent;
+  try {
+    intent = await dapinhoActions.detectIntent(question);
+  } catch (err) {
+    console.error('[dapinho] falha ao detectar intenção (seguindo como chat):', err.message);
+    intent = { type: 'chat' };
+  }
+
+  // generate_report não passa por resolução de contato/confirmação — é
+  // só leitura (não grava/envia nada), o "resultado" é um link de
+  // download que o front já sabe renderizar (message.type === 'report').
+  // A URL do relatório é sempre a MESMA (/api/dapinho/report, gerado sob
+  // demanda a partir das conversas ATUAIS, nunca uma versão histórica
+  // salva) — por isso não precisa ser persistida junto da mensagem
+  // (store.addMessage não tem coluna pra isso); o front reconstrói a URL
+  // sozinho a partir de message.type === 'report', mesmo depois de
+  // recarregar o histórico.
+  if (intent.type === 'generate_report') {
+    const reportMsg = {
+      id: await nextMessageId(),
+      direction: 'in',
+      type: 'report',
+      text: 'Seu relatório está pronto pra baixar.',
+      createdAt: new Date().toISOString(),
+    };
+    await persistAndBroadcast(ownerId, reportMsg);
+    return { questionId, answer: reportMsg };
+  }
+
+  if (intent.type !== 'chat') {
+    const { pendingAction: resolved, replyText } = await dapinhoActions.resolveAndDescribe(ownerId, intent);
+    if (resolved) await setPendingAction(ownerId, resolved);
+    return replyAndReturn(ownerId, questionId, replyText);
   }
 
   let answerText;
@@ -182,12 +311,9 @@ async function ask(ownerId, questionText, { ownerName } = {}) {
     answerText = 'Não consegui processar sua pergunta agora — tente de novo em instantes.';
   }
 
-  const answerMsg = { id: await nextMessageId(), direction: 'in', type: 'text', text: answerText, createdAt: new Date().toISOString() };
-  await persistAndBroadcast(ownerId, answerMsg);
-
+  const result = await replyAndReturn(ownerId, questionId, answerText);
   saveExample(ownerId, question, answerText); // fire-and-forget, best-effort (ver dapinhoExamples.saveExample)
-
-  return { questionId, answer: answerMsg };
+  return result;
 }
 
 // Aviso manual de feature nova — disparado pelo super admin (ver POST
@@ -294,6 +420,7 @@ module.exports = {
   sessionIdFor,
   configure,
   ask,
+  checkReportRateLimit,
   broadcastFeatureAnnouncement,
   listBroadcasts,
   getConversationSummary,

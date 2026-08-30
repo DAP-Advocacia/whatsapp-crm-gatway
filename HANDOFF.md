@@ -3,8 +3,47 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-28 — Parte FH: **incidente de
-> deploy travado + duplicação de mensagem no Dapinho corrigidos**.
+> aberto). Última atualização: sessão de 2026-08-30 — Parte FI: **Dapinho ganha
+> ações de execução real** — enviar mensagem de WhatsApp, gerar relatório em
+> PDF, arquivar/marcar conversa como pendente, tudo por comando em linguagem
+> natural no chat com o assistente. Pedido do usuário: "faça essa funcionalidade
+> valer" (o Dapinho antes só respondia "não posso enviar mensagens" quando
+> pedido).
+>
+> **Arquitetura**: `src/dapinhoActions.js` (novo) — `detectIntent(question)`
+> classifica a mensagem via OpenAI em JSON estruturado
+> (`chat`/`send_message`/`generate_report`/`archive`/`unarchive`/
+> `mark_pending`/`unmark_pending`), com `contactName`/`text` extraídos.
+> `resolveAndDescribe` acha a conversa real por nome (reaproveita
+> `store.listConversations` com `search`, mesma busca do campo de texto do
+> Chat) — 0 resultados pede pra conferir o nome, 2+ pede desambiguação
+> listando as opções, 1 resultado monta um `pendingAction` descrevendo
+> exatamente o que vai fazer ("Vou mandar 'oi' pro Daniel Costa
+> (5511999...). Confirma?"). **Toda ação que grava/envia algo real exige
+> confirmação explícita** (decisão de produto) — fica em
+> `dapinho_state.pending_action` (jsonb novo) por até 5min, expira sozinha;
+> a resposta seguinte do usuário é checada primeiro como sim/não
+> (`parseConfirmation`, regex determinística, NUNCA IA) antes de qualquer
+> outra coisa. `executeAction` só lê parâmetros já resolvidos do
+> `pendingAction` salvo — nunca reinterpreta a mensagem de confirmação em
+> si (`security-reviewer-agent` confirmou essa separação, sem vetor de
+> injeção). "Gerar relatório" (PDF de resumo de todas as conversas ativas,
+> uma linha por contato) é a única sem confirmação — só leitura, não
+> grava/envia nada.
+>
+> **Campo novo "pendente manual"** (`conversations.pending_manual`,
+> independente do indicador automático que já existia por
+> `unreadCount > 0`) — botão próprio na lista do Chat (bandeira dourada) +
+> ação do Dapinho (`mark_pending`/`unmark_pending`).
+>
+> **2 achados reais do `security-reviewer-agent`, corrigidos**: (1)
+> `intent.text` (texto extraído pra `send_message`) sem teto de tamanho
+> antes de `gateway.sendMessage` — `MAX_SEND_TEXT_LENGTH = 1000` adicionado,
+> mesmo padrão de `MAX_QUESTION_LENGTH`/`MAX_BROADCAST_LENGTH` já usados no
+> módulo; (2) `GET /api/dapinho/report` sem NENHUM rate limit (geração de
+> PDF é I/O+CPU por request) — `checkReportRateLimit` novo (15s, mesmo
+> padrão atômico de `checkAntiFlood`, coluna própria `last_report_at` pra
+> não acoplar cooldown do relatório ao do chat).
 >
 > (1) O usuário reportou que o Dapinho continuava "sumido" mesmo depois do
 > push da correção anterior (Parte FG) e de um "deploy manual" — investigação
