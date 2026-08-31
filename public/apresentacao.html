@@ -328,6 +328,15 @@
   .flow-step p{ font-size:12.5px; color:var(--text-muted); line-height:1.6; }
   .flow-arrow{ display:flex; align-items:center; justify-content:center; width:34px; color:var(--text-faint); font-size:16px; flex-shrink:0; }
 
+  /* tour em vídeo — seção 04 */
+  .video-tour{ margin-top:48px; }
+  .video-tour-title{ font-size:15.5px; font-weight:600; margin-bottom:8px; }
+  .video-tour .lede{ margin-bottom:20px; }
+  .video-tour-player{
+    width:100%; max-width:960px; display:block; border:1px solid var(--border);
+    border-radius:10px; background:#000; box-shadow:0 8px 40px rgba(0,0,0,.35);
+  }
+
   /* insight / questions */
   .qa-grid{ display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:40px; }
   .qa{ padding:22px 24px; background:var(--surface); border:1px solid var(--border-soft); border-radius:2px; }
@@ -757,6 +766,15 @@
             <h3>Banco de dados e arquivos</h3>
             <p>Toda conversa, contato, campanha, agendamento e notificação fica gravada num banco na nuvem; imagens, áudios e vídeos ficam num armazenamento de arquivos separado e privado — nada depende do celular ou computador de uma pessoa específica.</p>
           </div>
+        </div>
+
+        <div class="video-tour">
+          <h3 class="video-tour-title">Tour em vídeo</h3>
+          <p class="lede">Um passeio de dois minutos e meio pelas telas que a equipe mais usa — Dashboard, Contatos, Campanha, Agente de IA e Configurações. Gravado do ambiente de demonstração, com dados fictícios.</p>
+          <video controls preload="none" poster="/video/video-poster.png" class="video-tour-player">
+            <source src="/video/video-onboarding.mp4" type="video/mp4">
+            Seu navegador não reproduz este vídeo. <a href="/video/video-onboarding.mp4">Baixar o arquivo</a>.
+          </video>
         </div>
       </div>
     </section>

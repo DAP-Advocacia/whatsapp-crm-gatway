@@ -1,0 +1,34 @@
+{
+  "voice": "pt-BR-AntonioNeural",
+  "rate": "-8%",
+  "parts": [
+    {
+      "slug": "00-abertura",
+      "text": "Oi! Esse é um tour rápido pelo WhatsApp Gateway, o sistema que conecta o WhatsApp direto ao Bitrix24 — conversa, campanha, agente de inteligência artificial e métricas, tudo numa aba só dentro do CRM. Em dois minutos eu mostro as telas que você mais vai usar."
+    },
+    {
+      "slug": "01-dashboard",
+      "text": "A primeira tela é o Dashboard. Assim que abre, a inteligência artificial já gera alguns insights automáticos sobre o período — taxa de resposta, picos de volume, instância com menos atividade. Logo abaixo ficam os números principais: mensagens totais, recebidas, enviadas, conversas ativas e tempo médio de resposta, cada um comparando com o mês e o ano anterior. Mais para baixo, a tabela de conversas vinculadas a negócio, e os gráficos de volume por dia e de dispersão entre recebidas e enviadas."
+    },
+    {
+      "slug": "02-contatos",
+      "text": "Em Contatos você cadastra e organiza contatos em listas personalizadas — dá pra importar direto das conversas existentes ou de um arquivo CSV. As listas servem depois pra escolher destinatários numa campanha, e também dá pra criar grupos de WhatsApp de verdade a partir daqui."
+    },
+    {
+      "slug": "03-campanha",
+      "text": "A aba Campanha envia a mesma mensagem, personalizada por contato, pra vários destinatários de uma vez — com um aviso importante sobre o risco de banimento do próprio WhatsApp, e um controle de intervalo entre cada envio pra reduzir esse risco. O preview ao vivo do lado mostra exatamente como a mensagem vai aparecer pro destinatário, com as variáveis de nome e telefone já substituídas."
+    },
+    {
+      "slug": "04-agente-ia",
+      "text": "No Agente de IA você configura um atendimento automático de triagem — ele responde sozinho a mensagem de um lead novo, até um humano assumir a conversa. Cada instância tem sua própria configuração: mensagem de sistema, base de conhecimento e uma revisão final antes de salvar. E tem um playground aqui embaixo pra testar a configuração conversando com a IA antes de ativar de verdade."
+    },
+    {
+      "slug": "05-configuracoes",
+      "text": "Em Configurações dá pra personalizar a paleta de cores do sistema inteiro — com modelos prontos ou ajustando cada cor à mão, e uma prévia ao vivo mostrando como fica nas telas reais antes mesmo de salvar."
+    },
+    {
+      "slug": "06-encerramento",
+      "text": "Isso cobre o essencial do WhatsApp Gateway. Tem outras telas também, como Instâncias, Auditoria de Conversas e Análise de Sugestões, mas essas cinco já dão conta do dia a dia. Qualquer dúvida, o guia de atalhos fica disponível em qualquer tela, no ícone de teclado lá no topo. Bom trabalho!"
+    }
+  ]
+}
