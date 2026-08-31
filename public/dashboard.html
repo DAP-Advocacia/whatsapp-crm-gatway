@@ -683,9 +683,25 @@
   }
   .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
   .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  /* Banner de MODO DEMO — achado de segurança (2026-08-31): sem aviso
+     visível, um usuário real que passou por ?demo=1 uma vez fica "preso"
+     vendo dados fictícios por até 4h sem perceber. Mostrado só via JS
+     (isDemoMode() no boot), nunca por padrão. */
+  .demo-mode-banner{
+    display: none; position: sticky; top: 0; z-index: 300;
+    background: var(--red); color: #fff; font-size: 12.5px; font-weight: 600;
+    padding: 8px 16px; text-align: center; letter-spacing: .01em;
+  }
+  .demo-mode-banner.visible{ display: block; }
+  .demo-mode-banner a{ color: #fff; text-decoration: underline; margin-left: 10px; font-weight: 700; }
 </style>
 </head>
 <body>
+
+<div class="demo-mode-banner" id="demoModeBanner">
+  MODO DEMO — todos os dados nesta tela são fictícios.
+  <a href="/api/demo/exit?from=/dashboard.html">Sair do modo demo</a>
+</div>
 
 <aside class="sidebar">
   <div class="sidebar-logo">
@@ -1250,6 +1266,15 @@
     } catch {}
   }
 
+  // MODO DEMO (ver src/demoModeGate.js, src/demoData.js) — dados 100%
+  // fictícios, sem tocar Supabase/Bitrix. Ligado via `?demo=1` na URL
+  // (o gate seta um cookie e redireciona). Detectado ANTES de qualquer
+  // BX24 — troca o accessToken real pelo valor mágico que o backend
+  // reconhece, e troca o nome do escritório hardcoded no HTML.
+  function isDemoMode() {
+    return document.cookie.split(';').some((p) => p.trim() === 'demo_mode=1');
+  }
+
   // Confirma com o backend (que por sua vez confirma com o próprio Bitrix)
   // que o access_token pertence de verdade a um usuário deste portal, e
   // devolve um token de app curto — usado em toda chamada de API daqui pra
@@ -1257,6 +1282,18 @@
   // páginas, aqui não importa QUEM é o usuário (métricas são agregadas/de
   // time, de propósito) — só que seja alguém real logado neste portal.
   async function verifyAuth() {
+    if (isDemoMode()) {
+      const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+        method: 'POST',
+        headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: 'demo-mode-token' }),
+      });
+      const data = await res.json();
+      appToken = data.token;
+      document.querySelectorAll('.firm-name').forEach((e) => { e.textContent = 'Andrade & Camargo'; });
+      document.querySelectorAll('.firm-sub').forEach((e) => { e.textContent = 'Advogados Associados'; });
+      return data.ownerId;
+    }
     const auth = BX24.getAuth ? BX24.getAuth() : null;
     if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
     const res = await fetch(`${window.location.origin}/api/auth/verify`, {
@@ -1456,28 +1493,40 @@
   // depois de autenticar com o portal; abrir fora do Bitrix mostra um erro em
   // vez de silenciosamente deixar as métricas abertas pra qualquer um.
   let bx24Ready = false;
-  if (window.BX24) {
-    BX24.init(async () => {
-      bx24Ready = true;
+  async function bootAuthenticated() {
+    bx24Ready = true;
+    try {
+      const ownerId = await verifyAuth();
+      myOwnerId = ownerId;
+      fetch(`${window.location.origin}/api/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
+        .catch(() => {});
+      startPresenceHeartbeat();
+      revealAdminNavItemIfSuperAdmin();
+      applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
+      load();
+      setInterval(load, 30000);
+      loadInsights(false); // cacheado no servidor (30min) — não entra no polling de 30s do load()
+    } catch (err) {
+      content.innerHTML = `<p class="empty">Não foi possível autenticar com o Bitrix. ${escapeHtml(err.message)}</p>`;
+    }
+  }
+  // MODO DEMO: pula o BX24 real inteiro (fora do Bitrix, BX24.init nunca
+  // chama o callback) — vai direto pro boot autenticado, que por sua vez
+  // detecta o cookie e usa o token mágico (ver isDemoMode() acima). Revela
+  // o banner ANTES de autenticar (não espera a chamada de API), pra nunca
+  // ter uma janela onde os dados fictícios aparecem sem aviso.
+  if (isDemoMode()) {
+    const banner = document.getElementById('demoModeBanner');
+    if (banner) banner.classList.add('visible');
+    bootAuthenticated();
+  } else if (window.BX24) {
+    BX24.init(() => {
       // Pede pro Bitrix redimensionar o iframe pra ocupar o espaço vertical
       // disponível, em vez de deixar uma altura padrão com espaço em branco embaixo.
       if (typeof BX24.fitWindow === 'function') BX24.fitWindow();
-      try {
-        const ownerId = await verifyAuth();
-        myOwnerId = ownerId;
-        fetch(`${window.location.origin}/api/whatsapp/notifications/unread-count?owner=${encodeURIComponent(ownerId)}`, { headers: { ...FETCH_HEADERS, Authorization: `Bearer ${appToken}` } })
-          .then((r) => (r.ok ? r.json() : null))
-          .then((data) => { if (data && window.updateNotifBadge) window.updateNotifBadge(data.count); })
-          .catch(() => {});
-        startPresenceHeartbeat();
-        revealAdminNavItemIfSuperAdmin();
-        applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
-        load();
-        setInterval(load, 30000);
-        loadInsights(false); // cacheado no servidor (30min) — não entra no polling de 30s do load()
-      } catch (err) {
-        content.innerHTML = `<p class="empty">Não foi possível autenticar com o Bitrix. ${escapeHtml(err.message)}</p>`;
-      }
+      bootAuthenticated();
     });
   } else {
     content.innerHTML = '<p class="empty">Abra esta página de dentro do Bitrix24.</p>';

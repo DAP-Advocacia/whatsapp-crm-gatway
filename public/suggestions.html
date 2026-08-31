@@ -469,9 +469,25 @@
   }
   .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
   .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  /* Banner de MODO DEMO — achado de segurança (2026-08-31): sem aviso
+     visível, um usuário real que passou por ?demo=1 uma vez fica "preso"
+     vendo dados fictícios por até 4h sem perceber. Mostrado só via JS
+     (isDemoMode() no boot), nunca por padrão. */
+  .demo-mode-banner{
+    display: none; position: sticky; top: 0; z-index: 300;
+    background: var(--red); color: #fff; font-size: 12.5px; font-weight: 600;
+    padding: 8px 16px; text-align: center; letter-spacing: .01em;
+  }
+  .demo-mode-banner.visible{ display: block; }
+  .demo-mode-banner a{ color: #fff; text-decoration: underline; margin-left: 10px; font-weight: 700; }
 </style>
 </head>
 <body>
+
+<div class="demo-mode-banner" id="demoModeBanner">
+  MODO DEMO — todos os dados nesta tela são fictícios.
+  <a href="/api/demo/exit?from=/suggestions.html">Sair do modo demo</a>
+</div>
 
 <aside class="sidebar">
   <div class="sidebar-logo">
@@ -940,7 +956,28 @@
 
   let appToken = null;
 
+  // MODO DEMO (ver src/demoModeGate.js, src/demoData.js) — dados 100%
+  // fictícios, sem tocar Supabase/Bitrix. Ligado via `?demo=1` na URL (o
+  // gate seta um cookie e redireciona). Detectado ANTES de qualquer BX24.
+  function isDemoMode() {
+    return document.cookie.split(';').some((p) => p.trim() === 'demo_mode=1');
+  }
+
   async function verifyAuth() {
+    if (isDemoMode()) {
+      const banner = document.getElementById('demoModeBanner');
+      if (banner) banner.classList.add('visible');
+      const res = await fetch(`${window.location.origin}/api/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: 'demo-mode-token' }),
+      });
+      const data = await res.json();
+      appToken = data.token;
+      document.querySelectorAll('.firm-name').forEach((e) => { e.textContent = 'Andrade & Camargo'; });
+      document.querySelectorAll('.firm-sub').forEach((e) => { e.textContent = 'Advogados Associados'; });
+      return data.ownerId;
+    }
     if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
     await bx24Ready;
     const auth = BX24.getAuth ? BX24.getAuth() : null;

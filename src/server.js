@@ -24,6 +24,9 @@ const swaggerUi = require('swagger-ui-express');
 const openapiSpec = require('./openapi');
 
 const { SessionManager } = require('./sessions');
+const { demoModeGate } = require('./demoModeGate');
+const { createDemoFixturesRouter } = require('./routes/demoFixtures');
+const demoData = require('./demoData');
 const { createWhatsappRouter } = require('./routes/whatsapp');
 const { createCrmRouter } = require('./routes/crm');
 const { createLeadFormsRouter } = require('./routes/leadForms');
@@ -111,6 +114,15 @@ app.use('/api', apiLimiter);
 // de filtro/aba, mesmo com o deploy já confirmado no servidor (HANDOFF Parte
 // CV/CW). Aplica pra TODOS os estáticos (html/js/css em public/), não só
 // chat.html — mesma causa afetaria qualquer arquivo dali.
+// MODO DEMO (ver src/demoModeGate.js) — TEM que rodar antes do
+// express.static abaixo: o static intercepta e responde qualquer
+// arquivo de public/ (ex: dashboard.html?demo=1 → serve dashboard.html
+// direto, ignorando o query string) antes que qualquer middleware
+// depois dele veja a request. Descoberto testando localmente: o gate só
+// funcionava se ficasse aqui em cima, não no meio do arquivo perto dos
+// outros mounts de API.
+app.use(demoModeGate);
+
 app.use(express.static('public', { setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 // Imagem/áudio/vídeo ficam no Supabase Storage (ver src/media.js) — não
 // precisa de rota estática local pra mídia.
@@ -960,6 +972,15 @@ app.get('/t/:slug', async (req, res) => {
 app.post('/api/auth/verify', async (req, res) => {
   const { accessToken } = req.body || {};
   if (!accessToken) return res.status(400).json({ error: 'accessToken é obrigatório' });
+  // MODO DEMO (ver src/demoModeGate.js): as telas mandam este valor mágico
+  // em vez do access_token real do BX24 quando o cookie demo_mode=1 está
+  // presente — emite um app token de verdade (issueAppToken), só que pro
+  // ownerId fixo do demo, sem chamar o Bitrix real. Fica aqui (não no
+  // router de fixtures) porque esta rota roda ANTES de qualquer
+  // requireAuth e já é o próprio passo de login.
+  if (accessToken === 'demo-mode-token') {
+    return res.json({ ownerId: demoData.OWNER_ID, token: issueAppToken(demoData.OWNER_ID), expiresIn: TOKEN_TTL_MS / 1000 });
+  }
   try {
     const userId = await verifyBitrixToken(accessToken);
     if (!userId) return res.status(401).json({ error: 'token inválido' });
@@ -997,6 +1018,21 @@ app.post('/api/whatsapp/page-session/close', async (req, res) => {
     res.status(502).json({ error: err.message });
   }
 });
+
+// ---------------------------------------------------------------
+// MODO DEMO — router de fixtures (ver src/routes/demoFixtures.js,
+// src/demoData.js; o gate em si já rodou lá em cima, antes do
+// express.static). Dados 100% fictícios, sem tocar Supabase/Bitrix.
+// Regra global (CLAUDE.md 2026-08-31): todo app com uso real precisa de
+// um ambiente de demonstração pra gravar vídeo/screenshot sem depender
+// de dado real de cliente. Fica ANTES dos mounts autenticados abaixo —
+// mesmo padrão já usado pra /api/leads (público) coexistir com
+// /api/lead-forms (autenticado): o router de fixtures só RESPONDE se
+// `req.isDemoMode`; senão chama next() e a request segue pro mount real
+// de sempre, atrás de requireAuth, sem nenhuma mudança de comportamento
+// pra quem não usa `?demo=1`.
+// ---------------------------------------------------------------
+app.use(createDemoFixturesRouter());
 
 // ---------------------------------------------------------------
 // Rotas REST consumidas pela aba do card (frontend) — atrás de requireAuth:
