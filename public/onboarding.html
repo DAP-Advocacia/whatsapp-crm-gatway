@@ -227,6 +227,18 @@
      .nav-item/.theme-toggle-item já existentes (mesmo visual do botão
      de tema logo acima) — sem classe própria nova. */
 
+  /* ---------- Modal "Vídeo de onboarding" ----------
+     Mesmo componente .overlay/.modal do modal de atalhos acima, mas UMA
+     chave de localStorage só pro app INTEIRO (não por página) — o
+     vídeo é do app, faz sentido mostrar uma vez só, na primeira tela
+     que a pessoa abrir. Piloto validado em dashboard.html (47f4a42). */
+  .tutorial-video-modal .modal{ max-width: 720px; }
+  .tutorial-video-modal video{
+    width: 100%; display: block; border-radius: 8px; background: #000;
+    border: 1px solid var(--border);
+  }
+  .tutorial-video-desc{ font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px; }
+
   .sidebar{
     position: fixed; top:0; left:0; bottom:0;
     width: var(--sidebar-w);
@@ -572,6 +584,12 @@
     <span class="nav-tip">Atalhos e recursos</span>
   </button>
 
+  <button type="button" id="tutorialVideoReopenBtn" class="nav-item theme-toggle-item">
+    <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10 8.5v7l6-3.5-6-3.5Z" fill="currentColor" stroke="none"/></svg></span>
+    <span class="nav-label">Como usar (vídeo)</span>
+    <span class="nav-tip">Como usar (vídeo)</span>
+  </button>
+
 
   <div class="sidebar-bottom">
     <a href="/notifications.html" class="nav-item bell-btn" id="notifBell">
@@ -731,6 +749,39 @@
     bindShortcutsModal();
   }
 
+  // Modal "Vídeo de onboarding" — MESMO mecanismo do modal de atalhos
+  // acima, mas com UMA chave de localStorage pro APP INTEIRO (não por
+  // página) — o vídeo é do app, mostra 1x na 1ª visita a qualquer tela.
+  function bindTutorialVideoModal() {
+    var modal = document.getElementById('tutorialVideoModal');
+    var checkbox = document.getElementById('tutorialVideoNoAutoOpen');
+    var reopenBtn = document.getElementById('tutorialVideoReopenBtn');
+    var closeBtn = document.getElementById('tutorialVideoCloseBtn');
+    if (!modal) return;
+    var SEEN_KEY = 'tutorialVideoSeen';
+    var NO_AUTO_KEY = 'tutorialVideoNoAutoOpen';
+    if (checkbox) checkbox.checked = localStorage.getItem(NO_AUTO_KEY) === '1';
+    function open() { modal.classList.add('open'); }
+    function close() {
+      modal.classList.remove('open');
+      if (checkbox) localStorage.setItem(NO_AUTO_KEY, checkbox.checked ? '1' : '0');
+      localStorage.setItem(SEEN_KEY, '1');
+      var video = modal.querySelector('video');
+      if (video) video.pause();
+    }
+    if (reopenBtn) reopenBtn.addEventListener('click', open);
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (localStorage.getItem(SEEN_KEY) !== '1' && localStorage.getItem(NO_AUTO_KEY) !== '1') {
+      open();
+      localStorage.setItem(SEEN_KEY, '1');
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindTutorialVideoModal);
+  } else {
+    bindTutorialVideoModal();
+  }
+
   // ESC fecha qualquer overlay aberto (regra global do projeto). Esta
   // tela não tinha handler de ESC nenhum — as outras 15 telas com modal
   // já têm; foi lacuna na replicação.
@@ -885,6 +936,24 @@
     </div>
     <div class="modal-actions">
       <button class="btn secondary" id="shortcutsCloseBtn">Entendi</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay tutorial-video-modal" id="tutorialVideoModal">
+  <div class="modal">
+    <h3>Como usar o WhatsApp Gateway</h3>
+    <p class="tutorial-video-desc">Um tour de dois minutos e meio pelas telas que você mais vai usar — Dashboard, Contatos, Campanha, Agente de IA e Configurações.</p>
+    <video controls preload="none" poster="/video/video-poster.png">
+      <source src="/video/video-onboarding.mp4" type="video/mp4">
+      Seu navegador não reproduz este vídeo. <a href="/video/video-onboarding.mp4">Baixar o arquivo</a>.
+    </video>
+    <div class="shortcuts-footer-check">
+      <input type="checkbox" id="tutorialVideoNoAutoOpen">
+      <label for="tutorialVideoNoAutoOpen">Não mostrar automaticamente da próxima vez</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="tutorialVideoCloseBtn">Entendi</button>
     </div>
   </div>
 </div>
