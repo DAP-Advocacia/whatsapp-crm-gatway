@@ -576,6 +576,11 @@
     position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex;
     align-items: center; justify-content: center; z-index: 200; padding: 20px;
   }
+  /* O JS desta tela liga/desliga os overlays via `.hidden` (atributo). O
+     atributo `hidden` sozinho não vence o `display: flex` de autor acima
+     (regra do user-agent tem prioridade menor), então o modal ficava
+     preso na tela sem conseguir fechar — precisa da regra explícita. */
+  .overlay[hidden]{ display: none; }
   .modal{
     background: var(--bg); border: 1px solid var(--border); border-radius: 14px;
     width: 100%; max-width: 420px; max-height: 85vh; display: flex; flex-direction: column;
@@ -2436,9 +2441,17 @@
 
   // Modal de histórico de edições — elemento fixo do DOM (não recriado a
   // cada render, diferente do drawer de notas), registrado uma única vez.
-  document.getElementById('noteRevisionsCloseBtn').addEventListener('click', () => {
-    document.getElementById('noteRevisionsModal').hidden = true;
-  });
+  (function setupNoteRevisionsModal() {
+    const modal = document.getElementById('noteRevisionsModal');
+    const closeModal = () => { modal.hidden = true; };
+    document.getElementById('noteRevisionsCloseBtn').addEventListener('click', closeModal);
+    // Clique no backdrop (fora do .modal) fecha.
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    // ESC fecha (regra global — ESC sempre fecha o overlay aberto).
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modal.hidden) closeModal();
+    });
+  })();
 
   boot();
 })();
