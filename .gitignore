@@ -10,3 +10,8 @@ control-plane/
 
 # config/estado local do Claude Code (por máquina, não é do projeto)
 .claude/
+
+# gravações de demo com a instância de produção — contêm nome/dados reais
+# de cliente (PII). O material sanitizado pro portfólio mora em outro lugar.
+docs/demo-*/
+scripts/*-token*.txt
