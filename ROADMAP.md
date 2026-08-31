@@ -191,6 +191,29 @@ sentimento (`.contact-sentiment-face`).
   mesma função/CSS (copiar, já que os arquivos não compartilham módulo
   JS) na hora de migrar.
 
+**Escopo confirmado bem maior em 2026-08-31** (checker rodado no redesign
+do Dashboard): 4 `title=` na sidebar de `public/dashboard.html` (botão de
+recolher, 2 carets de submenu, botão de notificações do sistema) — e o
+checker confirmou o **mesmo texto/atributo idêntico em 18 das ~23
+páginas do projeto**, `chat.html` incluído (a própria referência do
+padrão de tooltip customizado). Ou seja: o componente `.app-tooltip`
+existe desde 2026-08-30 mas nunca foi aplicado nos controles de sidebar
+de NENHUMA tela — só em usos pontuais de conteúdo (badge de sentimento,
+agora `.agent-name` do Dashboard). Corrigir só numa tela (ex: só o
+Dashboard, por ter sido a que foi tocada agora) criaria inconsistência
+com as outras 17 telas que mantêm o padrão antigo — decisão explícita de
+NÃO fazer isso pontual, mesma lição já registrada acima sobre o Dapinho.
+
+- **Critério de validação atualizado**: os 4 controles de sidebar
+  (`title="Recolher/expandir menu"`, os 2 carets de submenu, `title="Ativar
+  notificações do sistema"`) usando `data-tooltip` em vez de `title`
+  nativo, replicado nas ~23 telas de uma vez — não tela por tela.
+- **Escopo revisado**: como o texto do `title` é IDÊNTICO nas 23 telas
+  (mesmo boilerplate de sidebar copiado em todas), a migração é um
+  patch mecânico único aplicável a todas de uma vez (mesmo padrão de
+  script usado nesta sessão pra corrigir o modal "Atalhos e recursos"
+  em 17 telas) — não precisa de 23 decisões manuais separadas.
+
 ## 3.7. Débito de acessibilidade — `prefers-reduced-motion` ausente
 
 Observação do `design-system-checker-agent` (2026-08-30, revisão da

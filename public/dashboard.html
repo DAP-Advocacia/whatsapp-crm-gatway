@@ -390,26 +390,41 @@
     .credit-row{ left:0; }
   }
 
-  h1{
-    font-family: 'Fraunces', serif;
-    font-weight: 600;
-    font-size: 22px;
-    margin: 0 0 4px;
+  /* ======================================================
+     Topbar do Dashboard — título/subtítulo à esquerda, cluster de
+     controles à direita (filtro de origem + atualizar + timestamp).
+     A referência põe um datepicker de range aqui, mas o projeto não
+     tem esse dado (métricas são histórico completo + janelas MoM/YoY
+     fixas) — o controle real desta tela é o filtro de origem, então
+     é ele que ganha o lugar de destaque, sem inventar um seletor que
+     não filtraria nada (regra: nunca UI/dado fabricado).
+     ====================================================== */
+  .topbar{
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap; margin-bottom: 22px;
   }
-  .subtitle{ color: var(--text-muted); font-size: 13px; margin: 0 0 24px; }
+  .topbar-titles h1{
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 23px; margin: 0 0 3px;
+    letter-spacing: -.01em;
+  }
+  .topbar-titles .subtitle{ color: var(--text-muted); font-size: 12.5px; margin: 0; max-width: 60ch; }
+  .topbar-controls{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .topbar-updated{ font-size: 10.5px; color: var(--text-faint); white-space: nowrap; }
 
-  .refresh-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 24px; flex-wrap: wrap; }
   .refresh-btn{
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 7px 14px;
+    padding: 8px 13px;
     border-radius: 9px;
-    font-size: 12.5px;
+    font-size: 12px;
     cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: inherit;
   }
+  .refresh-btn svg{ width: 13px; height: 13px; }
   .refresh-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
-  .sidebar-updated{ font-size: 10.5px; color: var(--text-faint); }
+  .refresh-btn:hover svg{ transform: rotate(-90deg); transition: transform .3s ease; }
 
   .btn{
     background: var(--gold); color: #1a1408; border: none; border-radius: 9px;
@@ -444,33 +459,75 @@
     border: none;
     color: var(--text-muted);
     font-size: 12px;
-    padding: 6px 12px;
+    padding: 7px 13px;
     border-radius: 7px;
     cursor: pointer;
+    font-family: inherit;
   }
   .origin-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
   .origin-filter button:not(.active):hover{ color: var(--gold); }
 
+  /* ======================================================
+     Ícone informativo (ⓘ) + tooltip custom — regra global: KPI/gráfico/
+     item de navegação novo ganha explicação técnica + didática, e o
+     tooltip NUNCA é o `title` nativo do HTML (destoa do tema). O projeto
+     ainda não tinha um componente assim (só o .chart-tooltip, que é pra
+     valores de série de gráfico) — criado aqui seguindo o padrão dos
+     outros projetos do Daniel: um único elemento reaproveitado no DOM,
+     posicionado via getBoundingClientRect, delegado num listener só.
+     Formato do texto: "Título || parágrafo técnico || parágrafo didático"
+     no atributo data-info (o '||' vira quebra de bloco).
+     ====================================================== */
+  .info-icon{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid var(--border); background: var(--surface-2);
+    color: var(--text-faint); cursor: help; vertical-align: middle;
+    font-size: 0; line-height: 0;
+    transition: color .14s, border-color .14s;
+  }
+  .info-icon svg{ width: 10px; height: 10px; }
+  .info-icon:hover, .info-icon:focus-visible{ color: var(--gold); border-color: var(--gold-dim); outline: none; }
+
+  .info-pop{
+    position: fixed; z-index: 95; max-width: 280px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
+    padding: 11px 13px; box-shadow: 0 12px 30px rgba(0,0,0,.42);
+    font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+    pointer-events: none; opacity: 0; transform: translateY(3px);
+    transition: opacity .13s ease, transform .13s ease;
+  }
+  .info-pop.open{ opacity: 1; transform: none; }
+  .info-pop .info-pop-title{ color: var(--text); font-weight: 600; font-size: 12px; margin-bottom: 5px; }
+  .info-pop p{ margin: 0; }
+  .info-pop p + p{ margin-top: 6px; }
+
   /* auto-fit em vez de repeat(4,1fr) fixo: em telas largas, os cards
      preenchem a linha inteira (podendo caber mais de 4 por linha) em vez de
      ficarem 4 colunas artificialmente esticadas com muito vão interno. */
-  .kpi-grid{
+
+  /* ======================================================
+     LAYOUT DE 3 COLUNAS — coluna principal (KPIs + grid de painéis) +
+     coluna direita estreita "ao vivo" (o que está acontecendo agora).
+     Colapsa pra 1 coluna abaixo de 1180px (a coluna direita vai pro fim).
+     ====================================================== */
+  .dash-layout{
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 12px;
-    margin-bottom: 28px;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 20px;
+    align-items: start;
   }
-  @media (max-width: 700px){
-    .kpi-grid{ grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 1180px){
+    .dash-layout{ grid-template-columns: 1fr; }
   }
+  .dash-main{ min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .dash-side{ display: flex; flex-direction: column; gap: 16px; }
+  /* Painel largo abaixo das duas colunas (Resumo de atendimentos) —
+     fecha o layout numa faixa de largura total em vez de deixar a
+     coluna esquerda "sozinha" descendo mais que a direita. */
+  #content > .panel{ margin-top: 20px; }
 
-  /* Par de painéis lado a lado (gráfico diário+dispersão, tipo+sessão) —
-     antes empilhados um embaixo do outro mesmo com a tela cheia disponível. */
-  .panel-row{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; margin-bottom: 20px; }
-  .panel-row .panel{ margin-bottom: 0; }
-  @media (max-width: 1100px){ .panel-row{ grid-template-columns: 1fr; } }
-
-  /* Insights de IA — cards no topo do Dashboard, com diagnóstico/recomendação
+  /* Insights de IA — faixa acima de tudo, com diagnóstico/recomendação
      curtos sobre os números do time (ver GET /api/whatsapp/insights). */
   .insights-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
   .insights-head h2{ font-family:'Fraunces',serif; font-weight:600; font-size:14px; margin:0; display:flex; align-items:center; gap:7px; }
@@ -485,7 +542,8 @@
   .insights-refresh.spinning svg{ animation: spin .8s linear infinite; }
   @keyframes spin{ to{ transform: rotate(360deg); } }
   .insights-meta{ font-size:10.5px; color:var(--text-faint); margin:6px 0 0; }
-  .insights-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:14px; margin-bottom:22px; }
+  .insights-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(230px, 1fr)); gap:14px; }
+  .insights-section{ margin-bottom: 22px; }
   .insight-card{
     background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--gold-dim);
     border-radius:var(--radius); padding:14px 16px;
@@ -494,131 +552,295 @@
   .insight-card.warning{ border-left-color:var(--red); }
   .insight-card-title{ font-size:12.5px; font-weight:700; color:var(--text); margin:0 0 5px; }
   .insight-card-text{ font-size:12px; color:var(--text-muted); line-height:1.5; margin:0; }
+
+  /* ---------- Faixa de 6 KPIs ---------- */
+  .kpi-grid{
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 12px;
+  }
+  @media (max-width: 1480px){ .kpi-grid{ grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 900px){ .kpi-grid{ grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 360px){ .kpi-grid{ grid-template-columns: 1fr; } }
+
   .kpi-card{
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 16px;
+    padding: 14px 14px 13px;
+    display: flex; flex-direction: column;
+    min-width: 0;
   }
+  .kpi-card-top{ display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; min-height: 26px; }
+  .kpi-card .label{
+    font-size: 10px; color: var(--text-muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .05em;
+    display: inline-flex; align-items: center; gap: 5px;
+    line-height: 1.3;
+  }
+  /* Quadradinho de ícone temático no canto — fundo suave da cor de marca,
+     ícone em traço. É o toque visual que a referência pede; fica quieto
+     (baixo contraste) pra não competir com o número. */
+  .kpi-icon{
+    width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0;
+    background: rgba(var(--gold-rgb), .1);
+    border: 1px solid rgba(var(--gold-rgb), .16);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--gold);
+  }
+  .kpi-icon svg{ width: 14px; height: 14px; }
   .kpi-card .value{
     font-family: 'Fraunces', serif;
     font-size: 26px;
     font-weight: 600;
     color: var(--gold);
+    line-height: 1.1;
+    margin-top: 9px;
+    letter-spacing: -.01em;
   }
-  .kpi-card .label{ font-size: 12px; color: var(--text-muted); margin-top: 4px; }
-  .kpi-trends{ display: flex; flex-direction: column; gap: 2px; margin-top: 9px; }
-  .kpi-trend{ font-size: 10.5px; font-weight: 500; }
-  .kpi-trend-up{ color: var(--green); }
-  .kpi-trend-down{ color: var(--red); }
-  .kpi-trend-flat{ color: var(--text-faint); }
+  .kpi-card .context{ font-size: 10.5px; color: var(--text-faint); margin-top: 3px; line-height: 1.35; }
+  /* Empurra os deltas pro rodapé do card — mantém o baseline do bloco
+     inferior alinhado entre os 6 cards, mesmo o que não tem delta. */
+  .kpi-deltas{ display: flex; flex-wrap: wrap; gap: 3px 12px; margin-top: auto; padding-top: 9px; }
+  .kpi-delta{ font-size: 10px; font-weight: 500; display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+  .kpi-delta .kpi-delta-tag{ color: var(--text-faint); font-weight: 600; letter-spacing: .03em; }
+  .kpi-delta-up{ color: var(--green); }
+  .kpi-delta-down{ color: var(--red); }
+  .kpi-delta-flat{ color: var(--text-faint); }
 
+  /* ---------- Painel genérico ---------- */
   .panel{
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 18px;
-    margin-bottom: 20px;
+  }
+  /* Nos pares da grade, o painel vira coluna flex pra o corpo poder
+     centralizar verticalmente (evita vazio grande embaixo quando o
+     conteúdo é mais curto que o par ao lado). */
+  .panel-grid .panel{ display: flex; flex-direction: column; }
+  .panel-grid .panel > .donut-panel-body,
+  .panel-grid .panel > .respo-body,
+  .panel-grid .panel > .bar-list{ flex: 1; align-content: center; }
+  .panel-head{
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 14px;
   }
   .panel h2{
     font-family: 'Fraunces', serif;
     font-weight: 600;
-    font-size: 15px;
-    margin: 0 0 14px;
+    font-size: 14.5px;
+    margin: 0;
     color: var(--text);
+    display: inline-flex; align-items: center; gap: 6px;
   }
+  .panel-head-meta{ font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+
+  /* Grade 2-col de painéis dentro da coluna principal. align-items:stretch
+     (padrão) pra os pares ficarem da mesma altura — sem "degrau" quando
+     um tem mais conteúdo que o outro. */
+  .panel-grid{ display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px){ .panel-grid{ grid-template-columns: 1fr; } }
+  .panel-grid .panel{ min-width: 0; }
 
   .chart-wrap{ overflow-x: auto; }
 
-  .type-row{ display:flex; align-items:center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
-  .type-row .type-label{ width: 70px; color: var(--text-muted); flex-shrink:0; }
-  .type-row .bar-bg{ flex:1; background: var(--surface-2); border-radius: 6px; height: 10px; overflow:hidden; }
-  .type-row .bar-fill{ height:100%; background: var(--gold); border-radius: 6px; }
-  .type-row .count{ width: 40px; text-align:right; color: var(--text-faint); flex-shrink:0; }
-  /* Etapas do Bitrix têm nome mais longo que tipo de mensagem — label mais
-     largo, texto cortado com "…" se ainda assim não couber. */
-  .stage-chart .type-label{ width: 170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* ---------- Barras horizontais (distribuição por etapa, por tipo) ---------- */
+  .bar-list{ display: flex; flex-direction: column; justify-content: center; flex: 1; }
+  .bar-row{ display:flex; align-items:center; gap: 12px; margin-bottom: 13px; font-size: 12px; }
+  .bar-row:last-child{ margin-bottom: 0; }
+  .bar-row .bar-label{ width: 118px; color: var(--text-muted); flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bar-row .bar-bg{
+    flex:1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 100px; height: 10px; overflow:hidden; min-width: 40px;
+  }
+  html[data-theme="light"] .bar-row .bar-bg{ background: var(--surface-2); }
+  .bar-row .bar-fill{ height:100%; background: var(--gold); border-radius: 100px; min-width: 4px; }
+  .bar-row .bar-count{ width: 38px; text-align:right; color: var(--text); flex-shrink:0; font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* ---------- Donut (Status das Instâncias) ---------- */
+  .donut-panel-body{ display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+  .donut-wrap{ position: relative; flex-shrink: 0; width: 140px; height: 140px; }
+  .donut-svg{ display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .donut-track{ fill: none; stroke: var(--surface-2); }
+  .donut-seg{ fill: none; stroke-linecap: butt; transition: stroke-width .12s ease; }
+  .donut-center{
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; gap: 1px;
+  }
+  .donut-center .donut-num{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 26px; color: var(--text); line-height: 1; }
+  .donut-center .donut-cap{ font-size: 9.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .05em; }
+  .donut-legend{ display: flex; flex-direction: column; gap: 9px; min-width: 0; flex: 1; }
+  .donut-legend-row{ display: flex; align-items: center; gap: 9px; font-size: 12px; }
+  .donut-legend-row .dl-dot{ width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+  .donut-legend-row .dl-name{ color: var(--text-muted); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .donut-legend-row .dl-val{ color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .donut-legend-row .dl-pct{ color: var(--text-faint); font-size: 11px; width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* ---------- Tempo médio de resposta — dois números grandes ---------- */
+  .respo-body{ display: flex; gap: 14px; flex-wrap: wrap; }
+  .respo-stat{
+    flex: 1; min-width: 130px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 15px 16px;
+  }
+  .respo-stat .rs-label{ font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+  .respo-stat .rs-value{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px; color: var(--gold); margin-top: 6px; line-height: 1.1; }
+  .respo-stat .rs-sub{ font-size: 10.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.4; }
+  .respo-note{ font-size: 11px; color: var(--text-faint); margin: 12px 0 0; line-height: 1.5; }
 
   table{ width: 100%; border-collapse: collapse; font-size: 12.5px; }
   th, td{ text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-  th{ color: var(--text-muted); font-weight: 500; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; }
+  th{ color: var(--text-muted); font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
   td{ color: var(--text); }
-  td.num, th.num{ text-align: right; }
+  td.num, th.num{ text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr:last-child td{ border-bottom: none; }
 
-  .empty{ color: var(--text-faint); font-size: 13px; padding: 20px 0; text-align:center; }
-  .legend{ display:flex; gap: 16px; font-size: 11.5px; color: var(--text-muted); margin-top: 10px; }
+  /* Coluna "Taxa de resposta" da tabela de atendimentos — número + mini-barra. */
+  .rate-cell{ display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .rate-cell .rate-bar{ width: 46px; height: 6px; border-radius: 100px; background: var(--surface-2); overflow: hidden; flex-shrink: 0; }
+  .rate-cell .rate-bar span{ display: block; height: 100%; background: var(--gold); border-radius: 100px; }
+  .rate-cell .rate-num{ font-variant-numeric: tabular-nums; color: var(--text); min-width: 30px; text-align: right; }
+
+  .empty{ color: var(--text-faint); font-size: 12.5px; padding: 18px 0; text-align:center; }
+  .legend{ display:flex; gap: 16px; font-size: 11.5px; color: var(--text-muted); margin-top: 12px; }
   .legend span{ display:inline-flex; align-items:center; gap: 6px; }
   .legend .dot{ width: 9px; height: 9px; border-radius: 2px; display:inline-block; }
 
-  /* ---------- Menu de ações por linha (⋯) ---------- */
-  td.actions{ position: relative; text-align: right; width: 36px; }
-  .row-menu-btn{
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
-  }
-  .row-menu-btn:hover{ background: var(--surface-2); color: var(--gold); }
-  .row-menu{
-    position: absolute;
-    right: 8px;
-    top: 100%;
-    z-index: 10;
-    background: var(--surface-2);
+  /* ======================================================
+     COLUNA DIREITA — cards "ao vivo". Fio dourado no topo pra comunicar
+     "isto é o agora, não o acumulado" — diferencia da coluna principal
+     sem virar uma cor/borda totalmente nova.
+     ====================================================== */
+  .live-card{
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 9px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.4);
-    min-width: 150px;
-    padding: 4px;
-    display: none;
+    border-top: 2px solid var(--gold-dim);
+    border-radius: var(--radius);
+    padding: 15px 16px;
   }
-  .row-menu.open{ display: block; }
-  .row-menu button{
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    color: var(--text);
-    font-size: 12.5px;
-    padding: 8px 10px;
-    border-radius: 6px;
-    cursor: pointer;
+  .live-card-head{
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-bottom: 12px;
   }
-  .row-menu button:hover{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
-  .row-menu button:disabled{ color: var(--text-faint); cursor: not-allowed; }
-  .contact-cell .phone{ color: var(--text-faint); font-size: 11px; }
+  .live-card-head h3{
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 13px; margin: 0;
+    color: var(--text); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .live-card-count{
+    font-size: 10.5px; font-weight: 600; color: var(--gold);
+    background: rgba(var(--gold-rgb), .12); border-radius: 100px;
+    padding: 2px 8px; white-space: nowrap;
+  }
+  .live-list{ display: flex; flex-direction: column; }
 
-  .pagination{
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 14px;
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
+  /* Item de conversa ao vivo — avatar (mesmo padrão .avatar do Chat),
+     nome, preview, sinal de atividade. Clicável (abre o negócio no CRM). */
+  .live-conv{
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 10px 8px; margin: 0 -8px; border-bottom: 1px solid var(--border);
+    border-radius: 8px; cursor: pointer;
+    transition: background .12s;
   }
-  .pagination button{
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 12px;
-    cursor: pointer;
+  .live-conv:hover{ background: var(--surface-2); }
+  .live-conv:focus-visible{ outline: 2px solid var(--gold-dim); outline-offset: -2px; }
+  .live-conv:first-child{ padding-top: 2px; }
+  .live-conv:last-child{ padding-bottom: 2px; border-bottom: none; }
+  .live-avatar{
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 13px; color: var(--gold);
   }
-  .pagination button:hover:not(:disabled){ border-color: var(--gold-dim); color: var(--gold); }
-  .pagination button:disabled{ color: var(--text-faint); cursor: not-allowed; opacity: .5; }
-  .pagination-info{ color: var(--text-muted); font-size: 12px; }
+  .live-avatar svg{ width: 16px; height: 16px; }
+  .live-conv-body{ min-width: 0; flex: 1; }
+  .live-conv-top{ display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .live-conv-name{ font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .live-conv-time{ font-size: 10px; color: var(--text-faint); flex-shrink: 0; }
+  .live-conv-preview{ font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .live-conv-meta{ display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  /* Affordance de "abrir no CRM" — nunca visível por padrão (o card já
+     comunica clicabilidade via cursor:pointer + hover de fundo, e tem
+     aria-label explícito pra leitor de tela); aparece discreto só no
+     hover/focus do card pai, empurrado pro fim da linha de meta. BUG
+     REAL corrigido aqui: esta classe era usada no markup sem NENHUMA
+     regra CSS — renderizava como texto+ícone sempre visíveis,
+     sobrepondo a preview da mensagem seguinte (achado ao testar o
+     redesign, não durante a auto-revisão do agente que construiu). */
+  .live-conv-open{
+    display: flex; align-items: center; gap: 4px; margin-left: auto;
+    font-size: 10.5px; font-weight: 600; color: var(--gold);
+    opacity: 0; transform: translateX(-4px);
+    transition: opacity .12s, transform .12s;
+  }
+  .live-conv-open svg{ width: 11px; height: 11px; flex-shrink: 0; }
+  .live-conv:hover .live-conv-open,
+  .live-conv:focus-visible .live-conv-open{ opacity: 1; transform: translateX(0); }
+  .live-badge{
+    font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 100px;
+    background: var(--surface-2); color: var(--text-muted);
+  }
+  .live-badge.unread{ background: rgba(var(--gold-rgb), .15); color: var(--gold); }
+  .live-more{
+    font-size: 11px; color: var(--text-faint); text-align: center;
+    padding-top: 11px; margin-top: 4px; border-top: 1px solid var(--border);
+  }
+
+  /* Instância com problema. */
+  .live-prob{ display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .live-prob:first-child{ padding-top: 0; }
+  .live-prob:last-child{ padding-bottom: 0; border-bottom: none; }
+  .live-prob-icon{
+    width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+    background: rgba(var(--red-rgb), .12); border: 1px solid rgba(var(--red-rgb), .25);
+    display: flex; align-items: center; justify-content: center; color: var(--red);
+  }
+  .live-prob-icon svg{ width: 15px; height: 15px; }
+  .live-prob-body{ min-width: 0; flex: 1; }
+  .live-prob-name{ font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .live-prob-status{ font-size: 11px; color: var(--red); margin-top: 2px; font-weight: 500; }
+  .live-prob-reason{ font-size: 11px; color: var(--text-faint); margin-top: 3px; line-height: 1.4; }
+  .live-empty{
+    display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted);
+    padding: 4px 0; line-height: 1.4;
+  }
+  .live-empty svg{ width: 15px; height: 15px; color: var(--green); flex-shrink: 0; }
+
+  /* Grid de atendentes. */
+  .agent-grid{ display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 12px 8px; }
+  .agent-cell{ display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px; }
+  .agent-avatar{
+    width: 38px; height: 38px; border-radius: 50%; position: relative;
+    background: var(--surface-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; color: var(--gold);
+  }
+  .agent-avatar .agent-dot{
+    position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--green); border: 2px solid var(--surface); box-sizing: content-box;
+  }
+  .agent-name{ font-size: 10.5px; color: var(--text-muted); line-height: 1.25; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Tooltip leve pra revelar nome truncado (.agent-name) — mesmo
+     mecanismo [data-tooltip]/.app-tooltip já usado em chat.html (regra
+     global: nunca `title` nativo). Diferente de .info-icon/.info-pop
+     (ícone ⓘ com título+parágrafos técnico/didático) — aqui é só o
+     texto completo do próprio elemento, sem ícone extra. */
+  .app-tooltip{
+    position:fixed; z-index:400; max-width:240px; padding:6px 10px; border-radius:7px;
+    background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+    font-size:11.5px; line-height:1.4; pointer-events:none; opacity:0; transform:translateY(2px);
+    transition: opacity .12s ease, transform .12s ease; box-shadow:0 6px 16px rgba(0,0,0,.28);
+  }
+  .app-tooltip.visible{ opacity:1; transform:translateY(0); }
+  .agent-stat{ font-size: 9.5px; color: var(--text-faint); }
+
+  /* Tag de origem (interna/externa) — usada na lista de conversas ao vivo. */
   .origin-tag{
     display: inline-block;
-    font-size: 10.5px;
+    font-size: 9.5px;
     font-weight: 600;
-    padding: 3px 9px;
+    padding: 2px 7px;
     border-radius: 100px;
     text-transform: uppercase;
     letter-spacing: .02em;
@@ -879,21 +1101,29 @@
 <div class="toast-stack" id="toastStack"></div>
 <div class="chart-tooltip" id="chartTooltip"></div>
 
-<div id="app">
-  <h1>Dashboard</h1>
-  <p class="subtitle">Conversas de WhatsApp vinculadas a negócios, e métricas agregadas de todas as sessões conectadas.</p>
+<div class="info-pop" id="infoPop"></div>
 
-  <div class="refresh-row">
-    <button class="refresh-btn" id="refreshBtn">Atualizar agora</button>
-    <div class="origin-filter" id="originFilter">
-      <button type="button" data-origin="interna">Internas</button>
-      <button type="button" data-origin="externa">Externas</button>
-      <button type="button" data-origin="">Todas</button>
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-titles">
+      <h1>Dashboard</h1>
+      <p class="subtitle">Conversas de WhatsApp vinculadas a negócios, e métricas agregadas de todas as sessões conectadas.</p>
     </div>
-    <span class="sidebar-updated" id="updatedAt"></span>
+    <div class="topbar-controls">
+      <div class="origin-filter" id="originFilter" role="group" aria-label="Filtrar por origem das conversas">
+        <button type="button" data-origin="interna">Internas</button>
+        <button type="button" data-origin="externa">Externas</button>
+        <button type="button" data-origin="">Todas</button>
+      </div>
+      <button class="refresh-btn" id="refreshBtn" type="button">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+        Atualizar
+      </button>
+      <span class="topbar-updated" id="updatedAt"></span>
+    </div>
   </div>
 
-  <div id="insightsSection"></div>
+  <div id="insightsSection" class="insights-section"></div>
 
   <div id="content">
     <p class="empty">Carregando…</p>
@@ -952,14 +1182,18 @@
   var SHORTCUTS_PAGE_KEY = 'dashboard'; // usado nas chaves de localStorage — único por página
   var SHORTCUTS_CONTENT = {
     global: [
-      { icon: 'esc', title: "ESC fecha tudo", desc: "Fecha qualquer modal/popover aberto — sempre a ação mais imediata primeiro." },
+      { icon: 'esc', title: "ESC fecha tudo", desc: "Fecha qualquer modal, popover ou tooltip aberto; sem nada aberto, tira o foco do campo em que você estiver digitando." },
+      { icon: 'info', title: "Ícone ⓘ", desc: "Ao lado de cada KPI e título de gráfico. Passe o mouse (ou dê Tab e pare nele) para ver de onde vem o número e o que ele significa na prática." },
       { icon: 'bell', title: "Sino de notificações", desc: "Avisa (com um toast e um número no sino) sempre que chega mensagem nova, mesmo em outra tela — clique no sino leva ao histórico completo." },
       { icon: 'theme', title: "Tema claro/escuro", desc: "O botão de sol/lua na sidebar troca o tema — sua escolha fica salva neste navegador." },
       { icon: 'sidebar', title: "Sidebar retrátil", desc: "O botão redondo na borda da sidebar recolhe o menu pra só ícones — útil em telas menores." },
+      { icon: 'keys', title: "Este guia", desc: "Reabra esta janela quando quiser pelo ícone de interrogação na sidebar." },
     ],
     page: [
-      { icon: 'insight', title: "Filtro Internas/Externas", desc: "Alterne a origem das mensagens contabilizadas nos gráficos." },
-      { icon: 'ai', title: "Insights de IA", desc: "Um resumo gerado por IA sobre o período — \"Gerar de novo\" atualiza com dados mais recentes." },
+      { icon: 'filter', title: "Filtro Internas / Externas", desc: "No topo, à direita. Escolhe quais conversas entram em todos os números da tela: internas (testes entre colegas), externas (clientes) ou todas." },
+      { icon: 'sparkle', title: "Insights de IA", desc: "Um resumo escrito por IA sobre o período. Fica em cache por 30 minutos; \"Gerar de novo\" força uma releitura com os dados mais recentes." },
+      { icon: 'panel', title: "Cartão de conversa", desc: "Na coluna direita, em \"Conversas em andamento\": clicar num item abre o negócio correspondente no Bitrix (só funciona com a tela aberta dentro do Bitrix)." },
+      { icon: 'chart', title: "Gráfico de atividade", desc: "Passe o mouse sobre a linha do tempo para ver recebidas e enviadas de cada dia." },
     ],
   };
   var SHORTCUTS_ICONS = {
@@ -977,6 +1211,10 @@
     kanban: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>',
     ai: '<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 3"/>',
     drag: '<circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/>',
+    info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+    filter: '<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>',
+    sparkle: '<path d="M12 3v3m0 12v3m9-9h-3M6 12H3m14.5-6.5-2 2m-9 9-2 2m13-2-2-2m-9-9-2-2"/><circle cx="12" cy="12" r="3"/>',
+    chart: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
   };
   function renderShortcutsSection(label, items) {
     return `
@@ -1150,12 +1388,133 @@
     if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(result); }
   }
 
+  // ---------------------------------------------------------------
+  // Tooltip do ícone informativo (ⓘ) — componente custom (regra global:
+  // nunca `title` nativo). Um único elemento (#infoPop) reaproveitado,
+  // posicionado via getBoundingClientRect + clamp na viewport. Delegado
+  // no document (funciona pra qualquer .info-icon criado depois, mesmo
+  // quando #content é trocado inteiro a cada poll de 30s). Texto no
+  // atributo data-info no formato "Título || técnico || didático".
+  // ---------------------------------------------------------------
+  var infoPop = document.getElementById('infoPop');
+  var infoAnchor = null;
+  function positionInfoPop() {
+    if (!infoAnchor || !infoPop) return;
+    var r = infoAnchor.getBoundingClientRect();
+    var pr = infoPop.getBoundingClientRect();
+    var gap = 8;
+    var left = r.left + r.width / 2 - pr.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+    var top = r.bottom + gap;
+    if (top + pr.height > window.innerHeight - 8) top = r.top - pr.height - gap;
+    infoPop.style.left = left + 'px';
+    infoPop.style.top = Math.max(8, top) + 'px';
+  }
+  function showInfoPop(anchor) {
+    if (!infoPop) return;
+    var raw = anchor.getAttribute('data-info') || '';
+    var parts = raw.split('||').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (!parts.length) return;
+    var div = document.createElement('div');
+    div.textContent = parts[0];
+    var html = '<div class="info-pop-title">' + div.innerHTML + '</div>';
+    for (var i = 1; i < parts.length; i++) {
+      var p = document.createElement('div');
+      p.textContent = parts[i];
+      html += '<p>' + p.innerHTML + '</p>';
+    }
+    infoPop.innerHTML = html;
+    infoAnchor = anchor;
+    infoPop.style.left = '-9999px';
+    infoPop.style.top = '0';
+    infoPop.classList.add('open');
+    positionInfoPop();
+  }
+  function hideInfoPop() {
+    if (!infoPop) return;
+    infoPop.classList.remove('open');
+    infoAnchor = null;
+  }
+  document.addEventListener('mouseover', function (e) {
+    var icon = e.target.closest ? e.target.closest('.info-icon') : null;
+    if (icon) showInfoPop(icon);
+  });
+  document.addEventListener('mouseout', function (e) {
+    var icon = e.target.closest ? e.target.closest('.info-icon') : null;
+    if (icon && (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest('.info-icon'))) hideInfoPop();
+  });
+  document.addEventListener('focusin', function (e) {
+    if (e.target.classList && e.target.classList.contains('info-icon')) showInfoPop(e.target);
+  });
+  document.addEventListener('focusout', function (e) {
+    if (e.target.classList && e.target.classList.contains('info-icon')) hideInfoPop();
+  });
+  window.addEventListener('scroll', hideInfoPop, true);
+  window.addEventListener('resize', hideInfoPop);
+
+  // Tooltip leve [data-tooltip] (mesmo mecanismo de chat.html) — pra
+  // revelar o texto completo de algo truncado (ex: .agent-name), sem o
+  // peso de um .info-icon+.info-pop pra um caso tão simples.
+  var __appTooltipEl = null;
+  var __appTooltipCurrent = null;
+  function __ensureAppTooltip() {
+    if (!__appTooltipEl) {
+      __appTooltipEl = document.createElement('div');
+      __appTooltipEl.className = 'app-tooltip';
+      document.body.appendChild(__appTooltipEl);
+    }
+    return __appTooltipEl;
+  }
+  function __showAppTooltip(target) {
+    var text = target.getAttribute('data-tooltip');
+    if (!text) return;
+    __appTooltipCurrent = target;
+    var tip = __ensureAppTooltip();
+    tip.textContent = text;
+    tip.classList.add('visible');
+    var r = target.getBoundingClientRect();
+    var tipRect = tip.getBoundingClientRect();
+    var left = r.left + r.width / 2 - tipRect.width / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tipRect.width - 8));
+    var top = r.top - tipRect.height - 8;
+    if (top < 8) top = r.bottom + 8;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+  }
+  function __hideAppTooltip() {
+    __appTooltipCurrent = null;
+    if (__appTooltipEl) __appTooltipEl.classList.remove('visible');
+  }
+  document.addEventListener('mouseenter', function (e) {
+    var t = e.target.closest && e.target.closest('[data-tooltip]');
+    if (t) __showAppTooltip(t);
+  }, true);
+  document.addEventListener('mouseleave', function (e) {
+    var t = e.target.closest && e.target.closest('[data-tooltip]');
+    if (t && t === __appTooltipCurrent) __hideAppTooltip();
+  }, true);
+  document.addEventListener('focus', function (e) {
+    var t = e.target.closest && e.target.closest('[data-tooltip]');
+    if (t) __showAppTooltip(t);
+  }, true);
+  document.addEventListener('blur', function (e) {
+    var t = e.target.closest && e.target.closest('[data-tooltip]');
+    if (t && t === __appTooltipCurrent) __hideAppTooltip();
+  }, true);
+
   // ESC fecha qualquer modal aberto (.overlay.open) — inclusive o confirmDialog,
-  // que conta como "Cancelar".
+  // que conta como "Cancelar" — e também o tooltip informativo, se aberto.
+  // Fallback final: tira o foco de campo de formulário focado (regra global).
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
+    __hideAppTooltip();
+    var hadOverlay = document.querySelectorAll('.overlay.open').length > 0;
     document.querySelectorAll('.overlay.open').forEach(function (el) { el.classList.remove('open'); });
     if (__confirmResolve) { var r = __confirmResolve; __confirmResolve = null; r(false); }
+    if (infoPop && infoPop.classList.contains('open')) { hideInfoPop(); return; }
+    if (hadOverlay) return;
+    var ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) ae.blur();
   });
 })();
 </script>
@@ -1191,8 +1550,13 @@
   // apresentação SVG (fill="...") precisam do hex já resolvido, var() nem
   // sempre funciona ali em todo navegador.
   const CHART_BLUE = '#3987e5'; // recebidas
+  // Lê uma variável CSS já resolvida (hex) — atributos de apresentação
+  // SVG (fill/stroke) nem sempre aceitam var() em todo navegador.
+  function cssVar(name, fallback) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+  }
   function chartGold() {
-    return getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() || '#d8ab4f';
+    return cssVar('--gold', '#d8ab4f');
   }
 
   // Filtro padrão: todas as conversas (internas + externas), sem filtro —
@@ -1213,15 +1577,12 @@
     if (!btn) return;
     currentOrigin = btn.dataset.origin;
     syncOriginButtons();
-    conversationsPage = 1; // troca de filtro sempre volta pra primeira página
     load();
   });
   syncOriginButtons();
 
-  // Paginação da tabela de Conversas — client-side, sem rebuscar do servidor
-  // (guardamos a última resposta de /metrics em `lastMetrics` e só re-renderizamos).
-  const CONVERSATIONS_PAGE_SIZE = 10;
-  let conversationsPage = 1;
+  // Guarda a última resposta de /metrics — o poll de /instances re-renderiza
+  // a tela inteira sem precisar rebuscar as métricas, e vice-versa.
   let lastMetrics = null;
 
   let appToken = null;
@@ -1516,6 +1877,8 @@
       applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
       load();
       setInterval(load, 30000);
+      loadInstances();
+      setInterval(loadInstances, 30000);
       loadInsights(false); // cacheado no servidor (30min) — não entra no polling de 30s do load()
     } catch (err) {
       content.innerHTML = `<p class="empty">Não foi possível autenticar com o Bitrix. ${escapeHtml(err.message)}</p>`;
@@ -1594,43 +1957,101 @@
 
   // `invert`: pra métricas onde subir é ruim (ex: tempo médio de resposta),
   // inverte qual sinal pinta de verde/vermelho.
-  function trendBadge(prefix, change, invert) {
-    if (!change) return `<span class="kpi-trend kpi-trend-flat">${prefix} —</span>`;
+  function deltaBadge(prefix, change, invert) {
+    if (!change) return `<span class="kpi-delta kpi-delta-flat"><span class="kpi-delta-tag">${prefix}</span> —</span>`;
     const good = invert ? change.sign < 0 : change.sign > 0;
     const bad = invert ? change.sign > 0 : change.sign < 0;
-    const cls = good ? 'kpi-trend-up' : bad ? 'kpi-trend-down' : 'kpi-trend-flat';
-    return `<span class="kpi-trend ${cls}">${prefix} ${change.arrow} ${change.text}</span>`;
+    const cls = good ? 'kpi-delta-up' : bad ? 'kpi-delta-down' : 'kpi-delta-flat';
+    return `<span class="kpi-delta ${cls}"><span class="kpi-delta-tag">${prefix}</span> ${change.arrow} ${change.text}</span>`;
   }
 
-  function renderKpis(m) {
-    const cards = [
-      { value: m.totals.total, label: 'Mensagens totais', key: 'total' },
-      { value: m.totals.in, label: 'Recebidas', key: 'in' },
-      { value: m.totals.out, label: 'Enviadas', key: 'out' },
-      { value: m.totals.conversas, label: 'Conversas ativas', key: 'conversas' },
-      { value: m.totals.sessoes, label: 'Sessões (usuários)', key: 'sessoes' },
-      { value: m.avgResponseLabel || '—', label: 'Tempo médio de resposta', key: 'avgResponseMs', invert: true },
-      { value: formatPercent(m.responseRate), label: 'Taxa de resposta', key: 'responseRate' },
-      { value: formatDecimal(m.avgMessagesPerConversation), label: 'Msgs por conversa', key: 'avgMessagesPerConversation' },
-    ];
+  const KPI_ICON = {
+    activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+    inbox: '<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+    send: '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+    chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+    clock: '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    reply: '<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+  };
+
+  // Ícone informativo (ⓘ) reutilizável — o mesmo glifo em toda a tela.
+  function infoIcon(text) {
+    return `<span class="info-icon" tabindex="0" role="img" aria-label="Sobre este dado" data-info="${escapeHtml(text)}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>`;
+  }
+
+  // 6 KPIs escolhidos pro formato da referência (rótulo + número + contexto +
+  // delta): os que respondem "como está a operação num relance". Msgs totais,
+  // Sessões e Msgs/conversa saíram desta faixa (viram detalhe nos painéis) —
+  // 6 cabe numa linha limpa; 8 forçava 2 linhas desiguais.
+  function renderKpis(m, instances) {
     const trend = m.trend || {};
     const cur = trend.current || {};
     const prevMonth = trend.prevMonth || {};
     const prevYear = trend.prevYear || {};
+    const totalInst = Array.isArray(instances) ? instances.length : null;
+    const onlineInst = Array.isArray(instances) ? instances.filter((i) => i.status === 'online').length : null;
+
+    const cards = [
+      {
+        icon: 'chat', label: 'Conversas ativas', key: 'conversas', invert: false,
+        value: String(m.totals.conversas),
+        context: 'vinculadas a um negócio',
+        info: 'Conversas ativas || Conta as conversas de WhatsApp que estão vinculadas a um negócio no Bitrix, somando todas as instâncias conectadas. || Na prática: quantos atendimentos de verdade estão em andamento — grupos e mensagens avulsas não entram.',
+      },
+      {
+        icon: 'send', label: 'Mensagens enviadas', key: 'out', invert: false,
+        value: fmtInt(m.totals.out),
+        context: 'no total, todas as instâncias',
+        info: 'Mensagens enviadas || Total histórico de mensagens que saíram das instâncias — pelo painel ou direto do celular. || Na prática: o volume de resposta que a equipe produziu. O delta compara o mês atual com o mês anterior (MoM) e com o mesmo mês do ano passado (YoY).',
+      },
+      {
+        icon: 'inbox', label: 'Mensagens recebidas', key: 'in', invert: false,
+        value: fmtInt(m.totals.in),
+        context: 'no total, todas as instâncias',
+        info: 'Mensagens recebidas || Total histórico de mensagens que chegaram nas instâncias conectadas. || Na prática: a demanda que entrou. Se cresce mais rápido que as enviadas, a fila tende a acumular.',
+      },
+      {
+        icon: 'reply', label: 'Taxa de resposta', key: 'responseRate', invert: false,
+        value: formatPercent(m.responseRate),
+        context: 'das recebidas tiveram resposta',
+        info: 'Taxa de resposta || Percentual de mensagens recebidas que tiveram pelo menos uma resposta enviada depois, dentro da mesma conversa. || Na prática: quão bem a equipe está dando conta de responder. Perto de 100% é o alvo; quedas indicam mensagens ficando sem retorno.',
+      },
+      {
+        icon: 'clock', label: 'Tempo médio de resposta', key: 'avgResponseMs', invert: true,
+        value: m.avgResponseLabel || '—',
+        context: 'da mensagem recebida à 1ª resposta',
+        info: 'Tempo médio de resposta || Média do intervalo entre uma mensagem recebida e a primeira resposta enviada depois dela, em todas as conversas. || Na prática: quanto o cliente espera. Aqui, menos é melhor — por isso o delta fica verde quando o tempo cai.',
+      },
+      {
+        icon: 'activity', label: 'Instâncias no ar', key: null, invert: false,
+        value: totalInst == null ? '—' : `${onlineInst}/${totalInst}`,
+        context: totalInst == null ? 'indisponível' : (totalInst === 1 ? 'de 1 conectada' : `de ${totalInst} conectadas`),
+        info: 'Instâncias no ar || Quantos números de WhatsApp da conta estão com a sessão conectada agora, sobre o total de instâncias cadastradas. || Na prática: se um número cai, as mensagens dele param de entrar e sair até religar. O painel "Status das instâncias" abaixo detalha cada uma.',
+      },
+    ];
+
     return `
       <div class="kpi-grid">
-        ${cards.map(c => `
+        ${cards.map((c) => `
           <div class="kpi-card">
-            <div class="value">${escapeHtml(String(c.value))}</div>
-            <div class="label">${c.label}</div>
-            <div class="kpi-trends">
-              ${trendBadge('MoM', pctChange(cur[c.key], prevMonth[c.key]), c.invert)}
-              ${trendBadge('YoY', pctChange(cur[c.key], prevYear[c.key]), c.invert)}
+            <div class="kpi-card-top">
+              <span class="label">${c.label} ${infoIcon(c.info)}</span>
+              <span class="kpi-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${KPI_ICON[c.icon]}</svg></span>
             </div>
+            <div class="value">${escapeHtml(String(c.value))}</div>
+            <div class="context">${escapeHtml(c.context)}</div>
+            ${c.key ? `<div class="kpi-deltas">
+              ${deltaBadge('MoM', pctChange(cur[c.key], prevMonth[c.key]), c.invert)}
+              ${deltaBadge('YoY', pctChange(cur[c.key], prevYear[c.key]), c.invert)}
+            </div>` : ''}
           </div>
         `).join('')}
       </div>
     `;
+  }
+
+  function fmtInt(v) {
+    return v == null ? '—' : Number(v).toLocaleString('pt-BR');
   }
 
   // Arredonda pra cima num número "redondo" (1/2/5×10ⁿ), pra rótulo de eixo
@@ -1647,10 +2068,6 @@
   // (crosshair) usa isso pra achar o dia mais próximo do mouse sem precisar
   // re-renderizar o SVG inteiro a cada movimento.
   let dailyChartMeta = null;
-  // Idem pro scatter: só precisa da lista de dias (cada ponto já carrega o
-  // índice em data-idx).
-  let scatterChartMeta = null;
-  let hoveredScatterDot = null;
 
   function hideChartTooltip() {
     chartTooltip.style.display = 'none';
@@ -1660,7 +2077,6 @@
     if (hoverIn) hoverIn.setAttribute('visibility', 'hidden');
     const hoverOut = document.getElementById('dailyHoverOut');
     if (hoverOut) hoverOut.setAttribute('visibility', 'hidden');
-    if (hoveredScatterDot) { hoveredScatterDot.classList.remove('hovered'); hoveredScatterDot = null; }
   }
 
   function showChartTooltip(clientX, clientY, html) {
@@ -1710,29 +2126,6 @@
     const dotOut = svg.querySelector('#dailyHoverOut');
     dotOut.setAttribute('cx', x); dotOut.setAttribute('cy', yOut); dotOut.setAttribute('visibility', 'visible');
 
-    if (hoveredScatterDot) { hoveredScatterDot.classList.remove('hovered'); hoveredScatterDot = null; }
-    showChartTooltip(evt.clientX, evt.clientY, dayTooltipHtml(day));
-  }
-
-  function updateScatterHover(hitEl, evt) {
-    const meta = scatterChartMeta;
-    if (!meta) return;
-    const day = meta.perDay[Number(hitEl.dataset.idx)];
-    if (!day) return;
-
-    const crosshair = document.getElementById('dailyCrosshair');
-    if (crosshair) crosshair.setAttribute('visibility', 'hidden');
-    const hoverIn = document.getElementById('dailyHoverIn');
-    if (hoverIn) hoverIn.setAttribute('visibility', 'hidden');
-    const hoverOut = document.getElementById('dailyHoverOut');
-    if (hoverOut) hoverOut.setAttribute('visibility', 'hidden');
-
-    const dot = hitEl.previousElementSibling;
-    if (hoveredScatterDot !== dot) {
-      if (hoveredScatterDot) hoveredScatterDot.classList.remove('hovered');
-      hoveredScatterDot = dot;
-      if (hoveredScatterDot) hoveredScatterDot.classList.add('hovered');
-    }
     showChartTooltip(evt.clientX, evt.clientY, dayTooltipHtml(day));
   }
 
@@ -1742,15 +2135,13 @@
   content.addEventListener('mousemove', (e) => {
     const dailySvg = e.target.closest('svg.daily-chart-svg');
     if (dailySvg) { updateDailyHover(dailySvg, e); return; }
-    const hit = e.target.closest('.scatter-hit');
-    if (hit) { updateScatterHover(hit, e); return; }
     hideChartTooltip();
   });
   content.addEventListener('mouseleave', hideChartTooltip);
 
-  // Gráfico de linhas, últimos 30 dias (o mês inteiro) — uma linha para
-  // recebidas e outra para enviadas. SVG responsivo (estica pra 100% do
-  // painel via viewBox) com grade, eixo Y e crosshair de hover.
+  // Gráfico de linhas, mês atual — uma linha para recebidas e outra para
+  // enviadas. SVG responsivo (estica pra 100% do painel via viewBox) com
+  // grade, eixo Y e crosshair de hover.
   function renderDailyChart(perDay) {
     if (!perDay.length) {
       dailyChartMeta = null;
@@ -1791,9 +2182,18 @@
       return `<text class="axis-label" x="${xAt(i)}" y="${padTop + chartH + 16}" text-anchor="middle">${formatDay(d.day)}</text>`;
     }).join('');
 
+    const INFO_ACTIVITY = 'Atividade de mensagens || Duas linhas por dia do mês atual: recebidas (azul) e enviadas (dourado), somando todas as instâncias. Cada ponto é um dia; passe o mouse para ver os valores. || Na prática: mostra o ritmo do atendimento — picos de demanda, dias parados, e se as respostas acompanham o que chega.';
     return `
       <div class="panel">
-        <h2>Mensagens por dia (mês atual)</h2>
+        <div class="panel-head">
+          <h2>Atividade de mensagens ${infoIcon(INFO_ACTIVITY)}</h2>
+          <div class="panel-head-meta">
+            <span class="legend" style="margin:0;">
+              <span><span class="dot" style="background:${CHART_BLUE}"></span> Recebidas</span>
+              <span><span class="dot" style="background:${chartGold()}"></span> Enviadas</span>
+            </span>
+          </div>
+        </div>
         <div class="chart-wrap">
           <svg class="daily-chart-svg" viewBox="0 0 ${vbW} ${vbH}">
             ${grid}
@@ -1809,240 +2209,373 @@
             <circle class="chart-hover-dot" id="dailyHoverOut" r="4" fill="${chartGold()}" visibility="hidden"></circle>
           </svg>
         </div>
-        <div class="legend">
-          <span><span class="dot" style="background:${CHART_BLUE}"></span> Recebidas</span>
-          <span><span class="dot" style="background:${chartGold()}"></span> Enviadas</span>
-        </div>
       </div>
     `;
   }
 
-  // Dispersão: cada ponto é um dia, posição = (recebidas, enviadas) naquele
-  // dia. Ajuda a ver se dias com mais mensagens recebidas também têm mais
-  // respostas enviadas (correlação), ou se ficam bem desequilibrados. A
-  // diagonal marca onde recebidas = enviadas — pontos acima dela responderam
-  // mais do que receberam naquele dia.
-  function renderScatterChart(perDay) {
-    if (!perDay.length) {
-      scatterChartMeta = null;
-      return `<div class="panel"><h2>Dispersão: recebidas × enviadas por dia</h2><p class="empty">Sem dados ainda.</p></div>`;
+  // ---------------------------------------------------------------
+  // Status das instâncias — donut. Relação parte/todo de 3 categorias
+  // (Ativa / Inativa / Com erro), com o número de instâncias no ar no
+  // centro (a leitura primária) e o anel decompondo (a leitura de
+  // detalhe). Forma escolhida por ser esse o caso de uso correto de
+  // donut: poucas fatias, somam 100%, uma pergunta de "quanto de".
+  // Cor por FUNÇÃO (design-system.md): verde = operando, vermelho = erro
+  // que precisa de ação, cinza-faint = ausência (offline sem erro).
+  //   Ativa       -> status 'online'
+  //   Com erro    -> needsAttention === true
+  //   Inativa     -> resto (offline/connecting sem needsAttention)
+  // ---------------------------------------------------------------
+  function renderInstanceStatus(instances) {
+    const INFO = 'Status das instâncias || Cada número de WhatsApp cadastrado, classificado pelo estado da sessão agora: Ativa (conectada), Com erro (o WhatsApp recusou a conexão e parou de tentar sozinho — precisa religar) e Inativa (desconectada, sem erro reportado). || Na prática: instância Ativa envia e recebe normalmente; qualquer outro estado significa mensagens paradas naquele número.';
+    if (!Array.isArray(instances)) {
+      return `<div class="panel"><div class="panel-head"><h2>Status das instâncias ${infoIcon(INFO)}</h2></div><p class="empty">Não foi possível carregar as instâncias.</p></div>`;
     }
-    const size = 240, padL = 34, padB = 24, padT = 10, padR = 10;
-    const axisMax = niceCeil(Math.max(1, ...perDay.map(d => Math.max(d.in, d.out))));
-    const plotSize = size - padL - padR;
-    const scaleX = (v) => padL + (v / axisMax) * plotSize;
-    const scaleY = (v) => (size - padB) - (v / axisMax) * plotSize;
+    if (!instances.length) {
+      return `<div class="panel"><div class="panel-head"><h2>Status das instâncias ${infoIcon(INFO)}</h2></div><p class="empty">Nenhuma instância cadastrada.</p></div>`;
+    }
+    const gold = chartGold();
+    const faint = cssVar('--text-faint', '#6e6353');
+    const red = cssVar('--red', '#d9685f');
+    const online = instances.filter((i) => i.status === 'online').length;
+    const withError = instances.filter((i) => i.needsAttention).length;
+    const inactive = instances.length - online - withError;
+    const segs = [
+      { name: 'Ativas', count: online, color: gold },
+      { name: 'Inativas', count: inactive, color: faint },
+      { name: 'Com erro', count: withError, color: red },
+    ].filter((s) => s.count > 0);
 
-    scatterChartMeta = { perDay };
-
-    const grid = [0, 1 / 3, 2 / 3, 1].map((frac) => {
-      const val = Math.round(axisMax * frac);
-      const x = padL + frac * plotSize;
-      const y = (size - padB) - frac * plotSize;
-      return `
-        <line class="grid-line" x1="${padL}" y1="${y}" x2="${size - padR}" y2="${y}"></line>
-        <line class="grid-line" x1="${x}" y1="${padT}" x2="${x}" y2="${size - padB}"></line>
-        <text class="grid-label" x="${padL - 5}" y="${y + 3}" text-anchor="end">${val}</text>
-        <text class="grid-label" x="${x}" y="${size - padB + 14}" text-anchor="middle">${val}</text>
-      `;
+    const total = instances.length;
+    const VB = 120, CX = 60, R = 47, C = 2 * Math.PI * R, SW = 15;
+    let offset = 0;
+    const arcs = segs.map((s) => {
+      const frac = s.count / total;
+      const len = frac * C;
+      // gap de 3px entre fatias só quando há mais de uma
+      const gap = segs.length > 1 ? 3 : 0;
+      const dash = `${Math.max(0.001, len - gap)} ${C - Math.max(0.001, len - gap)}`;
+      const arc = `<circle class="donut-seg" cx="${CX}" cy="${CX}" r="${R}" stroke="${s.color}" stroke-width="${SW}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}"></circle>`;
+      offset += len;
+      return arc;
     }).join('');
 
-    const points = perDay.map((d, i) => `
-      <circle class="scatter-dot" cx="${scaleX(d.in)}" cy="${scaleY(d.out)}" r="4" fill="${chartGold()}" fill-opacity="0.8"></circle>
-      <circle class="scatter-hit" data-idx="${i}" cx="${scaleX(d.in)}" cy="${scaleY(d.out)}" r="11"></circle>
+    const legend = segs.map((s) => `
+      <div class="donut-legend-row">
+        <span class="dl-dot" style="background:${s.color}"></span>
+        <span class="dl-name">${s.name}</span>
+        <span class="dl-val">${s.count}</span>
+        <span class="dl-pct">${Math.round((s.count / total) * 100)}%</span>
+      </div>
     `).join('');
 
     return `
       <div class="panel">
-        <h2>Dispersão: recebidas × enviadas por dia</h2>
-        <div class="chart-wrap">
-          <svg class="scatter-chart-svg" width="${size}" height="${size + 6}" viewBox="0 0 ${size} ${size + 6}">
-            ${grid}
-            <line class="ref-line" x1="${padL}" y1="${size - padB}" x2="${size - padR}" y2="${padT}"></line>
-            <line class="axis-line" x1="${padL}" y1="${padT}" x2="${padL}" y2="${size - padB}"></line>
-            <line class="axis-line" x1="${padL}" y1="${size - padB}" x2="${size - padR}" y2="${size - padB}"></line>
-            ${points}
-            <text class="axis-label" x="${padL + plotSize / 2}" y="${size + 4}" text-anchor="middle">Recebidas</text>
-            <text class="axis-label" x="-${padT + plotSize / 2}" y="10" text-anchor="middle" transform="rotate(-90)">Enviadas</text>
-          </svg>
+        <div class="panel-head">
+          <h2>Status das instâncias ${infoIcon(INFO)}</h2>
+          <div class="panel-head-meta">${total} ${total === 1 ? 'número' : 'números'}</div>
         </div>
-        <p class="empty" style="text-align:left; padding:6px 0 0;">Cada ponto é um dia — passe o mouse pra ver os valores. A diagonal marca onde recebidas = enviadas.</p>
+        <div class="donut-panel-body">
+          <div class="donut-wrap">
+            <svg class="donut-svg" viewBox="0 0 ${VB} ${VB}" role="img" aria-label="${online} de ${total} instâncias ativas">
+              <circle class="donut-track" cx="${CX}" cy="${CX}" r="${R}" stroke-width="${SW}"></circle>
+              ${arcs}
+            </svg>
+            <div class="donut-center">
+              <span class="donut-num">${online}<span style="color:var(--text-faint);font-size:15px;">/${total}</span></span>
+              <span class="donut-cap">no ar</span>
+            </div>
+          </div>
+          <div class="donut-legend">${legend}</div>
+        </div>
       </div>
     `;
   }
 
-  // Quantos negócios (dos já vinculados às conversas desta tela) estão em
-  // cada etapa do funil no Bitrix agora — `stages` vem pronto do backend
-  // (GET /metrics, ver src/bitrixCrm.js:getStageDistribution), já ordenado
-  // pela posição real da etapa no funil. Vazio quando não há webhook do
-  // Bitrix configurado, ou nenhum negócio vinculado ainda.
+  // Distribuição por etapa (funil do Bitrix) — barras horizontais, não
+  // donut: é um RANKING de categorias nomeadas com ordem (posição no
+  // funil), não uma relação parte/todo — barra comunica magnitude
+  // relativa melhor e sem competir com o donut de Status logo ao lado.
   function renderStageChart(stages) {
+    const INFO = 'Distribuição por etapa || Dos negócios já ligados a uma conversa de WhatsApp, quantos estão em cada etapa do funil no Bitrix agora — na ordem real do funil. || Na prática: mostra onde os atendimentos estão travando. Muitos parados numa etapa inicial pode indicar follow-up atrasado.';
     if (!stages || !stages.length) {
-      return `<div class="panel stage-chart"><h2>Leads por etapa (Bitrix)</h2><p class="empty">Sem negócios vinculados a conversas ainda.</p></div>`;
+      return `<div class="panel"><div class="panel-head"><h2>Distribuição por etapa ${infoIcon(INFO)}</h2></div><p class="empty">Sem negócios vinculados a conversas ainda.</p></div>`;
     }
     const max = Math.max(...stages.map((s) => s.count));
     const rows = stages.map((s) => `
-      <div class="type-row">
-        <span class="type-label" title="${escapeHtml(s.name)}">${escapeHtml(s.name)}</span>
+      <div class="bar-row">
+        <span class="bar-label">${escapeHtml(s.name)}</span>
         <span class="bar-bg"><span class="bar-fill" style="width:${(s.count / max) * 100}%"></span></span>
-        <span class="count">${s.count}</span>
+        <span class="bar-count">${s.count}</span>
       </div>
     `).join('');
-    return `<div class="panel stage-chart"><h2>Leads por etapa (Bitrix)</h2>${rows}</div>`;
+    return `<div class="panel"><div class="panel-head"><h2>Distribuição por etapa ${infoIcon(INFO)}</h2></div><div class="bar-list">${rows}</div></div>`;
   }
 
   function renderByType(byType) {
+    const INFO = 'Por tipo de mensagem || Total histórico de mensagens (recebidas + enviadas) quebrado por formato: texto, imagem, áudio e vídeo. || Na prática: dá a proporção de mídia no atendimento — útil pra dimensionar armazenamento e saber se o time lida bem com áudio/imagem.';
     const entries = Object.entries(byType);
     if (!entries.length) {
-      return `<div class="panel"><h2>Por tipo de mensagem</h2><p class="empty">Sem dados ainda.</p></div>`;
+      return `<div class="panel"><div class="panel-head"><h2>Por tipo de mensagem ${infoIcon(INFO)}</h2></div><p class="empty">Sem dados ainda.</p></div>`;
     }
     const max = Math.max(...entries.map(([, v]) => v));
     const rows = entries
       .sort((a, b) => b[1] - a[1])
       .map(([type, count]) => `
-        <div class="type-row">
-          <span class="type-label">${escapeHtml(TYPE_LABELS[type] || type)}</span>
+        <div class="bar-row">
+          <span class="bar-label">${escapeHtml(TYPE_LABELS[type] || type)}</span>
           <span class="bar-bg"><span class="bar-fill" style="width:${(count / max) * 100}%"></span></span>
-          <span class="count">${count}</span>
+          <span class="bar-count">${fmtInt(count)}</span>
         </div>
       `).join('');
-    return `<div class="panel"><h2>Por tipo de mensagem</h2>${rows}</div>`;
+    return `<div class="panel"><div class="panel-head"><h2>Por tipo de mensagem ${infoIcon(INFO)}</h2></div><div class="bar-list">${rows}</div></div>`;
   }
 
-  function renderPerSession(perSession) {
-    if (!perSession.length) {
-      return `<div class="panel"><h2>Por sessão (usuário do Bitrix)</h2><p class="empty">Sem dados ainda.</p></div>`;
-    }
-    const rows = perSession.map(s => `
-      <tr>
-        <td>${escapeHtml(s.label || s.sessionId)}</td>
-        <td class="num">${s.conversas}</td>
-        <td class="num">${s.in}</td>
-        <td class="num">${s.out}</td>
-        <td class="num">${s.in + s.out}</td>
-      </tr>
-    `).join('');
+  // Tempo médio de resposta — o metrics NÃO tem série temporal desse
+  // número (só a média corrente, avgResponseMs/avgResponseLabel). Então
+  // o painel mostra só os números grandes, sem gráfico de evolução —
+  // não invento uma série que não existe (regra: nunca dado fabricado).
+  function renderResponseTime(m) {
+    const INFO = 'Tempo médio de resposta || Média do intervalo entre uma mensagem recebida e a primeira resposta enviada depois, considerando todas as conversas do histórico. || Na prática: o tempo que o cliente costuma esperar por um primeiro retorno.';
+    const label = m.avgResponseLabel || '—';
     return `
       <div class="panel">
-        <h2>Por sessão (usuário do Bitrix)</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Sessão</th>
-              <th class="num">Conversas</th>
-              <th class="num">Recebidas</th>
-              <th class="num">Enviadas</th>
-              <th class="num">Total</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
+        <div class="panel-head">
+          <h2>Tempo médio de resposta ${infoIcon(INFO)}</h2>
+        </div>
+        <div class="respo-body">
+          <div class="respo-stat">
+            <div class="rs-label">Média geral</div>
+            <div class="rs-value">${escapeHtml(label)}</div>
+            <div class="rs-sub">da mensagem recebida à 1ª resposta</div>
+          </div>
+          <div class="respo-stat">
+            <div class="rs-label">Taxa de resposta</div>
+            <div class="rs-value">${formatPercent(m.responseRate)}</div>
+            <div class="rs-sub">das recebidas tiveram retorno</div>
+          </div>
+        </div>
+        <p class="respo-note">A evolução dia a dia desse tempo ainda não é registrada — quando estiver disponível, aparece aqui como uma linha de tendência.</p>
       </div>
     `;
   }
 
-  function formatDateTime(iso) {
-    return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  }
-
-  // Lista de conversas vinculadas a um negócio — cada linha tem um menu (⋯)
-  // com a ação "Abrir conversa", que leva pro negócio no CRM (BX24.openPath).
-  // Paginada: `page` decide o recorte de `conversations` mostrado.
-  function renderConversations(conversations, page) {
-    if (!conversations.length) {
-      return `<div class="panel"><h2>Conversas</h2><p class="empty">Nenhuma conversa vinculada a um negócio ainda.</p></div>`;
+  // Resumo de atendimentos — a tabela por instância, reestilizada com
+  // uma mini-barra de taxa de resposta na última coluna. `perSession`
+  // não traz responseTimesMs por instância, então a "taxa" aqui é a
+  // proporção enviadas/(recebidas+enviadas) daquela instância — um
+  // proxy honesto de "quanto essa instância respondeu", rotulado como
+  // tal (não como a taxa de resposta formal do KPI).
+  function renderPerSession(perSession) {
+    const INFO = 'Resumo de atendimentos || Uma linha por instância de WhatsApp, com o total de conversas, mensagens recebidas e enviadas do histórico. A barra mostra a proporção de mensagens enviadas sobre o total daquela instância. || Na prática: compara o volume e o equilíbrio entre os números — uma instância que recebe muito e envia pouco pode estar com atendimento atrasado.';
+    if (!perSession.length) {
+      return `<div class="panel"><div class="panel-head"><h2>Resumo de atendimentos ${infoIcon(INFO)}</h2></div><p class="empty">Sem dados ainda.</p></div>`;
     }
-
-    const totalPages = Math.max(1, Math.ceil(conversations.length / CONVERSATIONS_PAGE_SIZE));
-    const clampedPage = Math.min(Math.max(page, 1), totalPages);
-    const startIdx = (clampedPage - 1) * CONVERSATIONS_PAGE_SIZE;
-    const pageItems = conversations.slice(startIdx, startIdx + CONVERSATIONS_PAGE_SIZE);
-
-    const rows = pageItems.map((c, i) => {
-      const menuId = startIdx + i; // índice global, único mesmo entre páginas
+    const rows = perSession.map((s) => {
+      const totalMsg = s.in + s.out;
+      const ratio = totalMsg ? Math.round((s.out / totalMsg) * 100) : 0;
       return `
       <tr>
-        <td class="contact-cell">
-          ${escapeHtml(c.phone)}
-          <div class="phone">negócio #${escapeHtml(String(c.dealId))} · ${escapeHtml(c.sessionId)}</div>
-        </td>
-        <td><span class="origin-tag ${c.origin}">${c.origin === 'interna' ? 'Interna' : 'Externa'}</span></td>
-        <td>${c.lastMessageDirection === 'out' ? '↑ ' : '↓ '}${escapeHtml(c.lastMessageText || '—')}</td>
-        <td class="num">${formatDateTime(c.lastMessageAt)}</td>
-        <td class="num">${c.messageCount}</td>
-        <td class="actions">
-          <button class="row-menu-btn" data-menu-toggle="${menuId}" type="button">⋯</button>
-          <div class="row-menu" data-menu="${menuId}">
-            <button type="button" data-open-deal="${escapeHtml(String(c.dealId))}">Abrir conversa</button>
-          </div>
+        <td>${escapeHtml(s.label || s.sessionId)}</td>
+        <td class="num">${fmtInt(s.conversas)}</td>
+        <td class="num">${fmtInt(s.in)}</td>
+        <td class="num">${fmtInt(s.out)}</td>
+        <td class="num">
+          <span class="rate-cell">
+            <span class="rate-bar"><span style="width:${ratio}%"></span></span>
+            <span class="rate-num">${ratio}%</span>
+          </span>
         </td>
       </tr>
     `;
     }).join('');
-
-    const pagination = totalPages > 1 ? `
-      <div class="pagination">
-        <button type="button" data-page-nav="prev" ${clampedPage <= 1 ? 'disabled' : ''}>‹ Anterior</button>
-        <span class="pagination-info">Página ${clampedPage} de ${totalPages}</span>
-        <button type="button" data-page-nav="next" ${clampedPage >= totalPages ? 'disabled' : ''}>Próxima ›</button>
-      </div>
-    ` : '';
-
     return `
       <div class="panel">
-        <h2>Conversas (${conversations.length})</h2>
+        <div class="panel-head">
+          <h2>Resumo de atendimentos ${infoIcon(INFO)}</h2>
+          <div class="panel-head-meta">${perSession.length} ${perSession.length === 1 ? 'instância' : 'instâncias'}</div>
+        </div>
         <table>
           <thead>
             <tr>
-              <th>Contato</th>
-              <th>Origem</th>
-              <th>Última mensagem</th>
-              <th class="num">Quando</th>
-              <th class="num">Msgs</th>
-              <th></th>
+              <th>Instância</th>
+              <th class="num">Conversas</th>
+              <th class="num">Recebidas</th>
+              <th class="num">Enviadas</th>
+              <th class="num">Enviadas / total</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
         </table>
-        ${pagination}
       </div>
     `;
   }
 
-  // Delegação de evento: os menus/paginação são recriados a cada render, então
-  // o bind fica uma vez só aqui em cima, no container fixo #content.
+  function initialOf(str) {
+    const s = (str || '').trim();
+    return s ? s[0].toUpperCase() : '#';
+  }
+
+  // "há X" curto pra lista ao vivo — minutos/horas/dias, sem lib.
+  function shortAgo(iso) {
+    const then = new Date(iso).getTime();
+    if (!then) return '';
+    const diff = Date.now() - then;
+    const min = Math.round(diff / 60000);
+    if (min < 1) return 'agora';
+    if (min < 60) return `há ${min} min`;
+    const h = Math.round(min / 60);
+    if (h < 24) return `há ${h} h`;
+    const d = Math.round(h / 24);
+    return `há ${d} d`;
+  }
+
+  // ---------------------------------------------------------------
+  // COLUNA DIREITA — "ao vivo"
+  // ---------------------------------------------------------------
+
+  // Conversas em andamento — as conversas vinculadas a negócio, mais
+  // recentes primeiro. `conversations` NÃO tem contactName nem
+  // assignedToName no shape do backend, então o nome exibido é o
+  // telefone e NÃO há badge "Atribuído a" (não invento o dado). O
+  // contador de não lidas também não vem no shape — mostro a contagem
+  // de mensagens da conversa como sinal de atividade, rotulada como tal.
+  // Ícone de contato genérico — o shape de conversations não traz
+  // contactName, só o telefone; a "inicial" de um número não diz nada,
+  // então o avatar usa um glifo de pessoa em vez de "5".
+  const PERSON_GLYPH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+  const LIVE_CONV_LIMIT = 5;
+
+  function renderLiveConversations(conversations) {
+    const INFO = 'Conversas em andamento || As conversas de WhatsApp ligadas a um negócio no Bitrix, ordenadas pela mensagem mais recente. Clique para abrir o negócio no CRM. || Na prática: a fila de atendimentos vivos. O número ao lado de cada uma é o total de mensagens trocadas.';
+    const all = conversations || [];
+    const list = all.slice(0, LIVE_CONV_LIMIT);
+    const body = list.length ? list.map((c) => `
+      <div class="live-conv" data-open-deal="${escapeHtml(String(c.dealId))}" role="button" tabindex="0" aria-label="Abrir negócio ${escapeHtml(String(c.dealId))} de ${escapeHtml(c.phone)} no CRM">
+        <span class="live-avatar">${PERSON_GLYPH}</span>
+        <div class="live-conv-body">
+          <div class="live-conv-top">
+            <span class="live-conv-name">${escapeHtml(c.phone)}</span>
+            <span class="live-conv-time">${escapeHtml(shortAgo(c.lastMessageAt))}</span>
+          </div>
+          <div class="live-conv-preview">${c.lastMessageDirection === 'out' ? '↑ ' : '↓ '}${escapeHtml(c.lastMessageText || '—')}</div>
+          <div class="live-conv-meta">
+            <span class="origin-tag ${c.origin}">${c.origin === 'interna' ? 'Interna' : 'Externa'}</span>
+            <span class="live-badge">${c.messageCount} ${c.messageCount === 1 ? 'msg' : 'msgs'}</span>
+            <span class="live-conv-open">Abrir no CRM <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M7 7h10v10"/></svg></span>
+          </div>
+        </div>
+      </div>
+    `).join('') : '<p class="empty">Nenhuma conversa vinculada a um negócio ainda.</p>';
+    const more = all.length > LIVE_CONV_LIMIT
+      ? `<div class="live-more">+ ${all.length - LIVE_CONV_LIMIT} outras — veja todas no Chat</div>`
+      : '';
+    return `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h3>Conversas em andamento ${infoIcon(INFO)}</h3>
+          ${all.length ? `<span class="live-card-count">${all.length}</span>` : ''}
+        </div>
+        <div class="live-list">${body}</div>
+        ${more}
+      </div>
+    `;
+  }
+
+  // Instâncias com problemas — needsAttention OU offline. O shape do
+  // backend traz lastDisconnectReason (pode ser null); NÃO traz uma
+  // data de "desde quando" no modo demo/comum (openConnectionEvent
+  // existe mas nem sempre preenchido) — mostro o motivo quando houver,
+  // sem inventar "desde <data>".
+  function renderProblemInstances(instances) {
+    const INFO = 'Instâncias com problemas || Números de WhatsApp que estão fora do ar agora — desconectados ou com erro de conexão que o sistema não consegue resolver sozinho. || Na prática: enquanto um número está aqui, ele não envia nem recebe nada. Abra a tela Instâncias para religar.';
+    if (!Array.isArray(instances)) {
+      return `<div class="live-card"><div class="live-card-head"><h3>Instâncias com problemas ${infoIcon(INFO)}</h3></div><p class="empty">Não foi possível carregar.</p></div>`;
+    }
+    const problems = instances.filter((i) => i.needsAttention || i.status === 'offline');
+    if (!problems.length) {
+      return `
+        <div class="live-card">
+          <div class="live-card-head"><h3>Instâncias com problemas ${infoIcon(INFO)}</h3></div>
+          <div class="live-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            Todas as instâncias operando normalmente.
+          </div>
+        </div>
+      `;
+    }
+    const body = problems.map((i) => {
+      // lastDisconnectReason pode não vir (null) — nesse caso, uma
+      // orientação em vez de um "motivo" inventado.
+      const reason = i.lastDisconnectReason
+        ? `Motivo: ${String(i.lastDisconnectReason)}`
+        : (i.needsAttention
+          ? 'O WhatsApp recusou a reconexão automática. Reconecte pela tela Instâncias.'
+          : 'Reconecte pela tela Instâncias.');
+      return `
+      <div class="live-prob">
+        <span class="live-prob-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </span>
+        <div class="live-prob-body">
+          <div class="live-prob-name">${escapeHtml(i.label || i.id)}</div>
+          <div class="live-prob-status">${i.needsAttention ? 'Com erro — precisa religar' : 'Desconectada'}</div>
+          <div class="live-prob-reason">${escapeHtml(reason)}</div>
+        </div>
+      </div>
+    `;
+    }).join('');
+    return `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h3>Instâncias com problemas ${infoIcon(INFO)}</h3>
+          <span class="live-card-count" style="background:rgba(var(--red-rgb),.14);color:var(--red);">${problems.length}</span>
+        </div>
+        <div class="live-list">${body}</div>
+      </div>
+    `;
+  }
+
+  // Atendentes — cada sessão (perSession) é um "atendente". O projeto
+  // não tem sinal de online/offline por atendente aqui, então todos são
+  // listados como presentes (é o dado que existe). O rótulo abaixo do
+  // nome é o nº de conversas da instância.
+  function renderAgents(perSession) {
+    const INFO = 'Atendentes || Cada instância de WhatsApp conectada, tratada como um ponto de atendimento. O número abaixo do nome é o total de conversas daquela instância. || Na prática: quem está no ar para atender. O sistema não distingue online/ausente por pessoa nesta visão — todos aparecem como presentes.';
+    if (!perSession || !perSession.length) {
+      return `<div class="live-card"><div class="live-card-head"><h3>Atendentes ${infoIcon(INFO)}</h3></div><p class="empty">Nenhuma instância ativa.</p></div>`;
+    }
+    const cells = perSession.map((s) => {
+      const name = s.label || s.sessionId;
+      return `
+      <div class="agent-cell">
+        <span class="agent-avatar">${escapeHtml(initialOf(name))}<span class="agent-dot"></span></span>
+        <span class="agent-name" data-tooltip="${escapeHtml(name)}" tabindex="0">${escapeHtml(name)}</span>
+        <span class="agent-stat">${s.conversas} ${s.conversas === 1 ? 'conversa' : 'conversas'}</span>
+      </div>
+    `;
+    }).join('');
+    return `
+      <div class="live-card">
+        <div class="live-card-head">
+          <h3>Atendentes ${infoIcon(INFO)}</h3>
+          <span class="live-card-count">${perSession.length}</span>
+        </div>
+        <div class="agent-grid">${cells}</div>
+      </div>
+    `;
+  }
+
+  // Delegação de clique — um item de "Conversas em andamento" (coluna
+  // direita) leva pro negócio no CRM (BX24.openPath). Delegado no
+  // container fixo #content porque a lista é recriada a cada poll.
   content.addEventListener('click', (e) => {
-    const toggleBtn = e.target.closest('[data-menu-toggle]');
-    const openBtn = e.target.closest('[data-open-deal]');
-    const pageNavBtn = e.target.closest('[data-page-nav]');
-
-    if (pageNavBtn) {
-      if (pageNavBtn.disabled) return;
-      conversationsPage += pageNavBtn.dataset.pageNav === 'next' ? 1 : -1;
-      if (lastMetrics) renderAll(lastMetrics);
-      return;
-    }
-
-    // fecha qualquer menu aberto antes de decidir a próxima ação
-    content.querySelectorAll('.row-menu.open').forEach((el) => {
-      if (!toggleBtn || el.dataset.menu !== toggleBtn.dataset.menuToggle) el.classList.remove('open');
-    });
-
-    if (toggleBtn) {
-      const menu = content.querySelector(`.row-menu[data-menu="${toggleBtn.dataset.menuToggle}"]`);
-      menu.classList.toggle('open');
-      return;
-    }
-
-    if (openBtn) {
-      openConversation(openBtn.dataset.openDeal);
-    }
+    const conv = e.target.closest('[data-open-deal]');
+    if (conv) openConversation(conv.dataset.openDeal);
   });
-
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('[data-menu-toggle]') && !e.target.closest('.row-menu')) {
-      content.querySelectorAll('.row-menu.open').forEach((el) => el.classList.remove('open'));
-    }
+  content.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const conv = e.target.closest('[data-open-deal]');
+    if (conv) { e.preventDefault(); openConversation(conv.dataset.openDeal); }
   });
 
   const insightsSection = document.getElementById('insightsSection');
@@ -2061,8 +2594,8 @@
       : '';
     insightsSection.innerHTML = `
       <div class="insights-head">
-        <h2>${SPARKLE_ICON} Insights de IA</h2>
-        <button type="button" class="insights-refresh" id="insightsRefreshBtn" title="Gerar de novo">${REFRESH_ICON} Atualizar</button>
+        <h2>${SPARKLE_ICON} Insights de IA ${infoIcon('Insights de IA || Um modelo de IA lê os números agregados do período (volume, taxa e tempo de resposta, etapas do funil) e escreve de 3 a 5 observações curtas. O resultado fica em cache por 30 minutos. || Na prática: um resumo do que está indo bem e do que merece atenção, sem precisar cruzar os gráficos manualmente. "Gerar de novo" força uma releitura com os dados mais recentes.')}</h2>
+        <button type="button" class="insights-refresh" id="insightsRefreshBtn">${REFRESH_ICON} Gerar de novo</button>
       </div>
       <div class="insights-row">${cards || '<p class="empty">Sem insights ainda.</p>'}</div>
       ${meta}
@@ -2093,13 +2626,31 @@
     }
   }
 
-  function renderAll(m) {
-    content.innerHTML =
-      renderKpis(m) +
-      renderConversations(m.conversations || [], conversationsPage) +
-      renderStageChart(m.stages) +
-      `<div class="panel-row">${renderDailyChart(m.perDay)}${renderScatterChart(m.perDay)}</div>` +
-      `<div class="panel-row">${renderByType(m.byType)}${renderPerSession(m.perSession)}</div>`;
+  // Guarda a última resposta de /instances (o poll dela é separado do de
+  // /metrics — cadências e endpoints diferentes). renderAll junta os dois.
+  let lastInstances = null;
+
+  function renderAll(m, instances) {
+    content.innerHTML = `
+      ${renderKpis(m, instances)}
+      <div class="dash-layout">
+        <div class="dash-main">
+          ${renderDailyChart(m.perDay)}
+          <div class="panel-grid">
+            ${renderInstanceStatus(instances)}
+            ${renderResponseTime(m)}
+            ${renderStageChart(m.stages)}
+            ${renderByType(m.byType)}
+          </div>
+        </div>
+        <div class="dash-side">
+          ${renderLiveConversations(m.conversations)}
+          ${renderProblemInstances(instances)}
+          ${renderAgents(m.perSession)}
+        </div>
+      </div>
+      ${renderPerSession(m.perSession)}
+    `;
   }
 
   async function load() {
@@ -2110,7 +2661,7 @@
       const m = await res.json();
       lastMetrics = m;
 
-      renderAll(m);
+      renderAll(m, lastInstances);
 
       updatedAt.textContent = 'Atualizado às ' + new Date().toLocaleTimeString('pt-BR');
       return true;
@@ -2118,6 +2669,24 @@
       content.innerHTML = `<p class="empty">Não foi possível carregar as métricas. ${escapeHtml(err.message)}</p>`;
       return false;
     }
+  }
+
+  // Estado das instâncias do dono — alimenta o KPI "Instâncias no ar", o
+  // donut "Status das instâncias" e o card "Instâncias com problemas".
+  // Poll próprio (não depende do de métricas). Falha aqui degrada só
+  // esses 3 blocos (viram "indisponível"), nunca derruba o resto.
+  async function loadInstances() {
+    if (!myOwnerId) return;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/whatsapp/instances?owner=${encodeURIComponent(myOwnerId)}`);
+      if (!res.ok) throw new Error('falha ao buscar instâncias');
+      const data = await res.json();
+      lastInstances = Array.isArray(data.instances) ? data.instances : [];
+    } catch (err) {
+      console.error('[instances] erro:', err.message);
+      lastInstances = null;
+    }
+    if (lastMetrics) renderAll(lastMetrics, lastInstances);
   }
 
   document.getElementById('refreshBtn').addEventListener('click', async () => {
