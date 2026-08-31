@@ -846,7 +846,16 @@
       localStorage.setItem(seenKey, '1');
     }
   }
-  bindShortcutsModal();
+  // O HTML do #shortcutsModal fica MAIS ABAIXO no body que este <script>
+  // — chamar bindShortcutsModal() aqui direto pegava getElementById()
+  // === null e a função saía no guard, deixando o modal morto em 17 das
+  // 18 telas (só chat.html, com o modal antes do script, funcionava).
+  // Adia a chamada pro DOM estar pronto.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindShortcutsModal);
+  } else {
+    bindShortcutsModal();
+  }
 
   var lpGroup = document.getElementById('navGroupLP');
   var lpToggle = document.getElementById('navGroupLPToggle');

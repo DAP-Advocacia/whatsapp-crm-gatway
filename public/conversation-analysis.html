@@ -917,7 +917,16 @@
       localStorage.setItem(seenKey, '1');
     }
   }
-  bindShortcutsModal();
+  // O HTML do #shortcutsModal fica MAIS ABAIXO no body que este <script>
+  // — chamar bindShortcutsModal() aqui direto pegava getElementById()
+  // === null e a função saía no guard, deixando o modal morto em 17 das
+  // 18 telas (só chat.html, com o modal antes do script, funcionava).
+  // Adia a chamada pro DOM estar pronto.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bindShortcutsModal);
+  } else {
+    bindShortcutsModal();
+  }
 
   var lpGroup = document.getElementById('navGroupLP');
   var lpToggle = document.getElementById('navGroupLPToggle');
@@ -1577,6 +1586,12 @@
     if (e.key !== 'Escape') return;
     const overlay = document.getElementById('historyOverlay');
     if (overlay && !overlay.hidden) overlay.hidden = true;
+    // Também fecha qualquer .overlay.open (ex: o modal "Atalhos e
+    // recursos") — antes este handler só cuidava do historyOverlay e o
+    // modal de atalhos ficava sem ESC nesta tela.
+    document.querySelectorAll('.overlay.open').forEach((el) => el.classList.remove('open'));
+    const focused = document.activeElement;
+    if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.tagName === 'SELECT')) focused.blur();
   });
 
   // ------------------------------------------------------------
