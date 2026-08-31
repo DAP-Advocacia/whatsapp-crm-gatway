@@ -103,6 +103,39 @@ nunca sair do próprio dono).
   confiável hoje. **Revisitar se a equipe crescer** — não é um bug, é um
   trade-off aceito que pode deixar de fazer sentido em outra escala.
 
+### Modo Demo (`?demo=1`) — superfície pública conhecida e intencional (2026-08-31)
+
+Diferente de toda outra rota do app, o modo demo (`src/demoModeGate.js`,
+`src/demoData.js`, `src/routes/demoFixtures.js`, README §3.5) é
+**deliberadamente acessível em produção sem nenhuma credencial** — basta
+`?demo=1` em qualquer URL. Isso é uma decisão consciente, não um
+descuido:
+
+- **O dado exposto é 100% fictício** — nenhuma fixture em
+  `src/demoData.js` contém nome, telefone, negócio ou conteúdo de
+  conversa real. Não há PII em risco por esta superfície existir.
+- **Nenhuma rota de escrita real é alcançável pelo gatilho** —
+  `demoFixtures.js` só responde as rotas GET das fixtures; qualquer ação
+  de escrita cai no mount real de sempre, atrás de `requireAuth`
+  normal. O token emitido (`'demo-mode-token'` → `issueAppToken` pro
+  `ownerId` fixo `demo_owner_1`) não abre caminho para nenhum outro
+  `ownerId`.
+- **Achado do `security-reviewer-agent` (2026-08-31) e correção
+  aplicada**: sem aviso visual, um usuário real que passasse por
+  `?demo=1` uma vez (link compartilhado, aba antiga, cache) ficaria
+  "preso" vendo dados fictícios por até 4h sem perceber — inclusive o
+  super admin em `admin.html`, que perderia acesso ao painel real nesse
+  meio-tempo. **Já corrigido**: banner fixo vermelho "MODO DEMO — todos
+  os dados nesta tela são fictícios" + link "Sair do modo demo" em todas
+  as 17 telas cobertas, revelado no boot antes mesmo da chamada de API
+  terminar (`GET /api/demo/exit` limpa o cookie). Isto não é uma
+  pendência em aberto — a correção já está no ar desde o commit
+  `fcdf93e`.
+- Revisor confirmou adicionalmente: sem open redirect no gate (o
+  redirect só remove o próprio query param `demo`, nunca aceita um
+  destino arbitrário do client); custo do redirect desprezível (sem DoS
+  diferenciado de servir qualquer outro estático do projeto).
+
 ## 2. Onde cada segredo mora
 
 Todo segredo vive em variáveis de ambiente (`.env` local / painel do

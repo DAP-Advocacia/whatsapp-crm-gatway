@@ -142,9 +142,10 @@ ver `SECURITY.md` §3 para o que foi corrigido.
 
 ## 7. O que este checklist **não** cobre (limitação honesta)
 
-- Nenhum teste automatizado roda em CI hoje (não existe
-  `.github/workflows/` neste projeto ainda — pendência de documentação
-  estrutural, fora do escopo desta sessão).
+- Nenhum teste automatizado roda em CI hoje — `.github/workflows/ci.yml`
+  existe desde 2026-08-27, mas cobre só o que este checklist já descreve
+  como automatizável (`npm ci` + `node -c` em todo `.js`), não uma suíte
+  de teste formal (não há Jest/Mocha/Vitest configurado neste projeto).
 - `node -c`/`vm.Script`/harness de função isolada não substituem teste
   real contra WhatsApp/Bitrix em produção — várias features recentes
   (Agente de IA, grupo automático do Agente de IA, Copiloto Comercial)

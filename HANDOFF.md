@@ -3,7 +3,81 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-30 — Parte FN: **modal "Atalhos e
+> aberto). Última atualização: sessão de 2026-08-31 — Parte FO: **Modo Demo
+> (Fase 1 de 3 do plano "modo demo + vídeo de onboarding") — dados 100%
+> fictícios, sem token Bitrix nem tocar Supabase real**:
+>
+> **Como ligar**: `?demo=1` em qualquer URL do app (ex:
+> `https://whatsapp.bmdholding.com.br/dashboard.html?demo=1`). O middleware
+> `demoModeGate` (`src/demoModeGate.js`) seta um cookie `demo_mode=1` (4h de
+> validade) e redireciona pra mesma URL sem o query param — as chamadas de
+> API do frontend não carregam query string hoje, então persistir só no
+> query param se perderia ao navegar entre telas ou recarregar; o cookie
+> resolve isso. `GET /api/demo/exit?from=<path>` limpa o cookie e volta pro
+> path indicado.
+>
+> **O que cobre**: 17 das ~21 telas do app (todas exceto `lead-form.html`/
+> `satisfaction-form.html`, formulários públicos sem `verifyAuth()`, e
+> `bridge.html`/`apresentacao.html`/`index.html`, que têm padrão de boot
+> diferente — ainda não cobertas, não é regressão, é escopo que ficou de
+> fora desta Fase 1). Cada `verifyAuth()` ganhou um `isDemoMode()` que,
+> com o cookie presente, pula o BX24 real inteiro, troca o nome hardcoded
+> do escritório (`.firm-name`/`.firm-sub`, "Durão, Almeida & Pontes") por
+> "Andrade & Camargo" (fictício), e autentica com um token mágico
+> (`POST /api/auth/verify` com `accessToken === 'demo-mode-token'` emite
+> um app token real via `issueAppToken` pro `ownerId` fixo `demo_owner_1`,
+> sem chamar o Bitrix). `src/demoData.js` tem as fixtures estáticas
+> (~20 rotas GET: dashboard, contatos, instâncias, campanhas, leads,
+> sugestões, agente IA, análise de conversas, configurações, notificações)
+> com 2 instâncias fake ("Comercial SP" online, "Suporte RJ" offline).
+>
+> **Decisão de arquitetura — backend serve fixtures via gatilho de cookie,
+> não front-end mockado nem produção sanitizada**: `src/routes/demoFixtures.js`
+> é um router que responde nos MESMOS paths das rotas reais, só quando
+> `req.isDemoMode` — senão `next()` e a request cai no mount real de
+> sempre, atrás de `requireAuth`. Nenhuma rota real muda de comportamento
+> pra quem não usa `?demo=1` (verificado explicitamente: sem o cookie, o
+> comportamento é 100% idêntico ao de antes). `demoModeGate` precisou ser
+> montado em `src/server.js` **antes** do `express.static` — bug real
+> descoberto durante o desenvolvimento: montado depois, o `static`
+> intercepta e responde o arquivo direto, ignorando o gate por completo.
+> Motivo de existir: uma tentativa nesta mesma sessão de gravar o vídeo de
+> demonstração apontando o Playwright direto pra produção
+> (`whatsapp.bmdholding.com.br`) com blur de CSS sobre PII não funcionou —
+> cada tela usa classes diferentes pra exibir contato/telefone/mensagem, o
+> blur genérico não cobriu nada de forma confiável, e a tela de Auditoria
+> de Conversas chegou a expor ~30 nomes reais de cliente + telefones antes
+> do caminho ser abortado (ver commit `b0cad84`, scripts mantidos só como
+> referência do que NÃO funcionou). Dado fictício de ORIGEM, nunca
+> produção sanitizada por cima.
+>
+> **Achado de segurança (`security-reviewer-agent`) e correção**: sem
+> aviso visual, um usuário real que passasse por `?demo=1` uma vez (link
+> compartilhado, aba antiga) ficaria "preso" vendo dados fictícios por até
+> 4h sem perceber — inclusive o super admin em `admin.html`, que perderia
+> acesso ao painel real nesse meio-tempo. Corrigido: banner fixo vermelho
+> "MODO DEMO — todos os dados nesta tela são fictícios" + link "Sair do
+> modo demo" em todas as 17 telas, revelado no boot antes mesmo da chamada
+> de API terminar. Revisor confirmou: sem caminho pra `'demo-mode-token'`
+> emitir token de outro `ownerId`; sem rota de escrita real coberta pelas
+> fixtures (qualquer ação real cai no mount protegido de sempre); sem open
+> redirect no gate.
+>
+> **Validação**: 17/17 telas testadas com Playwright local (sem `.env`
+> real — só um `.env` de teste local com `SUPABASE_URL`/
+> `SUPABASE_SERVICE_ROLE_KEY`/`AUTH_TOKEN_SECRET` placeholder, não
+> commitado), autenticam sozinhas sem fallback de erro, dados fictícios
+> renderizando corretamente. Confirmado explicitamente que sem
+> `?demo=1`/cookie o comportamento é 100% idêntico ao de antes (zero
+> regressão).
+>
+> **Escopo — só Fase 1 de 3**: isto cobre só o modo demo em si. Fase 2
+> (vídeo de onboarding — roteiro + scripts com edge-tts/ffmpeg) e Fase 3
+> (embutir o `<video>` na Apresentação, modal de onboarding na 1ª visita,
+> link permanente na navegação) **ainda não existem** — ficam para
+> próximos commits.
+>
+> Antes disso, sessão de 2026-08-30 — Parte FN: **modal "Atalhos e
 > recursos" em 18 páginas + limpeza de resíduo de `skipVisual`**:
 >
 > (1) **Modal "Atalhos e recursos"** (pedido do usuário, replicando padrão visto
@@ -717,6 +791,12 @@
   perguntas fixas, dois públicos (cliente via link público/campanha,
   atendente via formulário interno em `suggestions.html`) — ver §2,
   parte FE (pendente de teste end-to-end real)
+- [x] **Modo Demo** (`?demo=1`): 17 telas autenticam com dados 100%
+  fictícios, sem token Bitrix nem tocar Supabase real — pra gravar
+  vídeo/screenshot de demonstração sem depender de dado real de cliente.
+  Banner vermelho + saída visível sempre que ativo. Fase 1 de 3 (vídeo de
+  onboarding e embutir na Apresentação ainda não existem) — ver Parte FO
+  no resumo do topo deste arquivo
 
 Não há bloqueador conhecido em aberto no momento. Ver §5 para dívidas técnicas não
 bloqueantes que ainda restam (persistir `AUTH_FOLDER`, fila de rate limit pro

@@ -190,6 +190,37 @@ bucket) — nessa ordem, pra não deixar mídia quebrada entre os dois passos.
 
 ---
 
+## 3.5. Modo Demo — testar/demonstrar sem credenciais reais (`?demo=1`)
+
+Existe um **modo demo** pra explorar as telas internas do app sem
+precisar de token do Bitrix nem de um projeto Supabase real — útil pra
+demonstração, gravação de vídeo/screenshot, ou só rodar local sem
+configurar `.env` inteiro. Basta acrescentar `?demo=1` em qualquer URL
+(ex: `/dashboard.html?demo=1`); o app libera um cookie de 4h
+(`demo_mode`) e a partir daí toda tela que passar por esse gatilho
+autentica sozinha e mostra dados **100% fictícios**.
+
+- **17 telas cobertas** — todas exceto `lead-form.html`/
+  `satisfaction-form.html` (formulários públicos, sem tela de login pra
+  demonstrar) e `bridge.html`/`apresentacao.html`/`index.html`
+  (padrão de boot diferente, ainda não cobertas nesta primeira fase).
+- **Dado fictício, nunca real**: 2 instâncias fake ("Comercial SP"
+  online, "Suporte RJ" offline), nome do escritório trocado para
+  "Andrade & Camargo" — nunca dado de cliente de verdade
+  (`src/demoData.js`).
+- **Nenhuma rota real de escrita é afetada** — o modo demo só serve
+  fixtures nas rotas GET; qualquer ação de escrita continua exigindo
+  autenticação real de sempre.
+- **Banner de aviso sempre visível** enquanto o modo está ativo, com
+  link "Sair do modo demo" — ver `SECURITY.md` §1 para o detalhe da
+  decisão de deixar isso acessível em produção.
+- **Escopo atual (Fase 1 de um plano maior)**: isto é só o modo demo em
+  si. Um vídeo de onboarding gravado a partir dele, e a integração desse
+  vídeo na página de Apresentação, ainda não existem — ver
+  `HANDOFF.md`, Parte FO.
+
+---
+
 ## 4. Subir o servidor
 
 ```bash
