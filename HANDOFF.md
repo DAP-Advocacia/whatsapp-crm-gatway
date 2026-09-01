@@ -5,10 +5,12 @@
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
 > aberto). Última atualização: sessão de 2026-09-01 — Parte FQ: **categoria
 > "Banida" na aba Instâncias + aviso multicanal** — quando o WhatsApp
-> recusa o acesso (`forbidden`) por mais de 24h seguidas (limiar
-> confirmado com o usuário, alinhado ao próprio prazo de análise que o
-> WhatsApp Business informa), a instância ganha uma seção visual própria
-> em `instances.html`, separada do aviso genérico "Precisa de atenção"
+> recusa o acesso (`forbidden`) de forma persistente (soma ≥ 20h dentro
+> das últimas 24h — não precisa ser 1 janela contínua: correção real no
+> mesmo dia, depois de confirmar que reconexão automática intermitente
+> nunca fecharia 24h numa única janela, mesmo com a conta banida de
+> verdade), a instância ganha uma seção visual própria em
+> `instances.html`, separada do aviso genérico "Precisa de atenção"
 > (que ainda cobre `connectionReplaced`/`badSession`), e o
 > `alertDispatcher` já existente dispara o aviso — ver detalhe logo
 > abaixo. Atualização anterior: sessão de 2026-09-01 — Parte FP: **fix real do
@@ -11494,4 +11496,38 @@ de introduzir uma 5ª cor semântica.
 do usuário cruzar as 24h de verdade (previsto para hoje, por volta das
 16:23) — confirmar a categoria e o aviso aparecendo sozinhos, sem
 simulação.
+
+**CORREÇÃO real, ainda no mesmo dia** (o critério original nunca teria
+disparado pra ninguém): checando a própria instância do usuário contra
+o critério publicado, a maior janela CONTÍNUA de `forbidden` dela foi
+só 19.47h — o Baileys tenta reconectar sozinho, falha de novo com o
+mesmo motivo, e o evento **fecha e reabre repetidamente** em vez de
+ficar 1 janela única aberta por 24h+. Com o critério original ("1
+janela aberta > 24h contínuas"), a instância do usuário **nunca**
+apareceria como "Banida", mesmo banida de verdade.
+
+Critério reescrito (2ª versão, atual): `instanceHealthStore.sumAttentionDuration`
+(nova) soma o tempo TOTAL em `forbidden` de uma instância olhando pra
+trás 24h — cobre janelas ainda abertas (não importa quando começaram)
+e janelas fechadas dentro do período; `instanceBanStore.listBannedNow()`
+filtra por soma ≥ 20h (limiar abaixo de 24h cheias, porque o padrão
+intermitente raramente soma exatamente 24h). `windowCount` viaja junto
+só como contexto, não é mais uma exigência (uma 1ª tentativa desta
+correção exigia 2+ janelas — **errado**: excluía incorretamente as
+órfãs de janela única longa, contra-teste real revelou isso). Dado
+real de produção confirmando as 2 formas que essa condição assume:
+3 instâncias órfãs com 1 janela única (27h/107h/145h, nunca reabriu,
+sem ninguém tentando reconectar) + 4 instâncias reais (incl. a do
+usuário) com 2-5 janelas somando ~21-26h (reconexão automática
+falhando repetidamente).
+
+`instanceBanPoller.js` também ajustado: o dedupe de aviso não pode mais
+usar `instance_connection_events.id` (não existe mais 1 evento pontual,
+`listBannedNow()` retorna uma agregação por instância) — passou a ser
+por `instanceId`, removido do Set assim que a instância sair da lista
+de banidas (reconectou de vez), voltando a avisar se banir de novo no
+futuro. Reteste completo contra o banco de produção real: 7 instâncias
+capturadas corretamente pelo novo critério (as 3 órfãs continuam
+puladas sem notificação fantasma, as 4 reais — incluindo a do usuário —
+disparam o alerta 1x, sem duplicar numa 2ª chamada).
 

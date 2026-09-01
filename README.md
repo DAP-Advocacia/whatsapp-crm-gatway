@@ -1281,19 +1281,28 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
 - **Categoria "Banida"** (Parte FQ, 2026-09-01) — dentro de "precisa de
   atenção", o motivo `forbidden` (403 — conta restrita/banida ou
   credencial rejeitada) ganha uma seção visual própria e separada
-  quando aberto **há mais de 24h** (limiar alinhado ao prazo que o
-  próprio WhatsApp Business informa em revisão de conta), diferente de
-  `connectionReplaced`/`badSession` (que continuam só em "precisa de
-  atenção" comum, nunca viram "Banida"). Sem coluna nova — calculado a
-  cada `GET /instances` a partir de `instance_connection_events`
-  (`src/instanceBanStore.js::listBannedNow`); se a instância reconectar
-  de verdade, sai da categoria sozinha (o evento fecha, mesmo mecanismo
-  de sempre). `instances.html` agrupa os cards banidos numa seção
-  própria no topo (1ª vez que a tela agrupa em seções nomeadas) — as
-  ações do card (Tentar reconectar/Ver QR/Remover) continuam todas
-  presentes, "Banida" é só informativo. `src/instanceBanPoller.js`
-  (mesmo padrão de poller de `src/dealStagePoller.js`, ~20min) dispara
-  o mesmo alerta multicanal acima 1x por janela de banimento — pula
+  quando **persistente** — soma do tempo total em `forbidden` ≥ 20h
+  dentro das últimas 24h (`instanceHealthStore::sumAttentionDuration` +
+  `instanceBanStore::listBannedNow`), **não** exige 1 janela contínua:
+  correção real feita no mesmo dia, depois de confirmar que a
+  reconexão automática do Baileys (tenta de novo sozinho, falha com o
+  mesmo motivo) fecha e reabre o evento repetidamente, o que faz uma
+  única janela quase nunca acumular 24h seguidas mesmo com a conta
+  banida de verdade — a soma cobre tanto esse padrão intermitente
+  quanto uma janela única longa nunca reaberta (típico de instância
+  órfã). Diferente de `connectionReplaced`/`badSession` (que continuam
+  só em "precisa de atenção" comum, nunca viram "Banida"). Sem coluna
+  nova — calculado a cada `GET /instances` a partir de
+  `instance_connection_events`; se a instância reconectar de verdade e
+  ficar estável, a soma cai naturalmente com o tempo, sem precisar de
+  nenhum passo de "destravar" manual. `instances.html` agrupa os cards
+  banidos numa seção própria no topo (1ª vez que a tela agrupa em
+  seções nomeadas) — as ações do card (Tentar reconectar/Ver QR/
+  Remover) continuam todas presentes, "Banida" é só informativo.
+  `src/instanceBanPoller.js` (mesmo padrão de poller de
+  `src/dealStagePoller.js`, ~20min) dispara o mesmo alerta multicanal
+  acima 1x por episódio de banimento (dedupe por `instanceId`,
+  reavisa se banir de novo no futuro depois de reconectar) — pula
   instâncias **órfãs** (removidas de `instances`, sem dono real pra
   avisar) explicitamente.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
@@ -2239,7 +2248,7 @@ revelar que o recurso existe).
 | `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
 | `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
-| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `banned` (categoria "Banida", Parte FQ — `forbidden` aberto há mais de 24h) + `openConnectionEvent` (Alerta de instância caída, §14) + `ownerName` (nome do dono pelo ID do Bitrix, só resolvido/exibido pra instância DELEGADA — Parte EQ) — resposta também traz `limit`. |
+| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `banned` (categoria "Banida", Parte FQ — `forbidden` persistente, soma ≥ 20h nas últimas 24h) + `openConnectionEvent` (Alerta de instância caída, §14) + `ownerName` (nome do dono pelo ID do Bitrix, só resolvido/exibido pra instância DELEGADA — Parte EQ) — resposta também traz `limit`. |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |
 | `instances/:id` | PUT | Body `{ owner, label }`. Renomeia. |
 | `instances/:id?owner=` | DELETE | Desconecta e remove a instância. |

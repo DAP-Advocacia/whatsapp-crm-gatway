@@ -16,30 +16,41 @@ const alertDispatcher = require('./alertDispatcher');
  * chamado 1x no boot.
  */
 
-// IDs (instance_connection_events.id, bigserial — identifica a JANELA de
-// banimento de forma única) já avisados neste boot do processo. Reseta a
-// cada restart — aceitável, mesmo raciocínio já usado em `lastHealthState`
-// (src/server.js): na pior hipótese avisa de novo 1x extra depois de um
-// deploy, nunca deixa de avisar.
+// `instanceId`s já avisados NESTE episódio de banimento — diferente da
+// 1ª versão desta feature (dedupe por id de linha de evento pontual),
+// listBannedNow() agora retorna uma AGREGAÇÃO por instância (soma de
+// várias janelas, ver src/instanceBanStore.js), sem id de linha único
+// pra usar. Dedupe por instanceId, removido do Set assim que ela sair
+// da lista de banidas (reconectou de vez e a soma caiu abaixo do
+// limiar) — se for banida de novo no futuro, volta a avisar. Reseta a
+// cada restart do processo — aceitável, mesmo raciocínio já usado em
+// `lastHealthState` (src/server.js): na pior hipótese avisa de novo 1x
+// extra depois de um deploy, nunca deixa de avisar.
 const alreadyNotified = new Set();
 
 async function runOnce({ sessions }) {
   const banned = await instanceBanStore.listBannedNow();
+  const bannedIds = new Set(banned.map((ev) => ev.instanceId));
+  // Esquece quem não está mais banida — próxima vez que banir de novo, avisa de novo.
+  for (const id of alreadyNotified) {
+    if (!bannedIds.has(id)) alreadyNotified.delete(id);
+  }
+
   for (const ev of banned) {
-    if (alreadyNotified.has(ev.id)) continue;
+    if (alreadyNotified.has(ev.instanceId)) continue;
     try {
-      // Instância ÓRFÃ (removida da tabela `instances`, mas o evento de
-      // conexão em aberto sobreviveu — ver comentário de topo de
+      // Instância ÓRFÃ (removida da tabela `instances`, mas o histórico
+      // de conexão sobreviveu — ver comentário de topo de
       // src/instanceHealthStore.js): não há dono real pra avisar.
       // instancesStore.ownerOf() tem um fallback deliberado (devolve o
       // próprio instanceId como "ownerId" quando órfã, ver src/instances.js)
       // que existe pra outros usos — aqui geraria notificação fantasma
       // pra ninguém de verdade, então pula sem marcar como notificado
-      // (se um dia a mesma janela deixar de ser órfã, o que não deveria
-      // acontecer na prática, ainda tentaria de novo no próximo tick).
+      // (se um dia deixar de ser órfã, o que não deveria acontecer na
+      // prática, ainda tentaria de novo no próximo tick).
       const inst = await instancesStore.get(ev.instanceId);
       if (!inst) {
-        console.warn(`[instance-ban-poller] instância órfã ${ev.instanceId} com forbidden > 24h — sem dono pra avisar, pulando.`);
+        console.warn(`[instance-ban-poller] instância órfã ${ev.instanceId} com forbidden persistente — sem dono pra avisar, pulando.`);
         continue;
       }
       const ownerId = inst.ownerId;
@@ -49,12 +60,12 @@ async function runOnce({ sessions }) {
       await alertDispatcher.notifyAttention({
         recipients,
         title: `Instância "${label}" foi banida pelo WhatsApp`,
-        body: 'O WhatsApp recusou o acesso a esse número por mais de 24h — provavelmente uma restrição/banimento da conta, não uma queda de conexão comum. Veja a aba Instâncias (categoria "Banida") pra mais detalhes.',
+        body: 'O WhatsApp recusou o acesso a esse número de forma persistente nas últimas 24h — provavelmente uma restrição/banimento da conta, não uma queda de conexão comum. Veja a aba Instâncias (categoria "Banida") pra mais detalhes.',
         target: { page: '/instances.html', sessionId: ev.instanceId },
         waSourceSessionId: ev.instanceId,
         sessions,
       });
-      alreadyNotified.add(ev.id);
+      alreadyNotified.add(ev.instanceId);
     } catch (err) {
       console.error(`[instance-ban-poller] falha ao notificar banimento de ${ev.instanceId}:`, err.message);
     }

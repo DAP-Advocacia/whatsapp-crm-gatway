@@ -85,6 +85,37 @@ async function listOpenAttentionEvents(reasons) {
   return rows;
 }
 
+// Agrega, por instância, o tempo TOTAL em 'attention' com os motivos
+// pedidos, olhando pra trás `sinceMs` — soma TODAS as janelas que ainda
+// estão abertas agora (não importa quando começaram — uma janela única
+// nunca reaberta conta sua duração inteira) OU que fecharam dentro
+// desse período (`ended_at > now() - sinceMs`, uma janela fechada há
+// mais tempo que isso não é mais "recente" o bastante pra somar).
+//
+// Duas formas reais de "banida" observadas em produção (Parte FQ do
+// HANDOFF): (1) 1 janela única aberta há muito tempo, nunca reaberta —
+// típico de instância ÓRFÃ, sem ninguém tentando reconectar; (2)
+// múltiplas janelas curtas se sobrepondo (o Baileys tenta reconectar
+// sozinho e falha de novo com o mesmo motivo, fechando e reabrindo o
+// evento repetidamente) — sozinha, cada janela raramente acumula muitas
+// horas contínuas, mesmo com a conta banida de verdade há dias. Por
+// isso `windowCount` vai junto no retorno — quem decide o critério
+// final (src/instanceBanStore.js) usa AMBOS os sinais (tempo total OU
+// contagem de janelas), não exige os dois ao mesmo tempo.
+async function sumAttentionDuration(reasons, sinceMs) {
+  const { rows } = await pool.query(
+    `select instance_id as "instanceId",
+            count(*)::int as "windowCount",
+            sum(coalesce(duration_ms, extract(epoch from (now() - started_at)) * 1000))::bigint as "totalMs"
+     from instance_connection_events
+     where kind = 'attention' and reason = any($1::text[])
+       and (ended_at is null or ended_at > now() - ($2 || ' milliseconds')::interval)
+     group by instance_id`,
+    [reasons, sinceMs]
+  );
+  return rows.map((r) => ({ ...r, totalMs: Number(r.totalMs) }));
+}
+
 // `on conflict` — idempotente, seguro rodar mais de 1x no mesmo dia (o job
 // de snapshot em src/server.js roda a cada hora, só a última chamada do dia
 // prevalece).
@@ -121,6 +152,7 @@ module.exports = {
   getOpenConnectionEvent,
   listConnectionEvents,
   listOpenAttentionEvents,
+  sumAttentionDuration,
   snapshotDailyMetrics,
   listMetricsDaily,
 };
