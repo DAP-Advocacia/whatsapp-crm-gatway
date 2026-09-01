@@ -3,7 +3,10 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-08-31 — Parte FO: **Modo Demo
+> aberto). Última atualização: sessão de 2026-09-01 — Parte FP: **fix real do
+> gráfico "Atividade de mensagens" (Dashboard) aparecendo com a escala do eixo
+> Y "amontoada"/com rótulos repetidos em mês de baixo volume** — ver detalhe
+> logo abaixo. Atualização anterior: sessão de 2026-08-31 — Parte FO: **Modo Demo
 > (Fase 1 de 3 do plano "modo demo + vídeo de onboarding") — dados 100%
 > fictícios, sem token Bitrix nem tocar Supabase real**:
 >
@@ -785,7 +788,10 @@
 - [x] **Grupo automático muda de gatilho pro fechamento do negócio**:
   poller novo (`src/dealStagePoller.js`, ~20min) detecta mudança de
   etapa no Bitrix (sem webhook de evento, precisou ser construído do
-  zero) — ver §2, parte FD
+  zero) — ver §2, parte FD. Confirmado rodando de verdade em produção
+  (linhas reais em `deal_stage_watch` sendo atualizadas a cada tick);
+  teste do disparo fim a fim (mensagem → card → fechamento → grupo)
+  ainda bloqueado — ver §5
 - [x] **Pesquisa de Satisfação**: tab nova no Painel Admin (só super
   admin), `admin.html` reestruturado em abas de verdade. Até 5
   perguntas fixas, dois públicos (cliente via link público/campanha,
@@ -5724,6 +5730,29 @@ Detalhes de arquitetura, rotas e mapa de arquivos: ver `README.md`.
   do processo (30min, por dono) — zera a cada restart do PM2. Não validado
   visualmente dentro do Bitrix com dados reais, nem a qualidade/relevância
   do texto gerado pela IA — só testado com o processo rodando sem erros.
+- [ ] **Teste real do grupo automático no fechamento do negócio (Parte FD/
+  EV) bloqueado** — instância "Padrão" do usuário (dono `183168`, a única
+  com histórico de negócio na categoria 628 do Agente de IA) caiu com
+  `forbidden` em 31/08 às 20:23 e segue caída; a causa não é uma falha de
+  conexão comum — o WhatsApp Business colocou a **conta em "Conta em
+  análise"** desde 1º de setembro (print do app confirmando, resposta
+  prometida em até 24h). Reescanear QR não resolve enquanto a análise não
+  terminar (é bloqueio da própria plataforma, não do gateway). Só existe 1
+  negócio de teste na categoria 628 hoje (`5614772`) e ele já tem grupo
+  criado (pelo gatilho antigo) — testar o caminho de "fechamento dispara o
+  grupo" de verdade vai precisar de uma mensagem de lead novo assim que a
+  instância voltar ao ar (conversa do número de teste `21965628397` já foi
+  apagada do banco do gateway pra esse fim — backup local feito antes).
+- [ ] Descoberta de passagem, sem ação tomada: o negócio `5614772`
+  (categoria 628) está vinculado a `session_id =
+  ..._183168` (sem sufixo), enquanto o `session_id` real da instância
+  "Padrão" hoje é `..._183168__mthcqb5l251x` (com sufixo aleatório, ver
+  `src/instances.js::create`) — e não existe linha em `agent_config` pro
+  formato sem sufixo nem com. Sinal de que a instância foi reconectada/
+  recriada em algum momento depois daquele negócio ter sido criado, e a
+  config do Agente de IA da Parte EV/EY original nunca foi refeita pro
+  `session_id` atual. Revisitar quando a instância voltar (reativar o
+  Agente de IA nela via `agente-ia.html`, como já orientado ao usuário).
 
 ---
 
@@ -11320,4 +11349,45 @@ fechadas), `filter:true` (busca), `tryItOutEnabled:false` (evita
 disparo acidental de request real com o token de 90 dias já
 preenchido). `node -c` ok — mudança só de configuração/CSS, sem lógica
 nova pra testar.
+
+### Parte FP — Fix real do gráfico "Atividade de mensagens" (Dashboard) com escala do eixo Y "amontoada" (2026-09-01)
+
+Usuário reportou 2x (print do Dashboard) "a disposição dos gráficos
+estão muito amontoados" — o eixo Y do gráfico de linha mostrava
+rótulos repetidos ("1, 1, 0, 0" de cima pra baixo) num mês de baixo
+volume de mensagens.
+
+**Causa raiz real** (não era CSS/layout, apesar da suspeita inicial):
+`niceCeil(v)` (`public/dashboard.html`), usada pra arredondar o teto do
+eixo Y (`axisMax`) num "número redondo", tinha `if (v <= 4) return
+Math.ceil(v) || 1;` — com o maior valor do mês sendo `1` (cenário real
+do usuário: Insights de IA do próprio Dashboard já apontavam "Queda
+drástica em atendimentos: -100%"), `axisMax` virava `1`. A grade marca
+4 pontos (`0, 1/3, 2/3, 1` da altura) via
+`Math.round(axisMax * frac)` — com `axisMax=1`, isso arredonda pra
+`[0, 0, 1, 1]`: dois pares de rótulos idênticos colados, lido pelo
+usuário como o gráfico "amontoado"/quebrado.
+
+**Fix**: `niceCeil` agora arredonda valores pequenos (`v <= 4`) pro
+próximo múltiplo de 3 (`Math.max(3, Math.ceil(v / 3) * 3)`), garantindo
+que os 4 pontos da grade (`0, axisMax/3, 2·axisMax/3, axisMax`) caiam
+sempre em 4 inteiros distintos. `v=1` agora gera `axisMax=3`, rótulos
+`[0, 1, 2, 3]`. Valores acima de 4 (a maioria dos meses, com volume
+normal) não mudam nada — só o piso de meses muito parados foi
+corrigido.
+
+**Verificação real, não só matemática isolada**: harness Playwright que
+carrega o `<style>`/`<script>` reais extraídos direto de
+`dashboard.html` num HTML mínimo, expõe `renderDailyChart`/`niceCeil`
+via `window.__test`, injeta o cenário exato do bug (dias de setembro
+com máximo diário = 1) e lê `.grid-label` do SVG renderizado de
+verdade. Confirmado visualmente com screenshot antes (`[0,0,1,1]`,
+grade colada) e depois (`[0,1,2,3]`, grade limpa) da correção — mesma
+função de produção nos dois casos, só a versão de `niceCeil` variando.
+`node -e` confirma também que valores de volume normal (5, 8, 17, 42,
+137) continuam com o mesmo teto de antes, sem regressão.
+
+**Pendente**: validar visualmente dentro do Bitrix, em produção, assim
+que o mês acumular mais dias (o cenário de teste foi sintético — dados
+reais de setembro ainda vão se acumular ao longo do mês).
 
