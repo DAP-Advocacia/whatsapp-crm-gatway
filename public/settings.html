@@ -22,14 +22,12 @@
   // fetch atualiza o cache pra próxima navegação ficar sem flash também.
   (function () {
     // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
-    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
-    // tema claro/escuro (ver html[data-theme="light"] no <style> e o
-    // switch no rodapé), nunca mais da paleta pessoal. Antes disso, os
-    // dois mecanismos escreviam a MESMA variável --bg em momentos
-    // diferentes — uma corrida real que só piorou quando um 3º
-    // concorrente (tema) também precisaria escrever ali. Cor de DESTAQUE
-    // (gold/green/red) continua igual nos dois temas, por decisão de
-    // produto — só isso a paleta pessoal ainda controla. Mesmo fix já
+    // mapa em 2026-08-30 — fundo virou responsabilidade do tema
+    // claro/escuro (ver html[data-theme="light"] no <style> e o switch
+    // no rodapé). Antes disso, os dois mecanismos escreviam a MESMA
+    // variável --bg de forma independente — uma corrida real. Cor de
+    // DESTAQUE (gold/green/red) continua igual nos dois temas, por
+    // decisão de produto — só isso continua neste MAP. Mesmo fix já
     // validado em public/chat.html (HANDOFF Parte FL).
     var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
     // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
@@ -61,6 +59,78 @@
         }
       });
     }
+
+    // Cor de fundo personalizada, DE VOLTA (2026-09-01) — mas redesenhada
+    // pra não repetir a corrida de 2026-08-30 acima: 1 cor POR TEMA
+    // (bgDark/bgLight), cada uma só lida/aplicada quando o TEMA
+    // correspondente está ativo agora — nunca os 2 mecanismos escrevendo
+    // --bg de forma independente. `deriveSurfacePalette` deriva
+    // --surface/--surface-2/--border a partir da cor de fundo escolhida
+    // (mesma técnica de deriveDim mais abaixo neste arquivo — multiplica/
+    // mistura canais RGB, sem HSL), pra card/borda nunca ficarem "presos"
+    // no tom do tema base enquanto só o fundo muda (decisão confirmada
+    // com o usuário: fundo + superfícies juntos, não só o fundo isolado).
+    function deriveSurfacePalette(bgHex, isLight) {
+      var num = parseInt(bgHex.slice(1), 16);
+      var ch = function (shift) { return (num >> shift) & 0xff; };
+      var clamp = function (v) { return Math.max(0, Math.min(255, Math.round(v))); };
+      var toHex = function (r, g, b) {
+        return '#' + [r, g, b].map(function (v) { return clamp(v).toString(16).padStart(2, '0'); }).join('');
+      };
+      var towardWhite = function (v, frac) { return v + (255 - v) * frac; };
+      var towardDark = function (v, frac) { return v * (1 - frac); };
+      if (isLight) {
+        // Tema claro: a superfície de destaque vai ao teto (branco —
+        // mesmo padrão real hoje, #f7f4ee -> #ffffff); surface2/border
+        // recuam pro lado escuro a partir do próprio fundo, formando a
+        // escada de contraste. Piso de segurança: se a cor escolhida já
+        // for muito escura pro tema claro (ex: usuário pôs preto),
+        // escurecer ainda mais colapsaria tudo — clareia nesse caso.
+        var surface = toHex(towardWhite(ch(16), 1), towardWhite(ch(8), 1), towardWhite(ch(0), 1));
+        var tooDark = ch(16) < 40 && ch(8) < 40 && ch(0) < 40;
+        var step2 = tooDark ? towardWhite : towardDark;
+        var surface2 = toHex(step2(ch(16), 0.14), step2(ch(8), 0.14), step2(ch(0), 0.14));
+        var border = toHex(step2(ch(16), 0.30), step2(ch(8), 0.30), step2(ch(0), 0.30));
+        return { surface: surface, surface2: surface2, border: border };
+      }
+      // Tema escuro: cada camada clareia um pouco mais que a anterior —
+      // mesmo padrão real hoje (#15120d -> #1d1812 -> #241d15 -> #34291a).
+      // Piso de segurança simétrico: cor escolhida já muito clara pro
+      // tema escuro (ex: usuário pôs branco) escurece em vez de clarear.
+      var tooLight = ch(16) > 215 && ch(8) > 215 && ch(0) > 215;
+      var step = tooLight ? towardDark : towardWhite;
+      var surfaceD = toHex(step(ch(16), 0.027), step(ch(8), 0.027), step(ch(0), 0.027));
+      var surface2D = toHex(step(ch(16), 0.08), step(ch(8), 0.08), step(ch(0), 0.08));
+      var borderD = toHex(step(ch(16), 0.18), step(ch(8), 0.18), step(ch(0), 0.18));
+      return { surface: surfaceD, surface2: surface2D, border: borderD };
+    }
+
+    function applyCachedBgPalette() {
+      var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      var suffix = isLight ? 'Light' : 'Dark';
+      var cached = localStorage.getItem('personalPalette_bg' + suffix) || localStorage.getItem('palette_bg' + suffix);
+      if (cached) {
+        var derived = deriveSurfacePalette(cached, isLight);
+        document.documentElement.style.setProperty('--bg', cached);
+        document.documentElement.style.setProperty('--surface', derived.surface);
+        document.documentElement.style.setProperty('--surface-2', derived.surface2);
+        document.documentElement.style.setProperty('--border', derived.border);
+      } else {
+        ['--bg', '--surface', '--surface-2', '--border'].forEach(function (v) {
+          document.documentElement.style.removeProperty(v);
+        });
+      }
+    }
+
+    // Grava o cache do prefixo certo e delega a aplicação visual pra
+    // applyCachedBgPalette() — mesmo padrão de __applyPalette acima.
+    // `key` é 'bgDark' ou 'bgLight'.
+    window.__applyBgPalette = function (key, hex, prefix) {
+      prefix = prefix || 'palette_';
+      if (hex) localStorage.setItem(prefix + key, hex);
+      else localStorage.removeItem(prefix + key);
+      applyCachedBgPalette();
+    };
     // `skipVisual` (parâmetro histórico, HANDOFF Parte EO): MANTIDO só
     // pela assinatura (chamadores antigos ainda passam esse 3º argumento),
     // mas não tem mais efeito — __applyPalette nunca mais toca
@@ -83,11 +153,13 @@
       applyCachedPalette();
     };
     applyCachedPalette();
-    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
-    // salvos por usuários que customizaram fundo antes do tema claro
-    // existir) — limpo aqui, uma vez, pra não competir silenciosamente
-    // com o tema nem ficar lixo morto em localStorage pra sempre. Nunca
-    // escreve nada nessas chaves de novo depois desta versão.
+    applyCachedBgPalette();
+    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border —
+    // SEM sufixo de tema, salvos por usuários que customizaram fundo
+    // antes do tema claro existir) — limpo aqui, uma vez, pra não
+    // competir silenciosamente com o tema nem ficar lixo morto em
+    // localStorage pra sempre. Chaves NOVAS (bgDark/bgLight, com
+    // sufixo) nunca colidem com estas — seguem intactas.
     ['palette_', 'personalPalette_'].forEach(function (prefix) {
       ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
         localStorage.removeItem(prefix + k);
@@ -101,7 +173,12 @@
     window.addEventListener('storage', function (e) {
       if (!e.key || (e.key.indexOf('palette_') !== 0 && e.key.indexOf('personalPalette_') !== 0)) return;
       applyCachedPalette();
+      applyCachedBgPalette();
     });
+    // Exposta fora do IIFE — o switch de tema (bloco de script mais
+    // abaixo, fora deste escopo) precisa reaplicar a cor de fundo certa
+    // assim que o tema muda de ativo.
+    window.__applyBgPaletteRefresh = applyCachedBgPalette;
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -395,6 +472,8 @@
 
   .field-label{ display:block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight:500; }
   .color-row{ display:flex; align-items:center; gap: 8px; margin-bottom: 8px; }
+  .bg-color-grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 8px; }
+  @media (max-width: 480px){ .bg-color-grid{ grid-template-columns: 1fr; } }
   .color-row input[type="color"]{ width: 44px; height: 40px; padding: 2px; flex-shrink:0; cursor:pointer; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); }
   .color-row input[type="text"]{
     flex:1; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px;
@@ -730,6 +809,25 @@
       <input type="text" id="redHex" placeholder="#d9685f">
     </div>
 
+    <label class="field-label" style="margin-top:8px;">Cor de fundo</label>
+    <p class="hint" style="margin-top:-2px;">Opcional — 1 cor pra cada tema (nunca as duas ao mesmo tempo). Deixe em branco pra usar o fundo padrão do tema claro/escuro.</p>
+    <div class="bg-color-grid">
+      <div>
+        <label class="field-label" style="font-size:12px;font-weight:500;">Tema escuro</label>
+        <div class="color-row">
+          <input type="color" id="bgDarkPicker" value="#15120d">
+          <input type="text" id="bgDarkHex" placeholder="ex: #15120d">
+        </div>
+      </div>
+      <div>
+        <label class="field-label" style="font-size:12px;font-weight:500;">Tema claro</label>
+        <div class="color-row">
+          <input type="color" id="bgLightPicker" value="#f7f4ee">
+          <input type="text" id="bgLightHex" placeholder="ex: #f7f4ee">
+        </div>
+      </div>
+    </div>
+
     <label class="field-label">Prévia</label>
     <div class="preview-row" id="previewRow">
       <button type="button" class="preview-btn" disabled>Botão de exemplo</button>
@@ -837,6 +935,9 @@
         localStorage.setItem('theme', 'light');
       }
       syncThemeToggleUI();
+      // Cor de fundo personalizada é POR TEMA (ver <head>) — reaplica a
+      // cor certa pro tema que acabou de virar ativo.
+      if (window.__applyBgPaletteRefresh) window.__applyBgPaletteRefresh();
     });
   }
 
@@ -1298,18 +1399,23 @@
   const greenHex = document.getElementById('greenHex');
   const redPicker = document.getElementById('redPicker');
   const redHex = document.getElementById('redHex');
+  const bgDarkPicker = document.getElementById('bgDarkPicker');
+  const bgDarkHex = document.getElementById('bgDarkHex');
+  const bgLightPicker = document.getElementById('bgLightPicker');
+  const bgLightHex = document.getElementById('bgLightHex');
   const swatchesWrap = document.getElementById('swatches');
   const previewRow = document.getElementById('previewRow');
   const saveBtn = document.getElementById('saveBtn');
   const resetBtn = document.getElementById('resetBtn');
 
   // Cada campo é {picker, hex, cssVar, previewVar} — trata os 4 de forma
-  // genérica pra não repetir a mesma lógica em cada um. `bgColor` SAIU
-  // daqui em 2026-08-30 — fundo agora é responsabilidade exclusiva do
-  // tema claro/escuro (switch na sidebar), nunca mais da paleta pessoal
-  // (eliminava uma corrida real entre os dois mecanismos escrevendo a
-  // mesma variável --bg, ver public/chat.html). Campo mantido no backend
-  // (src/settings.js) por enquanto, só não é mais editável por aqui.
+  // genérica pra não repetir a mesma lógica em cada um. `bgColor`
+  // (singular) SAIU daqui em 2026-08-30 — fundo virou responsabilidade
+  // do tema claro/escuro. VOLTOU em 2026-09-01 como `bgDarkColor`/
+  // `bgLightColor` (1 por tema), mas de propósito FORA deste array
+  // genérico: os 4 campos abaixo têm sempre o MESMO cssVar nos 2 temas;
+  // fundo depende de QUAL tema está ativo agora, então tem handlers
+  // próprios mais abaixo (window.__applyBgPalette), não este loop.
   const FIELD_DEFS = [
     { key: 'accentColor', picker: colorPicker, hex: colorHex, cssVar: '--gold', rgbVar: '--gold-rgb', previewVar: '--preview-color' },
     { key: 'accentColorDim', picker: colorDimPicker, hex: colorDimHex, cssVar: '--gold-dim', rgbVar: null, previewVar: null },
@@ -1335,6 +1441,24 @@
     // modelo pronto, load() e reset) — atualiza o destaque do card de
     // modelo ativo aqui em vez de espalhar a chamada em cada handler.
     updateActiveTemplate();
+  }
+
+  // Cor de fundo — FORA do FIELD_DEFS genérico de propósito (ver
+  // comentário acima): só atualiza a TELA REAL (via __applyBgPalette,
+  // que por sua vez só toca --bg/--surface/etc quando o tema daquele
+  // campo é o ativo AGORA) quando o campo editado corresponde ao tema
+  // que está na tela neste instante — editar o campo do claro enquanto
+  // a tela está no escuro só atualiza o picker/hex, sem mudar nada
+  // visualmente (evita "por que minha cor não mudou?", já que a cor do
+  // outro tema só passa a valer quando o usuário trocar de tema).
+  function setBgField(picker, hex, key, color) {
+    picker.value = color;
+    hex.value = color;
+    var isLightNow = document.documentElement.getAttribute('data-theme') === 'light';
+    var fieldIsForActiveTheme = (key === 'bgLight') === isLightNow;
+    if (fieldIsForActiveTheme && window.__applyBgPalette) {
+      window.__applyBgPalette(key, color, 'personalPalette_');
+    }
   }
 
   function currentAccentColor() {
@@ -1439,6 +1563,16 @@
     const v = redHex.value.trim();
     if (/^#[0-9a-f]{6}$/i.test(v)) setField(FIELD_DEFS[3], v);
   });
+  bgDarkPicker.addEventListener('input', () => setBgField(bgDarkPicker, bgDarkHex, 'bgDark', bgDarkPicker.value));
+  bgDarkHex.addEventListener('input', () => {
+    const v = bgDarkHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setBgField(bgDarkPicker, bgDarkHex, 'bgDark', v);
+  });
+  bgLightPicker.addEventListener('input', () => setBgField(bgLightPicker, bgLightHex, 'bgLight', bgLightPicker.value));
+  bgLightHex.addEventListener('input', () => {
+    const v = bgLightHex.value.trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) setBgField(bgLightPicker, bgLightHex, 'bgLight', v);
+  });
 
   autoDimCheck.addEventListener('change', () => {
     const auto = autoDimCheck.checked;
@@ -1473,6 +1607,16 @@
         green: data.greenColor || null,
         red: data.redColor || null,
       });
+      // Fundo é OPCIONAL (diferente das 4 acima) — campo fica vazio se
+      // nunca foi salvo, em vez de cair num padrão hardcoded.
+      bgDarkPicker.value = data.bgColorDark || '#15120d';
+      bgDarkHex.value = data.bgColorDark || '';
+      bgLightPicker.value = data.bgColorLight || '#f7f4ee';
+      bgLightHex.value = data.bgColorLight || '';
+      if (window.__applyBgPalette) {
+        window.__applyBgPalette('bgDark', data.bgColorDark || null, 'personalPalette_');
+        window.__applyBgPalette('bgLight', data.bgColorLight || null, 'personalPalette_');
+      }
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }
@@ -1491,6 +1635,20 @@
         return;
       }
     }
+    // Fundo é OPCIONAL — vazio é válido (limpa/usa o padrão do tema),
+    // só rejeita se tiver ALGO escrito que não seja hex válido.
+    const bgDarkVal = bgDarkHex.value.trim();
+    const bgLightVal = bgLightHex.value.trim();
+    if (bgDarkVal && !/^#[0-9a-f]{6}$/i.test(bgDarkVal)) {
+      if (window.showToast) window.showToast('Cor de fundo (tema escuro) inválida — use um código hex, ex: #15120d.', 'error');
+      return;
+    }
+    if (bgLightVal && !/^#[0-9a-f]{6}$/i.test(bgLightVal)) {
+      if (window.showToast) window.showToast('Cor de fundo (tema claro) inválida — use um código hex, ex: #f7f4ee.', 'error');
+      return;
+    }
+    patch.bgColorDark = bgDarkVal || null;
+    patch.bgColorLight = bgLightVal || null;
     saveBtn.disabled = true;
     try {
       const res = await apiFetch(`${API_BASE}/settings`, {
@@ -1501,6 +1659,10 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'falha ao salvar');
       syncPaletteCache({ color: patch.accentColor, colorDim: patch.accentColorDim, green: patch.greenColor, red: patch.redColor });
+      if (window.__applyBgPalette) {
+        window.__applyBgPalette('bgDark', patch.bgColorDark, 'personalPalette_');
+        window.__applyBgPalette('bgLight', patch.bgColorLight, 'personalPalette_');
+      }
       if (window.showToast) window.showToast('Paleta salva — já vale em todas as telas.', 'success');
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
@@ -1515,7 +1677,7 @@
       const res = await apiFetch(`${API_BASE}/settings`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ accentColor: null, accentColorDim: null, greenColor: null, redColor: null }),
+        body: JSON.stringify({ accentColor: null, accentColorDim: null, greenColor: null, redColor: null, bgColorDark: null, bgColorLight: null }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'falha ao restaurar');
       setField(FIELD_DEFS[0], DEFAULTS.accentColor);
@@ -1526,7 +1688,15 @@
       colorDimPicker.disabled = true;
       colorDimHex.disabled = true;
       dimRow.style.opacity = '.5';
+      bgDarkPicker.value = '#15120d';
+      bgDarkHex.value = '';
+      bgLightPicker.value = '#f7f4ee';
+      bgLightHex.value = '';
       syncPaletteCache({ color: null, colorDim: null, green: null, red: null, bg: null });
+      if (window.__applyBgPalette) {
+        window.__applyBgPalette('bgDark', null, 'personalPalette_');
+        window.__applyBgPalette('bgLight', null, 'personalPalette_');
+      }
       if (window.showToast) window.showToast('Paleta padrão restaurada.', 'success');
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');

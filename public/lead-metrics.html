@@ -49,6 +49,62 @@
     // Ausência dos DOIS caches é tratada como remoção explícita (não só
     // "não mexe") — sem isso, "Restaurar padrão" em Configurações nunca
     // revertia a cor numa aba já aberta.
+    // Cor de fundo personalizada, DE VOLTA (2026-09-01) — mas redesenhada
+    // pra não repetir a corrida de 2026-08-30: 1 cor POR TEMA (bgDark/
+    // bgLight), cada uma só lida/aplicada quando o TEMA correspondente
+    // está ativo agora — nunca os 2 mecanismos escrevendo --bg de forma
+    // independente. deriveSurfacePalette deriva --surface/--surface-2/
+    // --border a partir do fundo escolhido (mesma técnica de deriveDim
+    // em settings.html — canais RGB, sem HSL), testado e validado ali.
+    function deriveSurfacePalette(bgHex, isLight) {
+      var num = parseInt(bgHex.slice(1), 16);
+      var ch = function (shift) { return (num >> shift) & 0xff; };
+      var clamp = function (v) { return Math.max(0, Math.min(255, Math.round(v))); };
+      var toHex = function (r, g, b) {
+        return '#' + [r, g, b].map(function (v) { return clamp(v).toString(16).padStart(2, '0'); }).join('');
+      };
+      var towardWhite = function (v, frac) { return v + (255 - v) * frac; };
+      var towardDark = function (v, frac) { return v * (1 - frac); };
+      if (isLight) {
+        var surface = toHex(towardWhite(ch(16), 1), towardWhite(ch(8), 1), towardWhite(ch(0), 1));
+        var tooDark = ch(16) < 40 && ch(8) < 40 && ch(0) < 40;
+        var step2 = tooDark ? towardWhite : towardDark;
+        var surface2 = toHex(step2(ch(16), 0.14), step2(ch(8), 0.14), step2(ch(0), 0.14));
+        var border = toHex(step2(ch(16), 0.30), step2(ch(8), 0.30), step2(ch(0), 0.30));
+        return { surface: surface, surface2: surface2, border: border };
+      }
+      var tooLight = ch(16) > 215 && ch(8) > 215 && ch(0) > 215;
+      var step = tooLight ? towardDark : towardWhite;
+      var surfaceD = toHex(step(ch(16), 0.027), step(ch(8), 0.027), step(ch(0), 0.027));
+      var surface2D = toHex(step(ch(16), 0.08), step(ch(8), 0.08), step(ch(0), 0.08));
+      var borderD = toHex(step(ch(16), 0.18), step(ch(8), 0.18), step(ch(0), 0.18));
+      return { surface: surfaceD, surface2: surface2D, border: borderD };
+    }
+
+    function applyCachedBgPalette() {
+      var isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      var suffix = isLight ? 'Light' : 'Dark';
+      var cached = localStorage.getItem('personalPalette_bg' + suffix) || localStorage.getItem('palette_bg' + suffix);
+      if (cached) {
+        var derived = deriveSurfacePalette(cached, isLight);
+        document.documentElement.style.setProperty('--bg', cached);
+        document.documentElement.style.setProperty('--surface', derived.surface);
+        document.documentElement.style.setProperty('--surface-2', derived.surface2);
+        document.documentElement.style.setProperty('--border', derived.border);
+      } else {
+        ['--bg', '--surface', '--surface-2', '--border'].forEach(function (v) {
+          document.documentElement.style.removeProperty(v);
+        });
+      }
+    }
+
+    window.__applyBgPalette = function (key, hex, prefix) {
+      prefix = prefix || 'palette_';
+      if (hex) localStorage.setItem(prefix + key, hex);
+      else localStorage.removeItem(prefix + key);
+      applyCachedBgPalette();
+    };
+
     function applyCachedPalette() {
       Object.keys(MAP).forEach(function (k) {
         var cached = localStorage.getItem('personalPalette_' + k) || localStorage.getItem('palette_' + k);
@@ -83,6 +139,7 @@
       applyCachedPalette();
     };
     applyCachedPalette();
+    applyCachedBgPalette();
     // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
     // salvos por usuários que customizaram fundo antes do tema claro
     // existir) — limpo aqui, uma vez, pra não competir silenciosamente
@@ -101,7 +158,12 @@
     window.addEventListener('storage', function (e) {
       if (!e.key || (e.key.indexOf('palette_') !== 0 && e.key.indexOf('personalPalette_') !== 0)) return;
       applyCachedPalette();
+      applyCachedBgPalette();
     });
+    // Exposta fora do IIFE — o handler de clique do switch de tema
+    // (bloco de script mais abaixo) precisa reaplicar a cor de fundo certa
+    // assim que o tema muda de ativo.
+    window.__applyBgPaletteRefresh = applyCachedBgPalette;
   })();
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -779,6 +841,9 @@
         localStorage.setItem('theme', 'light');
       }
       syncThemeToggleUI();
+      // Cor de fundo personalizada é POR TEMA (ver <head>) — reaplica a
+      // cor certa pro tema que acabou de virar ativo.
+      if (window.__applyBgPaletteRefresh) window.__applyBgPaletteRefresh();
     });
   }
 

@@ -835,6 +835,18 @@ create table if not exists user_palette (
   updated_at timestamptz not null default now()
 );
 
+-- Cor de fundo personalizada, DE VOLTA (2026-09-01) — mas redesenhada:
+-- `bg_color` (acima) foi removida da UI em 2026-08-30 depois de um bug
+-- real (paleta pessoal e o switch de tema claro/escuro escreviam a
+-- mesma variável CSS --bg ao mesmo tempo, corrida real). Volta com 2
+-- colunas em vez de 1 — uma cor de fundo POR TEMA — pra cada uma só
+-- ser aplicada quando o tema correspondente estiver ativo, nunca
+-- competindo com o CSS do tema (ver public/settings.html e o bloco
+-- applyCachedBgPalette duplicado nas páginas com sidebar). `bg_color`
+-- antiga fica congelada sem uso, mesmo espírito de antes.
+alter table user_palette add column if not exists bg_color_dark text;
+alter table user_palette add column if not exists bg_color_light text;
+
 -- Quem mandou a mensagem DENTRO de um grupo de card (telefone/nome de quem
 -- está no grupo, não da empresa) — só preenchido em mensagens 'in' de
 -- conversas cujo "phone" é o JID de um wa_groups.source='card' (ver

@@ -3,7 +3,7 @@ const settings = require('../settings');
 const { issueApiToken } = require('../auth');
 
 const HEX_RE = /^#[0-9a-f]{6}$/i;
-const FIELDS = ['accentColor', 'accentColorDim', 'greenColor', 'redColor', 'bgColor'];
+const FIELDS = ['accentColor', 'accentColorDim', 'greenColor', 'redColor', 'bgColor', 'bgColorDark', 'bgColorLight'];
 
 /**
  * Paleta de cores POR USUÁRIO (tela `public/settings.html`) — montado em

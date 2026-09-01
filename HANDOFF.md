@@ -3,8 +3,10 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-09-01 — Parte FQ: **categoria
-> "Banida" na aba Instâncias + aviso multicanal** — quando o WhatsApp
+> aberto). Última atualização: sessão de 2026-09-01 — Parte FR: **cor de
+> fundo personalizada, de volta — 1 cor por tema (claro/escuro)** — ver
+> detalhe logo abaixo. Atualização anterior: sessão de 2026-09-01 —
+> Parte FQ: **categoria "Banida" na aba Instâncias + aviso multicanal** — quando o WhatsApp
 > recusa o acesso (`forbidden`) de forma persistente (soma ≥ 20h dentro
 > das últimas 24h — não precisa ser 1 janela contínua: correção real no
 > mesmo dia, depois de confirmar que reconexão automática intermitente
@@ -11547,4 +11549,94 @@ título nenhum, já que não faz sentido contrastar com uma seção que não
 existe). "Ativas" escolhido em vez de "Live" (confirmado com o
 usuário) por consistência com o tom em português já usado no resto do
 app.
+
+### Parte FR — Cor de fundo personalizada, de volta — 1 cor por tema (2026-09-01)
+
+Usuário viu, em outro produto (BI/DapZap), um campo "Cor de fundo" em
+Configurações e pediu o mesmo aqui. Esse campo existiu neste projeto
+até 2026-08-30 — foi **removido de propósito** depois de um bug real: a
+paleta pessoal e o switch de tema claro/escuro escreviam a mesma
+variável CSS `--bg` de forma independente, causando uma corrida (a cor
+pessoal "grudava" por cima do tema, ignorando a troca). Decisão
+confirmada com o usuário pra reintroduzir sem repetir o bug: **2 cores
+separadas, uma por tema**, não 1 valor só valendo pros dois — e cada
+uma só se aplica quando o tema correspondente está ativo, nunca os 2
+mecanismos escrevendo a variável de forma independente.
+
+**Achado que mudou o desenho**: `html[data-theme="light"]{...}` não
+redefine só `--bg` — redefine junto `--surface`/`--surface-2`/`--border`
+(conjunto coerente). Sobrescrever só o fundo isolado quebraria esse
+contraste com cores desavisadas. Decisão confirmada: a cor de fundo
+escolhida também deriva `--surface`/`--surface-2`/`--border`
+automaticamente — reaproveita a mesma técnica de `deriveDim(hex)`
+(`public/settings.html`, já usada pra `--gold-dim` a partir de
+`--gold`): multiplicar/misturar canais RGB, sem HSL.
+
+**`deriveSurfacePalette(bgHex, isLight)`** — calibrada nos valores reais
+do CSS (tema escuro: `--bg:#15120d`→`--surface:#1d1812`→`#241d15`→
+`#34291a`, cada camada clareia um pouco mais; tema claro:
+`--bg:#f7f4ee`→`--surface:#ffffff` no teto, `surface2`/`border`
+escurecem a partir do fundo). Achado durante a calibração: os 2 temas
+NÃO são simétricos (não é "inverte o sinal") — em ambos, `--surface` é
+sempre mais claro que `--bg`; só a magnitude do passo muda. Testado
+com `node -e` isolado contra vários casos (cores reais, "estranhas" —
+azul saturado, lavanda — e os 2 extremos matemáticos: preto/branco
+puro em cada tema) antes de integrar no HTML; extremos invertidos
+(branco escolhido no tema escuro, preto no claro) tinham um bug real
+de colapso sem distinção — corrigido com um piso de segurança (inverte
+a direção do passo nesses casos específicos).
+
+**Backend**: `user_palette` ganha `bg_color_dark`/`bg_color_light`
+(migração real rodada, `node db/migrate.js`) — `bg_color` (singular,
+já congelada desde 30/08) fica intocada. `src/settings.js`/
+`src/routes/settings.js` (FIELDS) ganham os 2 campos — `get`/`update`
+já eram genéricos o bastante, zero mudança de lógica. Testado
+get/update/persistência contra o banco real.
+
+**Frontend**: `public/settings.html` ganha os 2 pickers ("Fundo — tema
+escuro"/"Fundo — tema claro", campo OPCIONAL — vazio é válido, usa o
+padrão do tema), `setBgField()` (fora do `FIELD_DEFS` genérico de
+propósito — só atualiza a tela quando o campo editado corresponde ao
+tema ativo agora, evita "por que minha cor não mudou?"). O bloco
+`applyCachedBgPalette`/`window.__applyBgPalette`/`deriveSurfacePalette`
+foi replicado **mecanicamente** (script Node, testado contra cópias de
+backup antes de aplicar aos arquivos reais — mesmo rigor da Parte FC)
+nas outras **18 páginas** com sidebar (`grep -l __applyPalette
+public/*.html`, menos `index.html`). `public/index.html` (mini-chat
+embutido no card do Negócio/Contato) fica de fora de propósito —
+nunca teve paleta PESSOAL (só o brand global), limitação pré-existente
+e documentada; decisão confirmada de não criar uma inconsistência nova
+(fundo pessoal sem o resto da paleta pessoal).
+
+**2 bugs reais pegos e corrigidos durante a própria replicação
+automática** (nenhum deles teria aparecido só de ler o código, só
+testando de verdade): (1) a regex de "achar a chamada de boot" batia a
+1ª ocorrência solta de `applyCachedPalette();` no arquivo, que na
+verdade é a de DENTRO de `window.__applyPalette`, não o boot de
+verdade — corrigido ancorando no `};` de fechamento daquela função
+antes; (2) a indentação da linha inserida no handler de clique do
+switch de tema copiava do fechamento `});` (1 nível a menos) em vez da
+própria linha `syncThemeToggleUI()` ao lado — cosmético (JS funcionava
+de qualquer forma), corrigido mesmo assim.
+
+**Verificação real, ponta a ponta**:
+- `node db/migrate.js` + `get`/`update` reais contra o banco.
+- Harness Playwright com o `<head>` (script+CSS) **real** de
+  `public/settings.html` — trocou de tema 4x seguidas com uma cor
+  personalizada salva pros 2 temas: a cor certa apareceu em TODAS as 4
+  trocas, nunca "grudou" a do tema anterior (o teste direto da corrida
+  que motivou o redesenho).
+- Mesmo teste, agora com o `<head>` (script+CSS) **real e completo** de
+  `public/chat.html` (não um CSS mínimo de teste) — screenshot real
+  confirmando visualmente as 2 cores (verde escuro/creme claro) com
+  `--surface` derivada e legível nos 2 temas.
+- "Restaurar padrão" testado isolado — limpa o `localStorage` de
+  verdade e volta ao `--bg` puro do CSS do tema, confirmado via
+  `getComputedStyle` real.
+- Sintaxe (`new Function` em cada bloco `<script>`) confirmada nas 19
+  páginas tocadas (18 + settings.html) depois de TODAS as edições.
+
+**Pendente**: validar visualmente dentro do Bitrix em produção (todos
+os testes desta parte foram harness Playwright/banco real, mas fora do
+ambiente de verdade do Bitrix/iframe).
 
