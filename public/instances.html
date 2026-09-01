@@ -1799,7 +1799,10 @@
         <h2 class="instance-section-title instance-section-banned">Banida${bannedList.length > 1 ? 's' : ''} (${bannedList.length})</h2>
         <div class="instances-grid">${bannedList.map(cardHtml).join('')}</div>
       ` : ''}
-      ${restList.length ? `<div class="instances-grid">${restList.map(cardHtml).join('')}</div>` : ''}
+      ${restList.length ? `
+        ${bannedList.length ? `<h2 class="instance-section-title">Ativas (${restList.length})</h2>` : ''}
+        <div class="instances-grid">${restList.map(cardHtml).join('')}</div>
+      ` : ''}
     `;
 
     // "Fora do ar há Xh" — calculado no client a partir de um timestamp

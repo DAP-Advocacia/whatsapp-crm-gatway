@@ -11531,3 +11531,20 @@ capturadas corretamente pelo novo critério (as 3 órfãs continuam
 puladas sem notificação fantasma, as 4 reais — incluindo a do usuário —
 disparam o alerta 1x, sem duplicar numa 2ª chamada).
 
+**Validado em produção** (print real do usuário, mesmo dia): a
+instância "Padrão" apareceu na seção "Banida (1)" de verdade dentro do
+Bitrix, com a mensagem certa e todos os botões presentes — confirmação
+definitiva que faltava (a rota exige autenticação real do usuário,
+sem como simular de fora).
+
+**Ajuste pontual, mesmo print**: usuário pediu pra separar também a
+lista de baixo com um título próprio ("Live"/"Ativas"), não só a seção
+"Banida" isolada com o resto solto sem título. `renderInstances()`
+ganhou um 2º `<h2 class="instance-section-title">Ativas (N)</h2>`
+antes do grid restante — só aparece quando existe pelo menos 1 banida
+(`bannedList.length`), senão a tela continua idêntica a antes (sem
+título nenhum, já que não faz sentido contrastar com uma seção que não
+existe). "Ativas" escolhido em vez de "Live" (confirmado com o
+usuário) por consistência com o tom em português já usado no resto do
+app.
+
