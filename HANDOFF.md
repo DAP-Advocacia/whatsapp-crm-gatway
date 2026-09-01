@@ -3,7 +3,15 @@
 > Documento de passagem de projeto: estado atual, o que foi feito recentemente e o
 > que falta. A documentação completa de arquitetura/API/setup está no `README.md` —
 > este arquivo foca em **continuidade entre sessões** (o que mudou, o que está em
-> aberto). Última atualização: sessão de 2026-09-01 — Parte FP: **fix real do
+> aberto). Última atualização: sessão de 2026-09-01 — Parte FQ: **categoria
+> "Banida" na aba Instâncias + aviso multicanal** — quando o WhatsApp
+> recusa o acesso (`forbidden`) por mais de 24h seguidas (limiar
+> confirmado com o usuário, alinhado ao próprio prazo de análise que o
+> WhatsApp Business informa), a instância ganha uma seção visual própria
+> em `instances.html`, separada do aviso genérico "Precisa de atenção"
+> (que ainda cobre `connectionReplaced`/`badSession`), e o
+> `alertDispatcher` já existente dispara o aviso — ver detalhe logo
+> abaixo. Atualização anterior: sessão de 2026-09-01 — Parte FP: **fix real do
 > gráfico "Atividade de mensagens" (Dashboard) aparecendo com a escala do eixo
 > Y "amontoada"/com rótulos repetidos em mês de baixo volume** — ver detalhe
 > logo abaixo. Atualização anterior: sessão de 2026-08-31 — Parte FO: **Modo Demo
@@ -5597,10 +5605,12 @@ Detalhes de arquitetura, rotas e mapa de arquivos: ver `README.md`.
   chamadas do fluxo normal (criar negócio, logar timeline, buscar
   contato) — com muitos atendentes simultâneos, isso pode estourar o
   limite silenciosamente. Levantado na Revisão de Prontidão (item 04).
-- [ ] **Alerta automático de sessão caída** — hoje uma instância
-  desconectada só aparece como linha de log; com poucas instâncias dá pra
-  notar de olho, em escala não. Levantado na Revisão de Prontidão (item
-  05) — sugestão: PM2 Plus (já usa PM2) + UptimeRobot.
+- [x] ~~**Alerta automático de sessão caída**~~ — resolvido sem depender
+  de ferramenta externa (a sugestão original era PM2 Plus + UptimeRobot):
+  Parte FC (alerta multicanal in-app/Web Push/WhatsApp de sistema/
+  e-mail na transição pra "precisa de atenção") + Parte FQ (categoria
+  "Banida" + mesmo alerta multicanal quando `forbidden` passa de 24h
+  aberto, ver §2).
 - [ ] **Backup das credenciais de sessão (`auth_session/`)** — hoje só
   existe em disco local; uma falha de disco forçaria todo mundo conectado
   naquele momento a reescanear o QR do zero. Levantado na Revisão de
@@ -11390,4 +11400,98 @@ função de produção nos dois casos, só a versão de `niceCeil` variando.
 **Pendente**: validar visualmente dentro do Bitrix, em produção, assim
 que o mês acumular mais dias (o cenário de teste foi sintético — dados
 reais de setembro ainda vão se acumular ao longo do mês).
+
+### Parte FQ — Categoria "Banida" na aba Instâncias + aviso multicanal (2026-09-01)
+
+Usuário teve a própria instância banida de verdade pelo WhatsApp
+Business ("Conta em análise", print real do app, resposta prometida em
+até 24h). Pediu: quando isso acontecer, jogar a instância pra uma
+categoria "Banida" separada na aba Instâncias, e criar um aviso pro
+usuário.
+
+**Critério** (confirmado com o usuário): `forbidden` (ver
+`PERMANENT_CODES`, `src/whatsapp.js`) aberto **há mais de 24h** — não
+todo `forbidden` na hora, porque o próprio WhatsApp já avisa "resultado
+em até 24h"; marcar antes disso arriscaria rotular como banida uma
+restrição que ainda ia se resolver sozinha. Hoje essa queda cai no
+mesmo balde genérico `needsAttention` que também cobre
+`connectionReplaced` (outro aparelho assumiu) e `badSession`
+(credencial corrompida) — duas causas sem relação nenhuma com
+banimento; "Banida" é uma categoria nova, mais específica, ao lado da
+existente (não a substitui).
+
+**Sem coluna nova em `instances`** (decisão confirmada) — calculado na
+hora a partir de `instance_connection_events`, que já tem tudo
+necessário (`reason`, `started_at`, `ended_at is null` = aberto). Se a
+instância reconectar de verdade, o evento fecha sozinho
+(`closeOpenConnectionEvent`, já existente) e ela some da categoria sem
+precisar de nenhum passo de "destravar" manual.
+
+**Backend**: `src/instanceHealthStore.js` ganhou
+`listOpenAttentionEvents(reasons)` (nova — as duas funções de leitura
+que já existiam, `getOpenConnectionEvent`/`listConnectionEvents`,
+sempre recebiam 1 `instanceId`; esta varre a tabela inteira).
+`src/instanceBanStore.js` (novo, pequeno): `listBannedNow()` — a regra
+"é banida?" num só lugar (`BAN_THRESHOLD_MS = 24h`), usada tanto por
+`GET /instances` (campo novo `banned`, calculado 1x por request pro
+lote inteiro, não 1 query por instância) quanto pelo poller de aviso.
+`src/instanceBanPoller.js` (novo, mesmo esqueleto de
+`dealStagePoller.js`): varre a cada ~20min, dispara
+`alertDispatcher.notifyAttention` (mesmo dispatcher multicanal da Parte
+FC — in-app/Web Push/WhatsApp de sistema/e-mail, nenhum canal novo) 1x
+por janela de banimento (dedupe em memória por `instance_connection_events.id`,
+reseta a cada boot — mesmo raciocínio já usado em `lastHealthState`,
+`src/server.js`). Registrado no boot logo após `dealStagePoller`.
+
+**Achado real durante o teste**: 3 instâncias diferentes já estavam com
+`forbidden` aberto há mais de 24h no banco de produção — mas as 3 são
+**órfãs** (removidas de `instances`, só o histórico de conexão
+sobreviveu, mesmo padrão já documentado no topo de
+`instanceHealthStore.js`). Sem dono real pra avisar, `ownerOf()` tem um
+fallback deliberado (devolve o próprio `instanceId` como "ownerId"
+quando órfã) que gerava notificação fantasma pra ninguém de verdade —
+corrigido: `runOnce()` agora confere `instancesStore.get(instanceId)`
+antes de notificar e pula silenciosamente (com log) se vier `null`.
+
+**Frontend** (`public/instances.html`): `renderInstances()` particiona a
+lista em banidas/resto — **1ª vez que esta tela agrupa cards em seções
+nomeadas** (só aparece quando há pelo menos 1 banida, nunca uma seção
+vazia). Ações do card (Tentar reconectar/Ver QR/etc) continuam **todas
+presentes** (decisão confirmada: "Banida" é só informativo, não
+desliga nada — a análise do WhatsApp pode liberar a conta, ou pode ser
+hora de reparear com número novo). CSS novo reaproveita o token
+`--red` já existente (mesmo usado por `needsAttention`/offline),
+diferenciando por intensidade (borda mais forte + `box-shadow`) em vez
+de introduzir uma 5ª cor semântica.
+
+**Verificação real, não só leitura de código**:
+- `instanceBanStore.listBannedNow()` chamado contra o banco de
+  produção real — confirmou as 3 órfãs (e confirmou que a própria
+  instância do usuário, banida havia ~20h no momento do teste, ainda
+  não cruzava as 24h — matemática correta, sensível ao tempo real).
+- `instanceBanPoller.runOnce()` chamado 2x seguidas contra o banco
+  real: 1ª chamada criou as notificações reais em `notifications`
+  (depois removidas, eram artefato do teste antes da correção de
+  órfã); 2ª chamada não duplicou (dedupe confirmado).
+- Caminho positivo completo (dono real → `notifyAttention` chamado)
+  confirmado via mock isolado (`instanceBanStore.listBannedNow`/
+  `alertDispatcher.notifyAttention` substituídos temporariamente em
+  memória, sem gravar nada no banco) apontando pra uma instância real
+  e não-órfã — `recipients` e `title` corretos, sem side-effect real.
+  Tentativa inicial de simular alterando `started_at` de um evento
+  real foi bloqueada pelo classificador de permissão do Claude Code
+  (escrita direta em produção fora do fluxo normal) — resolvido com
+  mock em memória em vez disso.
+- Frontend: harness Playwright (mesmo padrão da Parte FP) com 3
+  instâncias simuladas (1 banida, 1 `connectionReplaced` comum, 1
+  online) — confirmado visualmente e via DOM real: seção "Banida (1)"
+  isolada, card com borda destacada, mensagem específica sem o bloco
+  genérico de atenção junto, `connectionReplaced` continua só em
+  "Precisa de atenção" (nunca vira "Banida"). Testado nos 2 temas
+  (claro/escuro).
+
+**Pendente**: validar dentro do Bitrix em produção quando a instância
+do usuário cruzar as 24h de verdade (previsto para hoje, por volta das
+16:23) — confirmar a categoria e o aviso aparecendo sozinhos, sem
+simulação.
 

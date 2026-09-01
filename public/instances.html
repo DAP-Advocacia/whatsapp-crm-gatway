@@ -481,6 +481,36 @@
     color: var(--text-muted);
   }
   .instance-downtime strong{ color: var(--gold); }
+
+  /* Categoria "Banida" (i.banned — ver GET /instances, forbidden aberto há
+     mais de 24h, src/instanceBanStore.js): reaproveita --red (mesmo token
+     semântico de needsAttention/offline, já é "o mais grave" no sistema),
+     diferenciando por INTENSIDADE — borda mais forte + fundo mais opaco —
+     em vez de introduzir uma 5ª cor semântica só pra esta feature. Título
+     de seção com a mesma trave lateral usada em .instance-attention/
+     .instance-downtime, só mais grosso, pra ficar claro que é um nível
+     acima de "precisa de atenção" comum. */
+  .instance-card.banned{
+    border-color: rgba(var(--red-rgb),.55);
+    box-shadow: 0 0 0 1px rgba(var(--red-rgb),.2);
+  }
+  .instance-banned{
+    display:flex; align-items:flex-start; gap:8px; margin-top:8px;
+    padding:8px 10px; border-radius:8px;
+    background: rgba(var(--red-rgb),.14); border: 1px solid rgba(var(--red-rgb),.4);
+    font-size: 12px; color: var(--text-muted); line-height: 1.5;
+  }
+  .instance-banned strong{ color: var(--red); }
+  .instance-section-title{
+    font-size: 13px; font-weight: 700; color: var(--text); margin: 0 0 12px;
+    padding-left: 10px; border-left: 3px solid var(--red);
+  }
+  .instance-section-title.instance-section-banned{ color: var(--red); }
+  /* Seção "Banida" some do fluxo normal do grid quando vazia (ver
+     renderInstances) — o espaçamento abaixo só se aplica quando ela
+     de fato é renderizada, evitando gap duplo com o grid seguinte. */
+  .instance-section-title + .instances-grid{ margin-bottom: 24px; }
+
   .instance-history-btn{
     background:none; border:1px solid var(--border); color: var(--text-muted);
     font-size: 11.5px; padding: 5px 10px; border-radius: 7px; cursor: pointer;
@@ -1715,8 +1745,17 @@
       instancesWrap.innerHTML = '<p class="empty">Nenhuma instância ainda.</p>';
       return;
     }
-    instancesWrap.innerHTML = `<div class="instances-grid">${list.map((i) => `
-      <div class="instance-card">
+
+    // Categoria "Banida" (i.banned — ver GET /instances, forbidden aberto há
+    // mais de 24h, src/instanceBanStore.js): 1ª vez que esta tela agrupa
+    // cards em seções nomeadas, então só aparece quando há pelo menos 1
+    // (nunca uma seção vazia). As ações do card continuam TODAS presentes
+    // (decisão confirmada: "Banida" é só informativo, não desliga nada).
+    const bannedList = list.filter((i) => i.banned);
+    const restList = list.filter((i) => !i.banned);
+
+    const cardHtml = (i) => `
+      <div class="instance-card${i.banned ? ' banned' : ''}">
         <div class="instance-card-top">
           <div>
             <div class="instance-label">${escapeHtml(i.label)}</div>
@@ -1729,7 +1768,11 @@
           <span class="instance-stat">${ICON_CONTACTS} ${i.contactCount != null ? i.contactCount : '—'} contatos</span>
           <span class="instance-stat">${ICON_GROUPS} ${i.groupCount != null ? i.groupCount : '—'} grupos</span>
         </div>
-        ${i.needsAttention ? `
+        ${i.banned ? `
+          <div class="instance-banned">
+            <span><strong>Banida:</strong> o WhatsApp recusou o acesso a esse número por mais de 24h — provavelmente uma restrição/banimento da conta, não uma queda de conexão comum. Pode tentar reconectar ou reescanear o QR a qualquer momento (se a análise do WhatsApp liberar a conta), ou trocar de número se persistir.</span>
+          </div>
+        ` : i.needsAttention ? `
           <div class="instance-attention">
             <span><strong>Precisa de atenção:</strong> ${DISCONNECT_REASON_LABEL[i.lastDisconnectReason] || 'a conexão parou sozinha e não volta automaticamente'}. Pare de usar por algumas horas e tente reconectar, ou remova e pareie de novo se persistir.</span>
           </div>
@@ -1749,7 +1792,15 @@
           `}
         </div>
       </div>
-    `).join('')}</div>`;
+    `;
+
+    instancesWrap.innerHTML = `
+      ${bannedList.length ? `
+        <h2 class="instance-section-title instance-section-banned">Banida${bannedList.length > 1 ? 's' : ''} (${bannedList.length})</h2>
+        <div class="instances-grid">${bannedList.map(cardHtml).join('')}</div>
+      ` : ''}
+      ${restList.length ? `<div class="instances-grid">${restList.map(cardHtml).join('')}</div>` : ''}
+    `;
 
     // "Fora do ar há Xh" — calculado no client a partir de um timestamp
     // absoluto ISO (i.openConnectionEvent.startedAt), não sincronização de

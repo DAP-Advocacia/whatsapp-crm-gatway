@@ -10,6 +10,7 @@ const scheduledStore = require('../scheduledCampaigns');
 const scheduler = require('../scheduler');
 const instancesStore = require('../instances');
 const instanceHealthStore = require('../instanceHealthStore');
+const instanceBanStore = require('../instanceBanStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
@@ -315,6 +316,9 @@ function createWhatsappRouter({ sessions, broadcast }) {
       const needsOwnerName = list.some((i) => i.delegated);
       const employees = needsOwnerName ? await listEmployees() : null;
       const nameByOwnerId = employees ? new Map(employees.map((e) => [ownerIdFor(e.id), e.name])) : new Map();
+      // Instâncias "banidas" (ver src/instanceBanStore.js: forbidden aberto
+      // há mais de 24h) — 1 query pro lote inteiro, não 1 por instância.
+      const bannedSet = new Set((await instanceBanStore.listBannedNow()).map((e) => e.instanceId));
       const withStatus = await Promise.all(list.map(async (i) => {
         let gateway = null;
         let status = 'offline';
@@ -339,7 +343,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
         const openConnectionEvent = await instanceHealthStore.getOpenConnectionEvent(i.id);
         const ownerName = i.delegated ? (nameByOwnerId.get(i.ownerId) || null) : null;
         const hasHistory = sessionsWithHistory ? sessionsWithHistory.has(i.id) : undefined;
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, openConnectionEvent, ownerName, hasHistory };
+        const banned = bannedSet.has(i.id);
+        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, banned, openConnectionEvent, ownerName, hasHistory };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {

@@ -69,6 +69,22 @@ async function listConnectionEvents(instanceId, limit = 50) {
   return rows;
 }
 
+// Todas as janelas de 'attention' ainda ABERTAS, de QUALQUER instância,
+// filtrando pelos motivos pedidos — diferente das funções acima (que
+// sempre recebem 1 instanceId), esta varre a tabela inteira. Usada por
+// src/instanceBanStore.js (categoria "Banida" na aba Instâncias) e pelo
+// poller de aviso (src/instanceBanPoller.js) — mesma fonte de dado,
+// sem duplicar consulta.
+async function listOpenAttentionEvents(reasons) {
+  const { rows } = await pool.query(
+    `select id, instance_id as "instanceId", reason, started_at as "startedAt"
+     from instance_connection_events
+     where kind = 'attention' and ended_at is null and reason = any($1::text[])`,
+    [reasons]
+  );
+  return rows;
+}
+
 // `on conflict` — idempotente, seguro rodar mais de 1x no mesmo dia (o job
 // de snapshot em src/server.js roda a cada hora, só a última chamada do dia
 // prevalece).
@@ -104,6 +120,7 @@ module.exports = {
   closeOpenConnectionEvent,
   getOpenConnectionEvent,
   listConnectionEvents,
+  listOpenAttentionEvents,
   snapshotDailyMetrics,
   listMetricsDaily,
 };

@@ -1278,6 +1278,24 @@ número e escolher qual usar em cada conversa (chat) ou campanha:
     reaproveita 100% o que já existia (`needsAttention`/`loggedOut`/
     `lastDisconnectReason`, ver acima) — só passou a ser persistida e
     conectada ao dispatcher de alerta, nada novo do lado da conexão em si.
+- **Categoria "Banida"** (Parte FQ, 2026-09-01) — dentro de "precisa de
+  atenção", o motivo `forbidden` (403 — conta restrita/banida ou
+  credencial rejeitada) ganha uma seção visual própria e separada
+  quando aberto **há mais de 24h** (limiar alinhado ao prazo que o
+  próprio WhatsApp Business informa em revisão de conta), diferente de
+  `connectionReplaced`/`badSession` (que continuam só em "precisa de
+  atenção" comum, nunca viram "Banida"). Sem coluna nova — calculado a
+  cada `GET /instances` a partir de `instance_connection_events`
+  (`src/instanceBanStore.js::listBannedNow`); se a instância reconectar
+  de verdade, sai da categoria sozinha (o evento fecha, mesmo mecanismo
+  de sempre). `instances.html` agrupa os cards banidos numa seção
+  própria no topo (1ª vez que a tela agrupa em seções nomeadas) — as
+  ações do card (Tentar reconectar/Ver QR/Remover) continuam todas
+  presentes, "Banida" é só informativo. `src/instanceBanPoller.js`
+  (mesmo padrão de poller de `src/dealStagePoller.js`, ~20min) dispara
+  o mesmo alerta multicanal acima 1x por janela de banimento — pula
+  instâncias **órfãs** (removidas de `instances`, sem dono real pra
+  avisar) explicitamente.
 - A primeira instância de cada usuário é sempre a "Principal" (compatibilidade com
   quem já usava o app antes desta função existir — nenhum dado precisou ser migrado).
 - **Compartilhar acesso** (botão no card, só aparece pra quem é dono de verdade):
@@ -2221,7 +2239,7 @@ revelar que o recurso existe).
 | `team-metrics?session=` | GET | Desempenho por atendente de UMA instância (400 se `session` tiver mais de um id) — ver §9 "Painel de atendimento". `isManager` decidido no servidor, nunca vindo do client. |
 | `team-insights?session=&refresh=` | GET | Mesmo formato de `insights`, só que pro Painel de atendimento — cacheado 30min por `owner::session`. |
 | `sessions?session=` | GET | Status de uma instância (ou de todas, sem o parâmetro — uso interno). |
-| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `openConnectionEvent` (Alerta de instância caída, §14) + `ownerName` (nome do dono pelo ID do Bitrix, só resolvido/exibido pra instância DELEGADA — Parte EQ) — resposta também traz `limit`. |
+| `instances?owner=` | GET | Lista as instâncias do dono (cria a "Principal" automaticamente se não existir nenhuma). Cada item inclui `status`/`phone` + `contactCount`/`groupCount` + `needsAttention`/`lastDisconnectReason` + `banned` (categoria "Banida", Parte FQ — `forbidden` aberto há mais de 24h) + `openConnectionEvent` (Alerta de instância caída, §14) + `ownerName` (nome do dono pelo ID do Bitrix, só resolvido/exibido pra instância DELEGADA — Parte EQ) — resposta também traz `limit`. |
 | `instances` | POST | Body `{ owner, label }`. Cria uma instância nova e já inicia o pareamento (QR). 400 se o dono já tiver atingido `MAX_INSTANCES_PER_OWNER` (3, ver §14). |
 | `instances/:id` | PUT | Body `{ owner, label }`. Renomeia. |
 | `instances/:id?owner=` | DELETE | Desconecta e remove a instância. |

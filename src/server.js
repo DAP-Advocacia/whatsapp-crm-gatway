@@ -720,6 +720,12 @@ require('./scheduler').startPolling(sessions);
 // observada a partir de agora conta.
 require('./dealStagePoller').startPolling();
 
+// Varre a cada ~20min instâncias com 'forbidden' aberto há mais de 24h
+// (ver src/instanceBanStore.js) — dispara o alerta multicanal 1x por
+// janela de banimento (categoria "Banida" na aba Instâncias, ver GET
+// /instances). Critério e canal confirmados com o usuário.
+require('./instanceBanPoller').startPolling(sessions);
+
 // Fecha sozinha page_sessions "órfãs" (aba fechada sem o beacon de saída
 // disparar — crash, queda de luz, ver HANDOFF Parte CO) — sem isto,
 // ficariam com ended_at null pra sempre. Intervalo de 60s (mais frequente
