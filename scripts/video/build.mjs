@@ -37,7 +37,7 @@ const TIMELINE = [
   { slug: '03-campanha', kind: 'scene', file: '03-03-campanha.webm' },
   { slug: '04-agente-ia', kind: 'scene', file: '04-04-agente-ia.webm' },
   { slug: '05-configuracoes', kind: 'scene', file: '05-05-configuracoes.webm' },
-  { slug: '06-encerramento', kind: 'card', title: 'WhatsApp Gateway', subtitle: 'Desenvolvido por Daniel Costa' },
+  { slug: '06-encerramento', kind: 'card', title: 'WhatsApp Gateway', subtitle: 'Desenvolvido por Gabriel Alves' },
 ];
 
 function sh(cmd) {
