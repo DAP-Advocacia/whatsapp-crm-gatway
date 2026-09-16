@@ -497,18 +497,19 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // métricas diárias (ver src/instanceHealthStore.js). Diferente das
   // rotas de AÇÃO acima (reconnect/delete/put, restritas só ao DONO
   // real) — esta é uma rota de LEITURA, então aceita também DELEGADO
-  // (instance_delegates), coerente com "dono + delegados" ser a mesma
-  // audiência que recebe a notificação de queda (ver handleStatusForHealth
-  // em src/server.js). requireOwnerMatch só impede spoofing de identidade
-  // (o owner do query precisa bater com o token) — a checagem de posse
-  // de fato é a de baixo.
+  // (instance_delegates) E gestor por hierarquia automática do Bitrix
+  // (mesmo critério de assertOwnsSession/listAccessible — achado real
+  // 2026-09-16: um gestor via a instância do subordinado normalmente na
+  // listagem geral, mas o histórico dela dava "instância não encontrada"
+  // porque esta rota checava posse com uma regra própria, mais restrita,
+  // que nunca considerava hierarquia). requireOwnerMatch só impede
+  // spoofing de identidade (o owner do query precisa bater com o token) —
+  // a checagem de posse de fato é a de baixo.
   // ---------------------------------------------------------------
   router.get('/instances/:id/health', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
     const owner = req.query.owner;
     try {
-      const inst = await instancesStore.get(req.params.id);
-      const delegates = inst ? await instancesStore.listDelegates(req.params.id) : [];
-      const hasAccess = inst && (inst.ownerId === owner || delegates.some((d) => d.delegateOwnerId === owner));
+      const hasAccess = await assertOwnsSession(req.params.id, owner);
       if (!hasAccess) return res.status(404).json({ error: 'instância não encontrada' });
       const [openEvent, events, metrics] = await Promise.all([
         instanceHealthStore.getOpenConnectionEvent(req.params.id),
