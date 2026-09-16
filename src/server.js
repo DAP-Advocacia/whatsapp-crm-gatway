@@ -42,6 +42,8 @@ const { createAgentRouter } = require('./routes/agent');
 const { createInsightsRouter } = require('./routes/insights');
 const { createSatisfactionRouter } = require('./routes/satisfaction');
 const { createSatisfactionPublicRouter } = require('./routes/satisfactionPublic');
+const { createDealGroupTriggerRouter } = require('./routes/dealGroupTrigger');
+const dealGroupTrigger = require('./dealGroupTrigger');
 const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
@@ -70,6 +72,17 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
 const PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '');
 
 const app = express();
+// Confia em 1 proxy reverso na frente (Traefik/EasyPanel em produção,
+// ngrok em teste local) — sem isso, o express-rate-limit v8 LANÇA erro
+// (ERR_ERL_UNEXPECTED_X_FORWARDED_FOR) toda vez que vê X-Forwarded-For
+// sem saber se pode confiar nele, e a request nem chega nas rotas (achado
+// real testando o gatilho de grupo por etapa via túnel ngrok, 2026-09-15
+// — o mesmo problema já existia contra produção atrás do Traefik, só
+// nunca tinha aparecido de forma visível). `1` = confia só no proxy mais
+// próximo (o que está na borda), nunca "true" (confiaria em qualquer IP
+// que o cliente alegasse via header, abrindo brecha pra falsificar
+// X-Forwarded-For e furar o rate limit por IP).
+app.set('trust proxy', 1);
 // Limite alto porque imagem/áudio/vídeo de /send-media chega em base64 no corpo
 // JSON (base64 infla o tamanho original em ~33%; vídeo é o maior caso, por isso
 // o limite folgado).
@@ -925,6 +938,17 @@ app.get('/pesquisa/:slug', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/satisfaction-form.html'));
 });
 app.use('/api/satisfaction-public', createSatisfactionPublicRouter());
+
+// ---------------------------------------------------------------
+// Gatilho de grupo automático por etapa do Kanban — chamado por um Robô de
+// Automação do próprio Bitrix (servidor a servidor, nunca pelo navegador),
+// por isso fica fora de requireAuth: autenticação própria por token fixo
+// (DEAL_GROUP_TRIGGER_TOKEN) dentro do router (ver
+// src/routes/dealGroupTrigger.js). `sessions`/`broadcast` injetados aqui
+// pelo mesmo motivo de agentDispatch/insightGenerator/dapinho acima.
+// ---------------------------------------------------------------
+dealGroupTrigger.configure({ sessions, broadcast });
+app.use('/api/system/deal-group-trigger', createDealGroupTriggerRouter());
 
 // ---------------------------------------------------------------
 // Teste A/B — URL pública única que divide o tráfego 50/50 entre as duas

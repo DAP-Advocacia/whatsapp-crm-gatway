@@ -219,6 +219,25 @@ async function getWonStageId(categoryId) {
   return won ? won.STATUS_ID : null;
 }
 
+// Negócio completo por ID — usado por src/dealGroupTrigger.js pra ler
+// ASSIGNED_BY_ID/CONTACT_ID/STAGE_ID de uma vez (diferente de
+// listDealStages, que só busca ID/STAGE_ID/CATEGORY_ID em lote pro
+// poller). null se o negócio não existir/webhook indisponível.
+async function getDeal(dealId) {
+  return safeCall('crm.deal.get', { id: dealId });
+}
+
+// Telefone principal de um contato do CRM — nenhuma outra parte do projeto
+// lê contato por ID hoje (só cria, ver ensureBitrixContact acima), então
+// esta é a primeira leitura de PHONE existente. Bitrix devolve PHONE como
+// array (pode ter vários números/tipos); usa o primeiro. null se o contato
+// não existir, não tiver telefone cadastrado, ou webhook indisponível.
+async function getContactPhone(contactId) {
+  if (!contactId) return null;
+  const contact = await safeCall('crm.contact.get', { id: contactId });
+  return contact?.PHONE?.[0]?.VALUE || null;
+}
+
 module.exports = {
   ensureBitrixContact,
   createDealForLead,
@@ -227,4 +246,6 @@ module.exports = {
   getStageDistribution,
   listDealStages,
   getWonStageId,
+  getDeal,
+  getContactPhone,
 };

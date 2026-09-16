@@ -1,9 +1,14 @@
 node_modules/
 auth_session/
 auth_session_backup*/
+auth_session_local_test/
 data/
 .env
 *.log
+
+# config local do MCP (pode conter token/endereço específico da máquina,
+# não é do projeto) — ver .claude/ abaixo pelo mesmo motivo
+.mcp.json
 
 # repositório Git próprio, já publicado separadamente (github.com/DanielCosta1997/control-plane)
 control-plane/

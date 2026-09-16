@@ -267,14 +267,67 @@ async function getEmployeePhone(bitrixUserId) {
 // .name/.phone e ignoram campos extras — seguro). `null` se o usuário não
 // existir/HR indisponível — best-effort, quem chama trata como "não
 // resolvido".
+//
+// Prioridade de telefone WORK_PHONE > PERSONAL_MOBILE (2026-09-15,
+// confirmado consultando os 50 usuários ativos do portal: 27 têm
+// WORK_PHONE preenchido contra 17 com PERSONAL_MOBILE — o celular
+// pessoal é o campo menos usado aqui, ao contrário do que o comentário
+// original desta função assumia). Mudança deliberadamente GLOBAL: afeta
+// os 3 chamadores já existentes (cardGroup.js, agentDispatch.js,
+// emailAlert.js) além do gatilho de grupo por etapa
+// (dealGroupTrigger.js) — decisão confirmada com o usuário, mesmo
+// problema provavelmente já afetava os 3 fluxos antigos sem terem sido
+// notados.
 async function getEmployeeInfo(bitrixUserId) {
   const users = await callBitrixHR('user.get', { ID: bitrixUserId });
   if (!users || !users.length) return null;
   const u = users[0];
   return {
     name: [u.NAME, u.SECOND_NAME, u.LAST_NAME].filter(Boolean).join(' ') || null,
-    phone: u.PERSONAL_MOBILE || null,
+    phone: u.WORK_PHONE || u.PERSONAL_MOBILE || null,
     email: u.EMAIL || null,
+  };
+}
+
+// Campos customizados de PERFIL DE USUÁRIO (não de negócio/CRM) que
+// guardam a cadeia de responsabilidade "[GER]/[DIR] RESPONSÁVEL" de cada
+// funcionário — usados pelo gatilho de grupo por etapa
+// (dealGroupTrigger.js) pra achar o Gerente/Diretor de um Responsável
+// específico. Nomes técnicos (UF_USR_*) resolvidos manualmente via
+// user.fields em 2026-09-15 (não há como descobrir isso programaticamente
+// sem já saber o rótulo em texto a procurar). Existe também um 3º campo,
+// "[CEO] RESPONSÁVEL" (UF_USR_1785964093400) — fora do escopo hoje (CEO
+// não está na ATA "Grupo de WhatsApp integrado ao processo comercial"),
+// não resolvido aqui de propósito; se entrar no escopo depois, é o mesmo
+// padrão de manager/director abaixo. Formato do valor: string
+// "NOME COMPLETO | ID", não um ID puro nem array — extrai só o `\| (\d+)$`
+// final.
+const RESPONSIBLE_CHAIN_FIELDS = {
+  manager: 'UF_USR_1785964131255', // "[GER] RESPONSÁVEL"
+  director: 'UF_USR_1785964110500', // "[DIR] RESPONSÁVEL"
+};
+
+function extractUserIdFromChainField(raw) {
+  if (!raw) return null;
+  const match = String(raw).match(/\|\s*(\d+)\s*$/);
+  return match ? match[1] : null;
+}
+
+// Gerente/Diretor responsável de UM funcionário, direto do campo
+// customizado do PRÓPRIO perfil dele (não da árvore de departamentos,
+// que resolve por hierarquia de departamento/UF_HEAD; este aqui é a fonte
+// que reflete o organograma comercial real, confirmado com o usuário que
+// a árvore de departamentos do Bitrix não mapeia isso de forma
+// confiável). Cada chave pode vir `null` se o campo não estiver
+// preenchido pra esse funcionário — comum, nem todo mundo tem os 2
+// preenchidos.
+async function getResponsibleChain(bitrixUserId) {
+  const users = await callBitrixHR('user.get', { ID: bitrixUserId });
+  if (!users || !users.length) return { managerUserId: null, directorUserId: null };
+  const u = users[0];
+  return {
+    managerUserId: extractUserIdFromChainField(u[RESPONSIBLE_CHAIN_FIELDS.manager]),
+    directorUserId: extractUserIdFromChainField(u[RESPONSIBLE_CHAIN_FIELDS.director]),
   };
 }
 
@@ -292,6 +345,7 @@ function normalizeBrazilPhone(raw) {
 
 module.exports = {
   getSubordinates,
+  getResponsibleChain,
   ensureHierarchyCacheFresh,
   refreshHierarchyCache,
   listEmployees,

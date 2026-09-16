@@ -562,6 +562,21 @@ class WhatsAppGateway extends EventEmitter {
   }
 
   /**
+   * Promove um participante já no grupo a admin (ex: gatilho de grupo por
+   * etapa do negócio, src/dealGroupTrigger.js, que promove o número fixo do
+   * escritório). Quem CRIA o grupo (esta própria instância, ver
+   * createGroup acima) já nasce admin automaticamente — isto é só para
+   * promover alguém ALÉM do criador.
+   */
+  async promoteParticipant(groupId, phone) {
+    if (this.status !== 'online') {
+      throw new Error('WhatsApp não está conectado no momento');
+    }
+    const jid = this._phoneToJid(phone);
+    await this.sock.groupParticipantsUpdate(groupId, [jid], 'promote');
+  }
+
+  /**
    * Telefones dos participantes de um grupo (usado pra achar "grupos em
    * comum" com um contato, no painel de detalhes do Chat). Mesma questão de
    * LID já conhecida deste projeto (ver diagnóstico do bug de recebimento no
