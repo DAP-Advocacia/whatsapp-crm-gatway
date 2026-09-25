@@ -1,0 +1,62 @@
+/*
+ * Fase 0 do redesign (ver plano em curso) — este arquivo espelha
+ * FIELMENTE a paleta que já está em produção hoje (dourado/escuro),
+ * extraída do :root de public/dashboard.html. Nenhuma cor muda nesta
+ * fase — o objetivo aqui é só criar o arquivo compartilhado e linká-lo
+ * nas páginas ANTES do <style> inline, sem nenhum efeito visual (o
+ * bloco inline continua vencendo a cascata até ser removido por página
+ * numa fase posterior).
+ *
+ * Tokens novos (--accent, --note, --success, --danger, --insight-bg
+ * etc.) e o tema data-theme="dark" entram numa fase futura, junto da
+ * repintura de verdade. Por ora só os tokens que já existem.
+ */
+
+:root{
+  --bg: #15120d;
+  --surface: #1d1812;
+  --surface-2: #241d15;
+  --border: #34291a;
+
+  --gold: #d8ab4f;
+  --gold-rgb: 216,171,79;
+  --gold-dim: #8a6b32;
+
+  --text: #f3ede2;
+  --text-muted: #a89a83;
+  --text-faint: #6e6353;
+
+  --green: #4caf6e;
+  --green-rgb: 76,175,110;
+  --red: #d9685f;
+  --red-rgb: 217,104,95;
+
+  --radius: 14px;
+  --sidebar-w: 236px;
+  --sidebar-w-collapsed: 68px;
+  --footer-h: 46px;
+  --header-h: 90px;
+
+  --bubble-mine: var(--gold);
+  --bubble-mine-text: #1a1408;
+  --bubble-theirs: #261f16;
+
+  /* Exclusiva do Copiloto Comercial (chat.html) — ver docs/design-system.md */
+  --insight: #78aadc;
+  --insight-rgb: 120,170,220;
+}
+
+/* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito
+   ANTES do primeiro paint. Só fundo/superfície/texto mudam entre os
+   dois temas — a cor de destaque (--gold etc.) continua igual nos
+   dois, por decisão de produto anterior (será revisitada na fase de
+   repintura). */
+html[data-theme="light"]{
+  --bg: #f7f4ee;
+  --surface: #ffffff;
+  --surface-2: #eee8db;
+  --border: #ddd4c0;
+  --text: #2a2318;
+  --text-muted: #6b6152;
+  --text-faint: #9a8f7a;
+}

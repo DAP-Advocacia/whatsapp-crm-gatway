@@ -1,0 +1,141 @@
+/*
+ * Fase 0 do redesign — núcleo dos balões de conversa (mine/theirs, nota
+ * interna, insight de IA), extraído de public/chat.html. Cobre o que já
+ * foi auditado nesta fase; o restante do CSS de chat.html (mídia,
+ * reações, citação, composer) migra para cá quando chat.html for
+ * convertido a consumir estes arquivos (fase de repintura), não nesta
+ * fundação. Sem mudança visual nesta fase.
+ */
+
+.bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
+.bubble-row.mine{ justify-content: flex-end; }
+.bubble-row.theirs{ justify-content: flex-start; }
+.bubble-row.has-reaction{ margin-bottom: 14px; }
+
+.bubble{
+  max-width: min(60%, 480px); width: fit-content; padding: 9px 12px 8px; font-size: 13.5px; line-height: 1.45;
+  border-radius: 16px; word-wrap: break-word; white-space: pre-wrap;
+  position: relative; box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16);
+}
+.bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 4px; color: var(--text); }
+/* Borda sutil só no tema claro — --bubble-theirs (quase branco) contra
+   --bg (bege claro) tem contraste mais sutil que no tema escuro. */
+html[data-theme="light"] .bubble-row.theirs .bubble{ border: 1px solid var(--border); }
+.bubble code{ background:rgba(0,0,0,.08); padding:1px 4px; border-radius:4px; font-family:'SFMono-Regular', Consolas, monospace; font-size:.92em; }
+.bubble-row.theirs .bubble code{ background:rgba(var(--dots-rgb),.08); }
+.bubble-row.mine .bubble{
+  background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
+.bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; }
+
+.bubble--typing{ display:flex; align-items:center; gap:4px; padding:12px 14px; }
+.typing-dot{ width:6px; height:6px; border-radius:50%; background: var(--text-faint); animation: typing-bounce 1.2s infinite ease-in-out; }
+.typing-dot:nth-child(2){ animation-delay: .15s; }
+.typing-dot:nth-child(3){ animation-delay: .3s; }
+@keyframes typing-bounce{ 0%, 60%, 100%{ transform: translateY(0); opacity:.5; } 30%{ transform: translateY(-4px); opacity:1; } }
+
+.reaction-badge{
+  position: absolute; bottom: -11px; right: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 100px;
+  padding: 1px 6px; font-size: 13px; line-height: 1.4; box-shadow: 0 1px 3px rgba(0,0,0,.35);
+}
+.bubble-row.theirs .reaction-badge{ right: auto; left: 10px; }
+.reaction-badge--mine{ cursor: pointer; }
+.reaction-badge--mine:hover{ filter: brightness(1.3); }
+
+.bubble.bubble--media{ padding: 3px 3px 8px; }
+.media-frame{ position: relative; line-height: 0; border-radius: 11px; overflow: hidden; background: #000; }
+.media-frame img, .media-frame video{ display: block; width: 100%; max-width: 260px; max-height: 320px; object-fit: cover; background: #000; }
+.caption-text{ padding: 7px 4px 0; }
+
+/* ---------- Nota interna humana ---------- */
+.note-row{ display:flex; margin: 6px 0; }
+.bubble-note{
+  width: 100%; background: rgba(var(--gold-rgb),.07); border: 1px solid rgba(var(--gold-rgb),.25);
+  border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--text);
+}
+.bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--gold-dim); margin-bottom:3px; }
+.bubble-note-head span{ flex:1; }
+.bubble-note-text{ white-space:pre-wrap; word-break:break-word; }
+.bubble-note-time{ font-size:10px; color:var(--text-faint); margin-top:4px; }
+.bubble-note--done{ opacity:.55; }
+.bubble-note--done .bubble-note-text{ text-decoration: line-through; text-decoration-color: var(--gold-dim); }
+.note-action-btn{ background:none; border:none; color:var(--gold-dim); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
+.note-action-btn:hover{ opacity:1; }
+.note-edited-tag{ background:none; border:none; color:var(--text-faint); font-size:10px; text-decoration:underline; cursor:pointer; padding:0; font-family:inherit; }
+.bubble-note--editing{ background: rgba(var(--gold-rgb),.1); }
+.bubble-note-edit-input{
+  width:100%; resize:vertical; min-height:60px; border-radius:8px; font-size:13px; padding:8px 10px;
+  border:1px solid rgba(var(--gold-rgb),.35); background:rgba(var(--gold-rgb),.06); color:var(--text); font-family:inherit;
+}
+.bubble-note-edit-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+
+.rev-item{ padding:8px 0; border-bottom:1px solid var(--border); }
+.rev-item:last-child{ border-bottom:none; }
+.rev-text{ font-size:12.5px; color:var(--text); white-space:pre-wrap; word-break:break-word; }
+.rev-time{ font-size:10px; color:var(--text-faint); margin-top:3px; }
+
+/* ---------- Insight de IA (Copiloto Comercial) ---------- */
+.bubble-insight{
+  width: 100%; background: rgba(var(--insight-rgb),.08); border: 1px solid rgba(var(--insight-rgb),.25);
+  border-left: 3px solid rgba(var(--insight-rgb),.6); border-radius: 10px; padding: 8px 12px;
+  font-size: 13px; color: var(--text);
+}
+.bubble-insight--low{ border-left-color: var(--text-faint); }
+.bubble-insight--sent{ opacity:.7; }
+.bubble-insight-head{ display:flex; align-items:center; gap:6px; margin-bottom:4px; flex-wrap:wrap; }
+.bubble-insight-head svg{ width:14px; height:14px; color:var(--insight); flex-shrink:0; }
+.bubble-insight-topic{
+  font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+  color:var(--insight); background:rgba(var(--insight-rgb),.15); border-radius:5px; padding:2px 6px;
+}
+.bubble-insight-title{ font-size:12.5px; font-weight:600; color:var(--text); }
+.bubble-insight-text{ white-space:pre-wrap; word-break:break-word; margin-bottom:6px; }
+.bubble-insight-actions{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.insight-action-btn{
+  background:rgba(var(--insight-rgb),.12); border:1px solid rgba(var(--insight-rgb),.3); color:var(--text-muted);
+  border-radius:6px; cursor:pointer; font-size:11px; padding:3px 8px; font-family:inherit;
+}
+.insight-action-btn:hover{ color:var(--text); border-color:rgba(var(--insight-rgb),.5); }
+.insight-action-btn:disabled{ opacity:.4; cursor:not-allowed; }
+.insight-action-btn--active{ background:rgba(var(--insight-rgb),.3); color:var(--text); }
+
+/* ---------- Ações/citação sobre a bolha ---------- */
+.bubble-actions-wrap{ display: none; align-items: center; gap: 3px; padding-bottom: 6px; flex-shrink: 0; }
+.bubble-row:hover .bubble-actions-wrap, .bubble-actions-wrap.picker-open{ display: flex; }
+.bubble-action-btn{
+  width: 25px; height: 25px; border-radius: 50%; border: none; background: var(--surface-2);
+  color: var(--text-muted); display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 12.5px; padding: 0; transition: background .15s, color .15s;
+}
+.bubble-action-btn:hover{ background: var(--gold-dim); color: var(--bg); }
+.emoji-picker{ display: flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 100px; padding: 3px; }
+.emoji-opt{ width: 25px; height: 25px; border: none; background: none; font-size: 15px; cursor: pointer; border-radius: 50%; }
+.emoji-opt:hover{ background: var(--surface); transform: scale(1.15); }
+
+.quoted-block{
+  border-left: 3px solid var(--gold-dim); background: rgba(0,0,0,.14); border-radius: 6px;
+  padding: 5px 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; cursor: pointer;
+}
+.bubble-row.theirs .quoted-block{ background: rgba(var(--dots-rgb),.06); border-left-color: var(--gold); }
+.quoted-author{ font-weight: 600; color: var(--gold); margin-bottom: 1px; font-size: 11.5px; }
+.quoted-text{
+  opacity: .8; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.quoted-media-row{ display:flex; align-items:center; gap:5px; opacity:.8; }
+.quoted-media-row svg{ width:13px; height:13px; flex-shrink:0; }
+.quoted-block--unknown{ font-style: italic; opacity: .65; cursor: default; }
+.bubble-row.flash .bubble{ outline: 2px solid var(--gold); outline-offset: 1px; }
+
+.reply-preview-bar{
+  display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  background: var(--surface-2); border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.reply-preview-bar[hidden]{ display: none; }
+.reply-preview-bar .bar-icon{ color: var(--gold); flex-shrink: 0; }
+.reply-preview-body{ flex: 1; min-width: 0; }
+.reply-preview-author{ font-size: 11.5px; font-weight: 600; color: var(--gold); }
+.reply-preview-text{ font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
