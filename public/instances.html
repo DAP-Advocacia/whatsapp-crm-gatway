@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Instâncias · WhatsApp Gateway</title>
+<title>Conexões do WhatsApp · WhatsApp Gateway</title>
 <!-- Fase 0 do redesign (ver plano em curso) — arquivos compartilhados
      linkados ANTES do <style> inline, de propósito: enquanto o bloco
      inline abaixo existir, ele vence a cascata e nada muda visualmente
@@ -686,8 +686,8 @@
     </a>
     <a href="/instances.html" class="nav-item active">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
-      <span class="nav-label">Instâncias</span>
-      <span class="nav-tip">Instâncias</span>
+      <span class="nav-label">Conexões do WhatsApp</span>
+      <span class="nav-tip">Conexões do WhatsApp</span>
     </a>
     <a href="/apresentacao.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
@@ -763,12 +763,12 @@
 <div class="toast-stack" id="toastStack"></div>
 
 <div id="app">
-  <h1>Minhas Instâncias</h1>
+  <h1>Minhas Conexões do WhatsApp</h1>
   <p class="subtitle">Conecte mais de um número de WhatsApp e escolha qual usar em cada conversa ou campanha.</p>
 
   <div class="panel">
     <div class="panel-head">
-      <h2>Instâncias conectadas <span id="instanceCount" style="font-weight:400;font-size:13px;color:var(--text-faint);"></span></h2>
+      <h2>Conexões ativas <span id="instanceCount" style="font-weight:400;font-size:13px;color:var(--text-faint);"></span></h2>
       <button class="btn" id="newInstanceBtn">+ Nova instância</button>
     </div>
     <div id="instancesWrap">
@@ -1173,7 +1173,7 @@
 
 <div class="overlay shortcuts-modal" id="shortcutsModal">
   <div class="modal">
-    <h3>Atalhos e recursos — Instâncias</h3>
+    <h3>Atalhos e recursos — Conexões do WhatsApp</h3>
     <div id="shortcutsBody"></div>
     <div class="shortcuts-footer-check">
       <input type="checkbox" id="shortcutsNoAutoOpen">
@@ -1567,7 +1567,7 @@
     notifiedAttentionSessions.add(sessionId);
     try {
       new Notification(`Instância "${inst.label}" precisa de atenção`, {
-        body: 'A conexão parou de tentar reconectar sozinha — veja o card em Instâncias.',
+        body: 'A conexão parou de tentar reconectar sozinha — veja o card abaixo.',
       });
     } catch { /* iframe pode bloquear silenciosamente — Central de Notificações garante o registro */ }
   }

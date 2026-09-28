@@ -598,7 +598,7 @@
   .bar-row .bar-fill{ height:100%; background: var(--gold); border-radius: 100px; min-width: 4px; }
   .bar-row .bar-count{ width: 38px; text-align:right; color: var(--text); flex-shrink:0; font-variant-numeric: tabular-nums; font-weight: 600; }
 
-  /* ---------- Donut (Status das Instâncias) ---------- */
+  /* ---------- Donut (Status das Conexões) ---------- */
   .donut-panel-body{ display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
   .donut-wrap{ position: relative; flex-shrink: 0; width: 140px; height: 140px; }
   .donut-svg{ display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
@@ -970,8 +970,8 @@
     </a>
     <a href="/instances.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
-      <span class="nav-label">Instâncias</span>
-      <span class="nav-tip">Instâncias</span>
+      <span class="nav-label">Conexões do WhatsApp</span>
+      <span class="nav-tip">Conexões do WhatsApp</span>
     </a>
     <a href="/apresentacao.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
@@ -1983,10 +1983,10 @@
         info: 'Tempo médio de resposta || Média do intervalo entre uma mensagem recebida e a primeira resposta enviada depois dela, em todas as conversas. || Na prática: quanto o cliente espera. Aqui, menos é melhor — por isso o delta fica verde quando o tempo cai.',
       },
       {
-        icon: 'activity', label: 'Instâncias no ar', key: null, invert: false,
+        icon: 'activity', label: 'Conexões no ar', key: null, invert: false,
         value: totalInst == null ? '—' : `${onlineInst}/${totalInst}`,
         context: totalInst == null ? 'indisponível' : (totalInst === 1 ? 'de 1 conectada' : `de ${totalInst} conectadas`),
-        info: 'Instâncias no ar || Quantos números de WhatsApp da conta estão com a sessão conectada agora, sobre o total de instâncias cadastradas. || Na prática: se um número cai, as mensagens dele param de entrar e sair até religar. O painel "Status das instâncias" abaixo detalha cada uma.',
+        info: 'Conexões no ar || Quantos números de WhatsApp da conta estão com a sessão conectada agora, sobre o total de conexões cadastradas. || Na prática: se um número cai, as mensagens dele param de entrar e sair até religar. O painel "Status das conexões" abaixo detalha cada uma.',
       },
     ];
 
@@ -2448,24 +2448,24 @@
     `;
   }
 
-  // Instâncias com problemas — needsAttention OU offline. O shape do
+  // Conexões com problemas — needsAttention OU offline. O shape do
   // backend traz lastDisconnectReason (pode ser null); NÃO traz uma
   // data de "desde quando" no modo demo/comum (openConnectionEvent
   // existe mas nem sempre preenchido) — mostro o motivo quando houver,
   // sem inventar "desde <data>".
   function renderProblemInstances(instances) {
-    const INFO = 'Instâncias com problemas || Números de WhatsApp que estão fora do ar agora — desconectados ou com erro de conexão que o sistema não consegue resolver sozinho. || Na prática: enquanto um número está aqui, ele não envia nem recebe nada. Abra a tela Instâncias para religar.';
+    const INFO = 'Conexões com problemas || Números de WhatsApp que estão fora do ar agora — desconectados ou com erro de conexão que o sistema não consegue resolver sozinho. || Na prática: enquanto um número está aqui, ele não envia nem recebe nada. Abra a tela Conexões do WhatsApp para religar.';
     if (!Array.isArray(instances)) {
-      return `<div class="live-card"><div class="live-card-head"><h3>Instâncias com problemas ${infoIcon(INFO)}</h3></div><p class="empty">Não foi possível carregar.</p></div>`;
+      return `<div class="live-card"><div class="live-card-head"><h3>Conexões com problemas ${infoIcon(INFO)}</h3></div><p class="empty">Não foi possível carregar.</p></div>`;
     }
     const problems = instances.filter((i) => i.needsAttention || i.status === 'offline');
     if (!problems.length) {
       return `
         <div class="live-card">
-          <div class="live-card-head"><h3>Instâncias com problemas ${infoIcon(INFO)}</h3></div>
+          <div class="live-card-head"><h3>Conexões com problemas ${infoIcon(INFO)}</h3></div>
           <div class="live-empty">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            Todas as instâncias operando normalmente.
+            Todas as conexões operando normalmente.
           </div>
         </div>
       `;
@@ -2476,8 +2476,8 @@
       const reason = i.lastDisconnectReason
         ? `Motivo: ${String(i.lastDisconnectReason)}`
         : (i.needsAttention
-          ? 'O WhatsApp recusou a reconexão automática. Reconecte pela tela Instâncias.'
-          : 'Reconecte pela tela Instâncias.');
+          ? 'O WhatsApp recusou a reconexão automática. Reconecte pela tela Conexões do WhatsApp.'
+          : 'Reconecte pela tela Conexões do WhatsApp.');
       return `
       <div class="live-prob">
         <span class="live-prob-icon">
@@ -2494,7 +2494,7 @@
     return `
       <div class="live-card">
         <div class="live-card-head">
-          <h3>Instâncias com problemas ${infoIcon(INFO)}</h3>
+          <h3>Conexões com problemas ${infoIcon(INFO)}</h3>
           <span class="live-card-count" style="background:rgba(var(--red-rgb),.14);color:var(--red);">${problems.length}</span>
         </div>
         <div class="live-list">${body}</div>
@@ -2638,8 +2638,8 @@
     }
   }
 
-  // Estado das instâncias do dono — alimenta o KPI "Instâncias no ar", o
-  // donut "Status das instâncias" e o card "Instâncias com problemas".
+  // Estado das instâncias do dono — alimenta o KPI "Conexões no ar", o
+  // donut "Status das conexões" e o card "Conexões com problemas".
   // Poll próprio (não depende do de métricas). Falha aqui degrada só
   // esses 3 blocos (viram "indisponível"), nunca derruba o resto.
   async function loadInstances() {

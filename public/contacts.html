@@ -571,8 +571,8 @@
     </a>
     <a href="/instances.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
-      <span class="nav-label">Instâncias</span>
-      <span class="nav-tip">Instâncias</span>
+      <span class="nav-label">Conexões do WhatsApp</span>
+      <span class="nav-tip">Conexões do WhatsApp</span>
     </a>
     <a href="/apresentacao.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
@@ -654,7 +654,7 @@
   <div class="panel">
     <label class="field-label" for="instanceSelect">Instância de WhatsApp</label>
     <select id="instanceSelect"><option value="">Carregando instâncias…</option></select>
-    <p class="hint">Contatos e listas agora são compartilhados entre todas as suas instâncias — se uma cair, os mesmos contatos aparecem ao conectar outra. Este seletor afeta só a seção "Grupos do WhatsApp" abaixo, que é mesmo específica de cada número — <a href="/instances.html" style="color:var(--gold)">gerencie ou conecte outra em Instâncias</a>.</p>
+    <p class="hint">Contatos e listas agora são compartilhados entre todas as suas instâncias — se uma cair, os mesmos contatos aparecem ao conectar outra. Este seletor afeta só a seção "Grupos do WhatsApp" abaixo, que é mesmo específica de cada número — <a href="/instances.html" style="color:var(--gold)">gerencie ou conecte outra em Conexões do WhatsApp</a>.</p>
   </div>
 
   <div class="panel">
@@ -1397,7 +1397,7 @@
       const data = await res.json();
       const list = data.instances || [];
       if (!list.length) {
-        instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Instâncias</option>';
+        instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Conexões do WhatsApp</option>';
         return;
       }
       instanceSelect.innerHTML = list.map((i) => `

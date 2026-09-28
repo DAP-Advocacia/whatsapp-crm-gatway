@@ -389,7 +389,7 @@
   .users-filters select{ width:auto; min-width:170px; flex:1 1 170px; }
   .users-filters .btn{ flex:0 0 auto; }
 
-  /* Busca + botão de ação lado a lado (ex: aba Instâncias) — mesmo
+  /* Busca + botão de ação lado a lado (ex: aba Conexões do WhatsApp) — mesmo
      princípio de quebra do .users-filters acima (sem flex-wrap, o botão
      fica espremido contra o input em tela estreita, já que
      input{width:100%} disputa o espaço todo dentro do flex). Classe
@@ -449,7 +449,7 @@
      com print (2026-08-12). Percentuais somam 100%; "Usuário" e "Conta"
      (nome+cargo, e-mail) recebem mais espaço por serem o conteúdo mais
      longo, "Online"/ações ficam com o mínimo confortável. Coluna
-     "Instâncias WhatsApp" (unificada 2026-08-28, Parte FG) inserida na
+     "Conexões WhatsApp" (unificada 2026-08-28, Parte FG) inserida na
      3ª posição — larguras das 8 colunas redistribuídas nessa mesma
      mudança, não só acrescentada por cima da distribuição antiga de 7.*/
   #usersTable th:nth-child(1), #usersTable td:nth-child(1){ width:20%; }
@@ -744,8 +744,8 @@
     </a>
     <a href="/instances.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
-      <span class="nav-label">Instâncias</span>
-      <span class="nav-tip">Instâncias</span>
+      <span class="nav-label">Conexões do WhatsApp</span>
+      <span class="nav-tip">Conexões do WhatsApp</span>
     </a>
     <a href="/apresentacao.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span>
@@ -903,7 +903,7 @@
     <div id="usersActiveFilters" style="display:none; margin-bottom:12px; font-size:12px; color:var(--text-muted);"></div>
     <table class="admin-table" id="usersTable">
       <thead>
-        <tr><th>Usuário</th><th>Conta</th><th>Instâncias WhatsApp</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
+        <tr><th>Usuário</th><th>Conta</th><th>Conexões WhatsApp</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
       </thead>
       <tbody id="usersBody">
         <tr><td colspan="8" class="skeleton-row">Carregando…</td></tr>
@@ -1705,7 +1705,7 @@
       if (window.showToast) window.showToast('Nenhum usuário pra exportar.', 'error');
       return;
     }
-    const header = ['Nome', 'E-mail', 'Cargo', 'Owner ID', 'Online', 'Instâncias WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
+    const header = ['Nome', 'E-mail', 'Cargo', 'Owner ID', 'Online', 'Conexões WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
     const lines = rows.map((u) => [
       u.name || '',
       u.email || '',
