@@ -22,7 +22,7 @@
   // ao servidor), aplicada ANTES do primeiro paint pra nunca piscar o
   // tema errado. Padrão 'dark' se nunca escolhido (comportamento atual
   // do projeto, sem mudança pra quem não mexer no switch novo).
-  if (localStorage.getItem('theme') === 'light') {
+  if (localStorage.getItem('theme') !== 'dark') {
     document.documentElement.setAttribute('data-theme', 'light');
   }
   // Paleta personalizada REMOVIDA no redesign visual (Fase 1, 2026-09-25)
@@ -32,38 +32,61 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg: #15120d;
-    --surface: #1d1812;
-    --surface-2: #241d15;
-    --border: #34291a;
-    --gold: #d8ab4f;
-    --gold-rgb: 216,171,79;
-    --gold-dim: #8a6b32;
-    /* Fase 2 do redesign: token semântico próprio pra nota interna
-       humana, isolado de --gold (cor de marca). Hoje aponta pros mesmos
-       valores — zero mudança visual — mas libera a repintura de --gold
-       sem afetar .bubble-note* e vice-versa. Ver docs/design-system.md. */
-    --note: var(--gold);
-    --note-rgb: var(--gold-rgb);
-    --note-accent: var(--gold-dim);
-    --text: #f3ede2;
-    --text-muted: #a89a83;
-    --text-faint: #6e6353;
-    --green: #4caf6e;
-    --green-rgb: 76,175,110;
-    --red: #d9685f;
-    --red-rgb: 217,104,95;
+    /* Fase 3 do redesign (2026-09-28) — paleta nova estilo WhatsApp.
+       Tema claro é o padrão agora (ver script de boot no <head>); este
+       bloco :root traz os valores do tema ESCURO, sobrepostos pelo bloco
+       html[data-theme="light"] logo abaixo quando o padrão se aplica.
+       --gold/--gold-dim/--gold-rgb viram apelidos de --accent pra não
+       reescrever as dezenas de seletores que ainda os usam neste arquivo
+       (cosmético, ver Fase 6 do plano). */
+    --bg: #0b141a;
+    --surface: #111b21;
+    --surface-2: #202c33;
+    --border: #2a3942;
+
+    --accent: #00a884;
+    --accent-rgb: 0,168,132;
+    --accent-hover: #02c39a;
+    --on-accent: #111b21;
+    --accent-soft: #0b3b32;
+
+    --gold: var(--accent);
+    --gold-rgb: var(--accent-rgb);
+    --gold-dim: var(--accent-hover);
+    --gold-on-light: var(--accent);
+
+    /* Nota interna humana — âmbar, isolado de --gold/--accent desde a
+       Fase 2. Só a nota muda de tom entre os temas (contraste contra
+       fundo escuro exige um âmbar mais claro que no tema claro). */
+    --note: #f2c14e;
+    --note-rgb: 242,193,78;
+    --note-accent: #f2c14e;
+
+    --text: #e9edef;
+    --text-muted: #8696a0;
+    --text-faint: #667781;
+
+    --green: #3fb950;
+    --green-rgb: 63,185,80;
+    --red: #f15c6d;
+    --red-rgb: 241,92,109;
+
     /* Copiloto Comercial (insights de IA, 2026-08-27) — tom azulado
-       PRÓPRIO, deliberadamente distinto de --gold (já significa "nota
-       interna humana") e --green/--red (já significam positivo/negativo
-       de métrica). Nenhum token existente serve pra essa 3ª categoria
-       semântica. Ver docs/design-system.md. */
-    --insight: #78aadc;
-    --insight-rgb: 120,170,220;
+       PRÓPRIO, deliberadamente distinto de --accent (marca), --note
+       (nota humana) e --green/--red (positivo/negativo de métrica).
+       Ver docs/design-system.md. */
+    --insight: #53a6e8;
+    --insight-rgb: 83,166,232;
+
     --radius: 14px;
-    --bubble-mine: var(--gold);
-    --bubble-mine-text: #1a1408;
-    --bubble-theirs: #261f16;
+    --bubble-mine: #005c4b;
+    --bubble-mine-text: #e9edef;
+    --bubble-theirs: #202c33;
+    --bubble-meta: #8696a0;
+    --tick-read: #53bdeb;
+    --chat-wallpaper: #0b141a;
+    --shadow-bubble: 0 1px .5px rgba(11,20,26,.4);
+
     --footer-h: 46px;
     --header-h: 90px;
     --chat-tabs-h: 0px; /* vira 33px via body.has-chat-tabs — ver #chatTabs no JS */
@@ -73,49 +96,52 @@
        html[data-theme="light"] abaixo) senão fica invisível sobre um
        fundo já quase branco. */
     --dots-rgb: 255,255,255;
-    /* --gold já tem contraste de sobra contra fundo escuro (~8.8:1) — só
-       existe pra o tema claro precisar de um tom mais escuro pro mesmo
-       papel (ver --gold-on-light em html[data-theme="light"] abaixo).
-       Aqui aponta pro próprio --gold, pra código que usa
-       var(--gold-on-light) funcionar igual nos dois temas sem duplicar
-       seletor. */
-    --gold-on-light: var(--gold);
   }
-  /* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito por
-     applyTheme() antes do primeiro paint (ver script no <head>, mesmo
-     padrão de cache-antes-do-paint já usado pra paleta pessoal). Só
-     FUNDO/SUPERFÍCIE/TEXTO mudam entre os dois temas — a cor de DESTAQUE
-     (--gold/--gold-dim/--green/--red, incl. presets de Configurações)
-     continua IGUAL nos dois, por decisão de produto (nunca mais controla
-     --bg: essa responsabilidade é só do tema agora).
-     --bubble-theirs/--bubble-mine-text também mudam (bolha do contato e
-     texto sobre a bolha própria dependem do contraste de fundo). */
+  /* Tema claro (2026-08-30, repintado na Fase 3 do redesign) —
+     [data-theme="light"] no <html>, escrito por applyTheme() antes do
+     primeiro paint (ver script no <head>). É o tema PADRÃO agora. */
   html[data-theme="light"]{
-    --bg: #f7f4ee;
+    --bg: #f0f2f5;
     --surface: #ffffff;
-    --surface-2: #eee8db;
-    --border: #ddd4c0;
-    --text: #2a2318;
-    --text-muted: #6b6152;
-    --text-faint: #9a8f7a;
-    --bubble-mine-text: #1a1408;
-    --bubble-theirs: #fbfaf7;
+    --surface-2: #f5f6f6;
+    --border: #e9edef;
+
+    --accent: #008069;
+    --accent-rgb: 0,128,105;
+    --accent-hover: #017561;
+    --on-accent: #ffffff;
+    --accent-soft: #d9fdd3;
+
+    --gold: var(--accent);
+    --gold-rgb: var(--accent-rgb);
+    --gold-dim: var(--accent-hover);
+    --gold-on-light: var(--accent-hover);
+
+    --note: #8a5a00;
+    --note-rgb: 138,90,0;
+    --note-accent: #e0a800;
+
+    --text: #111b21;
+    --text-muted: #54656f;
+    --text-faint: #8696a0;
+
+    --green: #1a7f37;
+    --green-rgb: 26,127,55;
+    --red: #d32f2f;
+    --red-rgb: 211,47,47;
+
+    --insight: #0a6ebd;
+    --insight-rgb: 10,110,189;
+
+    --bubble-mine: #d9fdd3;
+    --bubble-mine-text: #111b21;
+    --bubble-theirs: #ffffff;
+    --bubble-meta: #667781;
+    --tick-read: #53bdeb;
+    --chat-wallpaper: #efeae2;
+    --shadow-bubble: 0 1px .5px rgba(11,20,26,.13);
+
     --dots-rgb: 0,0,0;
-    /* Achado real do design-system-checker-agent (2026-08-30): --gold
-       (#d8ab4f, IGUAL nos dois temas por decisão de produto) rende só
-       ~2.1:1 de contraste contra superfície clara — abaixo do mínimo AA
-       (4.5:1) pra TEXTO. --gold continua valendo como acento decorativo
-       (borda fina, ícone, fundo translúcido, nunca lido como texto) nos
-       dois temas; --gold-on-light é só pra onde --gold vira COR DE TEXTO
-       de leitura (valor de KPI, item de nav ativo) — ~5.6:1, dentro do
-       AA com folga. Sem equivalente no tema escuro (--gold já tem
-       contraste de sobra ali, ~8.8:1). */
-    --gold-on-light: #8a6018;
-    /* Bolha do contato ficava com contraste fraco contra --bg (~8-17
-       pontos por canal, achado real do checker) — tom levemente
-       off-white em vez de branco puro aumenta essa diferença sem
-       comprometer o "quase branco" pretendido; --border reforça com uma
-       borda sutil (ver .bubble-row.theirs .bubble mais abaixo). */
   }
   *{ box-sizing: border-box; }
 
@@ -962,7 +988,8 @@
        normalmente quando há muitas mensagens (o conteúdo já preenche a
        altura e cresce pra cima com o scroll, como sempre). */
     justify-content: flex-end;
-    background-image: radial-gradient(circle at 1px 1px, rgba(var(--dots-rgb),0.025) 1px, transparent 0);
+    background-color: var(--chat-wallpaper);
+    background-image: radial-gradient(circle at 1px 1px, rgba(var(--dots-rgb),0.06) 1px, transparent 0);
     background-size: 22px 22px;
   }
   .messages::-webkit-scrollbar{ width: 8px; }
@@ -1039,8 +1066,8 @@
        nunca estica demais, independente da largura da janela; % continua
        valendo em telas estreitas onde 480px já seria maior que a coluna. */
     max-width: min(60%, 480px); width: fit-content; padding: 9px 12px 8px; font-size: 13.5px; line-height: 1.45;
-    border-radius: 16px; word-wrap: break-word; white-space: pre-wrap;
-    position: relative; box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16);
+    border-radius: 8px; word-wrap: break-word; white-space: pre-wrap;
+    position: relative; box-shadow: var(--shadow-bubble);
   }
   .bubble-row.theirs .bubble{ background: var(--bubble-theirs); border-bottom-left-radius: 4px; color: var(--text); }
   /* Borda sutil só no tema claro — achado real do checker: --bubble-theirs
@@ -1058,10 +1085,9 @@
   .bubble-row.theirs .bubble code{ background:rgba(var(--dots-rgb),.08); }
   .bubble-row.mine .bubble{
     background: var(--bubble-mine); color: var(--bubble-mine-text); border-bottom-right-radius: 4px;
-    box-shadow: 0 2px 4px rgba(0,0,0,.24), 0 6px 14px rgba(0,0,0,.16), inset 0 1px 0 rgba(255,255,255,.25);
   }
-  .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; opacity: .6; font-variant-numeric: tabular-nums; }
-  .bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; }
+  .bubble .timestamp{ display: block; text-align: right; font-size: 10px; margin-top: 4px; color: var(--bubble-meta); opacity: 1; font-variant-numeric: tabular-nums; }
+  .bubble .ticks{ margin-left: 4px; vertical-align: -2px; flex-shrink: 0; color: var(--bubble-meta); }
 
   /* "Dapinho está digitando" — mesma bolha .theirs, só com 3 pontos
      pulsando em vez de texto (ver renderDapinhoMessages). */
