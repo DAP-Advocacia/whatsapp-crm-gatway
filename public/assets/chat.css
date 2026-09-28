@@ -53,22 +53,22 @@ html[data-theme="light"] .bubble-row.theirs .bubble{ border: 1px solid var(--bor
 /* ---------- Nota interna humana ---------- */
 .note-row{ display:flex; margin: 6px 0; }
 .bubble-note{
-  width: 100%; background: rgba(var(--gold-rgb),.07); border: 1px solid rgba(var(--gold-rgb),.25);
+  width: 100%; background: rgba(var(--note-rgb),.07); border: 1px solid rgba(var(--note-rgb),.25);
   border-radius: 10px; padding: 8px 12px; font-size: 13px; color: var(--text);
 }
-.bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--gold-dim); margin-bottom:3px; }
+.bubble-note-head{ display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:var(--note-accent); margin-bottom:3px; }
 .bubble-note-head span{ flex:1; }
 .bubble-note-text{ white-space:pre-wrap; word-break:break-word; }
 .bubble-note-time{ font-size:10px; color:var(--text-faint); margin-top:4px; }
 .bubble-note--done{ opacity:.55; }
-.bubble-note--done .bubble-note-text{ text-decoration: line-through; text-decoration-color: var(--gold-dim); }
-.note-action-btn{ background:none; border:none; color:var(--gold-dim); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
+.bubble-note--done .bubble-note-text{ text-decoration: line-through; text-decoration-color: var(--note-accent); }
+.note-action-btn{ background:none; border:none; color:var(--note-accent); cursor:pointer; font-size:12px; padding:2px 4px; opacity:.6; flex-shrink:0; }
 .note-action-btn:hover{ opacity:1; }
 .note-edited-tag{ background:none; border:none; color:var(--text-faint); font-size:10px; text-decoration:underline; cursor:pointer; padding:0; font-family:inherit; }
-.bubble-note--editing{ background: rgba(var(--gold-rgb),.1); }
+.bubble-note--editing{ background: rgba(var(--note-rgb),.1); }
 .bubble-note-edit-input{
   width:100%; resize:vertical; min-height:60px; border-radius:8px; font-size:13px; padding:8px 10px;
-  border:1px solid rgba(var(--gold-rgb),.35); background:rgba(var(--gold-rgb),.06); color:var(--text); font-family:inherit;
+  border:1px solid rgba(var(--note-rgb),.35); background:rgba(var(--note-rgb),.06); color:var(--text); font-family:inherit;
 }
 .bubble-note-edit-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
 

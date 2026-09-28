@@ -22,6 +22,15 @@
   --gold-rgb: 216,171,79;
   --gold-dim: #8a6b32;
 
+  /* Fase 2 do redesign: tokens semânticos próprios para a nota humana,
+     hoje apontando para os mesmos valores de --gold (zero mudança
+     visual). Isolam .bubble-note* de --gold para a repintura poder
+     mudar a cor de marca sem afetar a nota, e vice-versa. */
+  --note: var(--gold);
+  --note-rgb: var(--gold-rgb);
+  --note-accent: var(--gold);
+  --note-bg: var(--gold-dim);
+
   --text: #f3ede2;
   --text-muted: #a89a83;
   --text-faint: #6e6353;
