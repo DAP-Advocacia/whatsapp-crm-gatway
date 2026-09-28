@@ -22,7 +22,7 @@
   // ao servidor), aplicada ANTES do primeiro paint pra nunca piscar o
   // tema errado. Padrão 'dark' se nunca escolhido. Mesmo mecanismo já
   // validado em public/chat.html (HANDOFF Parte FL/FM).
-  if (localStorage.getItem('theme') === 'light') {
+  if (localStorage.getItem('theme') !== 'dark') {
     document.documentElement.setAttribute('data-theme', 'light');
   }
   // Paleta personalizada REMOVIDA no redesign visual (Fase 1, 2026-09-25)
@@ -32,42 +32,64 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg: #15120d;
-    --surface: #1d1812;
-    --surface-2: #241d15;
-    --border: #34291a;
-    --gold: #d8ab4f;
-    --gold-rgb: 216,171,79;
-    --gold-dim: #8a6b32;
-    --text: #f3ede2;
-    --text-muted: #a89a83;
-    --text-faint: #6e6353;
-    --green: #4caf6e;
-    --green-rgb: 76,175,110;
-    --red: #d9685f;
-    --red-rgb: 217,104,95;
+    /* Fase 3 do redesign (2026-09-28) — paleta nova estilo WhatsApp,
+       verde-petróleo dessaturado (mesma paleta já validada e aprovada
+       pelo usuário em chat.html). Tema claro é o padrão (ver script de
+       boot no <head>); este bloco :root traz os valores do tema ESCURO.
+       --gold/--gold-dim/--gold-rgb viram apelidos de --accent pra não
+       reescrever os demais seletores desta página. */
+    --bg: #0b141a;
+    --surface: #111b21;
+    --surface-2: #202c33;
+    --border: #2a3942;
+
+    --accent: #3d8073;
+    --accent-rgb: 61,128,115;
+    --accent-hover: #4a9686;
+
+    --gold: var(--accent);
+    --gold-rgb: var(--accent-rgb);
+    --gold-dim: var(--accent-hover);
+
+    --text: #e9edef;
+    --text-muted: #8696a0;
+    --text-faint: #667781;
+
+    --green: #3fb950;
+    --green-rgb: 63,185,80;
+    --red: #f15c6d;
+    --red-rgb: 241,92,109;
+
     --radius: 14px;
     --footer-h: 46px;
     --header-h: 90px;
   }
-  /* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito
-     ANTES do primeiro paint (ver script no <head>). Só
-     FUNDO/SUPERFÍCIE/TEXTO mudam entre os dois temas — a cor de DESTAQUE
-     (--gold/--gold-dim/--green/--red, incl. presets de Configurações)
-     continua IGUAL nos dois, por decisão de produto. Mesmo bloco-base já
-     validado em public/chat.html (HANDOFF Parte FL/FM).
-     ATENÇÃO se --gold for usado como cor de TEXTO nesta página (não só
-     decoração/ícone): considerar --gold-on-light (ver chat.html) se o
-     contraste ficar insuficiente no tema claro — não replicado
-     automaticamente aqui, avaliar por página. */
+  /* Tema claro (2026-08-30, repintado na Fase 3 do redesign) —
+     [data-theme="light"] no <html>, escrito ANTES do primeiro paint (ver
+     script no <head>). É o tema PADRÃO agora. Mesma paleta já validada
+     em public/chat.html. */
   html[data-theme="light"]{
-    --bg: #f7f4ee;
+    --bg: #f0f2f5;
     --surface: #ffffff;
-    --surface-2: #eee8db;
-    --border: #ddd4c0;
-    --text: #2a2318;
-    --text-muted: #6b6152;
-    --text-faint: #9a8f7a;
+    --surface-2: #f5f6f6;
+    --border: #e9edef;
+
+    --accent: #3d7566;
+    --accent-rgb: 61,117,102;
+    --accent-hover: #2f5c50;
+
+    --gold: var(--accent);
+    --gold-rgb: var(--accent-rgb);
+    --gold-dim: var(--accent-hover);
+
+    --text: #111b21;
+    --text-muted: #54656f;
+    --text-faint: #8696a0;
+
+    --green: #1a7f37;
+    --green-rgb: 26,127,55;
+    --red: #d32f2f;
+    --red-rgb: 211,47,47;
   }
   /* Ícones sol/lua do switch de tema (ver botão #themeToggleBtn na
      sidebar e o JS de toggle mais abaixo) — mesmo padrão de
