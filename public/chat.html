@@ -39,10 +39,15 @@
        --gold/--gold-dim/--gold-rgb viram apelidos de --accent pra não
        reescrever as dezenas de seletores que ainda os usam neste arquivo
        (cosmético, ver Fase 6 do plano). */
-    --bg: #0b141a;
-    --surface: #111b21;
-    --surface-2: #202c33;
-    --border: #2a3942;
+    /* Cinza-chumbo neutro (2026-09-28, 2º ajuste de feedback: o tom
+       anterior #0b141a/#111b21/#202c33, herdado do WhatsApp, tinha leve
+       inclinação azul/verde que "lia" como verde demais ao lado do
+       --accent também verde — trocado por uma escala de cinza
+       verdadeiramente neutra, R=G=B, estilo WhatsApp Desktop/Slack dark). */
+    --bg: #17171a;
+    --surface: #1f1f23;
+    --surface-2: #2a2a2f;
+    --border: #38383e;
 
     /* Verde-petróleo dessaturado (2026-09-28, feedback do usuário: o
        verde-WhatsApp puro (#00a884) ficou "neon" demais pro visual de
@@ -87,7 +92,7 @@
     --bubble-theirs: #202c33;
     --bubble-meta: #8696a0;
     --tick-read: #53bdeb;
-    --chat-wallpaper: #0b141a;
+    --chat-wallpaper: #17171a;
     --shadow-bubble: 0 1px .5px rgba(11,20,26,.4);
 
     --footer-h: 46px;
@@ -223,7 +228,6 @@
     display:flex; flex-direction:column;
     transition: width .2s ease;
     z-index: 40;
-    overflow: hidden;
   }
   html.sidebar-collapsed .sidebar{ width: var(--sidebar-w-collapsed); }
 
@@ -233,10 +237,10 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
   }
-  .logo-mark{ width:32px; height:32px; color: var(--text); flex-shrink:0; }
+  .logo-mark{ width:32px; height:32px; flex-shrink:0; object-fit:contain; }
   .logo-text{ display:flex; flex-direction:column; gap:3px; }
-  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--text); letter-spacing:.01em; }
-  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
+  .logo-text .firm-name{ font-family:'Inter',sans-serif; font-weight:700; font-size:14px; line-height:1.3; color:var(--text); letter-spacing:-.01em; }
+  .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.03em; color:var(--text-faint); }
   html.sidebar-collapsed .logo-text{ display:none; }
   html.sidebar-collapsed .sidebar-logo{ padding: 8px; }
 
@@ -244,12 +248,12 @@
     position:absolute; top:20px; right:-14px;
     width:28px; height:28px; border-radius:50%;
     background:var(--gold); border:2px solid var(--bg); color:var(--on-accent);
-    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:45;
     box-shadow: 0 2px 8px rgba(0,0,0,.4);
     transition: transform .15s ease, filter .15s ease;
   }
   .sidebar-toggle:hover{ filter:brightness(1.08); transform: scale(1.08); }
-  .sidebar-toggle svg{ width:14px; height:14px; transition: transform .2s; }
+  .sidebar-toggle svg{ width:16px; height:16px; transition: transform .2s; }
   html.sidebar-collapsed .sidebar-toggle svg{ transform: rotate(180deg); }
 
   .sidebar-nav{ flex:1; overflow-y:auto; overflow-x:hidden; padding: 14px 10px; display:flex; flex-direction:column; gap:2px; }
@@ -1356,19 +1360,12 @@
 
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <svg class="logo-mark" viewBox="0 0 100 100" fill="none">
-      <rect x="10" y="6" width="56" height="9" rx="4.5" fill="currentColor"/>
-      <rect x="2" y="19" width="72" height="9" rx="4.5" fill="currentColor"/>
-      <rect x="8" y="36" width="60" height="58" fill="none" stroke="currentColor" stroke-width="6"/>
-      <path d="M20 90 V58 A9 9 0 0 1 38 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
-      <path d="M40 90 V58 A9 9 0 0 1 58 58 V90" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
-    </svg>
+    <img class="logo-mark" src="/assets/logo-icon.png?v=20260928" alt="Logo Durão, Almeida &amp; Pontes">
     <div class="logo-text">
-      <span class="firm-name">Durão, Almeida &amp; Pontes</span>
-      <span class="firm-sub">Advogados Associados</span>
+      <span class="firm-name">DapZap</span>
     </div>
     <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 6 8.5 12 14.5 18"/></svg>
     </button>
   </div>
 
