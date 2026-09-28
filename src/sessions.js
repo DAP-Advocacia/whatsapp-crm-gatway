@@ -109,11 +109,40 @@ class SessionManager {
     if (!fs.existsSync(this.baseFolder)) return;
     const STAGGER_MS = Number(process.env.SESSION_STAGGER_MS || 15000);
     const entries = fs.readdirSync(this.baseFolder, { withFileTypes: true });
+    // `creds.registered` (Baileys, ver initAuthCreds) só vira true DEPOIS do
+    // QR ser escaneado com sucesso — antes disso, creds.json já existe (o
+    // Baileys grava as chaves de criptografia assim que a sessão é aberta,
+    // mesmo sem ninguém ter escaneado nada) mas não representa uma sessão
+    // de verdade, só um QR gerado e nunca pareado. Sem este filtro, cada
+    // "Conectar outro WhatsApp" abandonado no meio do caminho virava uma
+    // pasta que o boot tentava reconectar pra sempre — encontrado um
+    // acúmulo real de centenas dessas pastas (meses de QRs nunca
+    // escaneados), sobrecarregando CPU/rede a cada boot e, no caso mais
+    // grave, levando o WhatsApp a atrasar/recusar até pareamentos NOVOS
+    // vindos do mesmo IP (mesmo padrão do incidente de 31/07 documentado
+    // acima, só que em escala muito maior).
+    let skippedUnregistered = 0;
     const pending = entries.filter((entry) => {
       if (!entry.isDirectory()) return false;
       const credsPath = path.join(this.baseFolder, entry.name, 'creds.json');
-      return fs.existsSync(credsPath);
+      if (!fs.existsSync(credsPath)) return false;
+      try {
+        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+        if (!creds.registered) {
+          skippedUnregistered++;
+          return false;
+        }
+        return true;
+      } catch {
+        // creds.json corrompido/ilegível — mesmo espírito de "não é uma
+        // sessão de verdade utilizável", não tenta reconectar.
+        skippedUnregistered++;
+        return false;
+      }
     });
+    if (skippedUnregistered > 0) {
+      console.log(`[sessions] ignorando ${skippedUnregistered} sessão(ões) nunca pareada(s) (QR gerado, nunca escaneado)`);
+    }
     console.log(`[sessions] retomando ${pending.length} sessão(ões) salva(s), escalonado a cada ${STAGGER_MS}ms`);
     for (const entry of pending) {
       console.log(`[sessions] retomando sessão salva: ${entry.name}`);
