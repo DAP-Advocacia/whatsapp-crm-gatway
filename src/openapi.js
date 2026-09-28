@@ -379,13 +379,6 @@ module.exports = {
         responses: { 200: jsonResponse('Modelo criado') },
       },
     },
-    '/api/settings': {
-      get: {
-        tags: ['Configurações'],
-        summary: 'Configurações globais (paleta de cores)',
-        responses: { 200: jsonResponse('Configurações atuais') },
-      },
-    },
     '/api/settings/api-token': {
       post: {
         tags: ['Configurações'],

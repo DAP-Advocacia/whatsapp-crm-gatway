@@ -22,59 +22,8 @@
   if (localStorage.getItem('theme') === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
   }
-  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
-  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
-  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
-  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
-  (function () {
-    // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
-    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
-    // tema claro/escuro, nunca mais da paleta pessoal (mesmo fix já
-    // validado em public/chat.html, HANDOFF Parte FL). Nota: esta página
-    // só usa o prefixo 'palette_' (brand global) — nunca recebeu a
-    // paleta PESSOAL por usuário que as outras 21 telas têm (limitação
-    // pré-existente, fora do escopo desta correção de tema).
-    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
-    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
-    function hexToRgbStr(hex) {
-      var n = parseInt(hex.slice(1), 16);
-      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
-    }
-    window.__applyPalette = function (b) {
-      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
-      Object.keys(MAP).forEach(function (k) {
-        if (values[k]) {
-          document.documentElement.style.setProperty(MAP[k], values[k]);
-          localStorage.setItem('palette_' + k, values[k]);
-          if (RGB_MAP[k]) {
-            var rgbStr = hexToRgbStr(values[k]);
-            document.documentElement.style.setProperty(RGB_MAP[k], rgbStr);
-            localStorage.setItem('palette_' + k + '_rgb', rgbStr);
-          }
-        } else {
-          document.documentElement.style.removeProperty(MAP[k]);
-          localStorage.removeItem('palette_' + k);
-          if (RGB_MAP[k]) {
-            document.documentElement.style.removeProperty(RGB_MAP[k]);
-            localStorage.removeItem('palette_' + k + '_rgb');
-          }
-        }
-      });
-    };
-    Object.keys(MAP).forEach(function (k) {
-      var cached = localStorage.getItem('palette_' + k);
-      if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-      if (RGB_MAP[k]) {
-        var cachedRgb = localStorage.getItem('palette_' + k + '_rgb');
-        if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-      }
-    });
-    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface2/border
-    // salvos antes do tema claro existir) — limpo aqui, uma vez.
-    ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
-      localStorage.removeItem('palette_' + k);
-    });
-  })();
+  // Paleta personalizada REMOVIDA no redesign visual (Fase 1, 2026-09-25)
+  // — a paleta do app é fixa no código (public/assets/theme.css).
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet">
@@ -2463,13 +2412,6 @@
   })();
 
   boot();
-})();
-</script>
-<script>
-(function () {
-  fetch('/api/brand').then(function (r) { return r.json(); }).then(function (b) {
-    if (window.__applyPalette) window.__applyPalette(b);
-  }).catch(function () {});
 })();
 </script>
 </body>

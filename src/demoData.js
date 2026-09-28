@@ -277,11 +277,6 @@ function conversationHistory() {
 }
 
 // ---------------------------------------------------------------
-// 10. Configurações
-// ---------------------------------------------------------------
-const settings = { accentColor: null, accentColorDim: null, greenColor: null, redColor: null, bgColor: null };
-
-// ---------------------------------------------------------------
 // 11. Notificações
 // ---------------------------------------------------------------
 function notificationsList() {
@@ -328,7 +323,6 @@ module.exports = {
   conversationAnalysisInstances,
   conversationAnalysisWhoami,
   conversationHistory,
-  settings,
   notificationsList,
   notificationsLatestUnread,
   notificationsUnreadCount,

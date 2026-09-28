@@ -44,7 +44,6 @@ const { createSatisfactionRouter } = require('./routes/satisfaction');
 const { createSatisfactionPublicRouter } = require('./routes/satisfactionPublic');
 const { createDealGroupTriggerRouter } = require('./routes/dealGroupTrigger');
 const dealGroupTrigger = require('./dealGroupTrigger');
-const settings = require('./settings');
 const abTests = require('./abTests');
 const store = require('./store');
 const pageSessions = require('./pageSessions');
@@ -807,31 +806,22 @@ setTimeout(() => {
 // Fica FORA do requireAuth abaixo, porque é o próprio passo de login.
 // ---------------------------------------------------------------
 // ---------------------------------------------------------------
-// Marca (nome/subtítulo/cor) — pública, sem autenticação: é só config de
-// exibição, nada sensível. Vazio por padrão (o HTML de cada página já tem um
-// texto fixo como fallback) — só sobrescreve quando as variáveis de
-// ambiente estiverem definidas, pra uma instância nova (outro cliente)
-// poder trocar a marca sem editar nenhum arquivo HTML.
+// Marca (nome/subtítulo/redes sociais/endereço) — pública, sem
+// autenticação: é só config de exibição, nada sensível. Vazio por padrão
+// (o HTML de cada página já tem um texto fixo como fallback) — só
+// sobrescreve quando as variáveis de ambiente estiverem definidas, pra
+// uma instância nova (outro cliente) poder trocar a marca sem editar
+// nenhum arquivo HTML.
+//
+// Cor de destaque REMOVIDA daqui no redesign visual (Fase 1) — a paleta
+// do app é fixa no código (public/assets/theme.css), sem exceção por
+// usuário (tabela `user_palette`, congelada) nem por instalação
+// (BRAND_COLOR do .env, sem efeito a partir de agora).
 // ---------------------------------------------------------------
-app.get('/api/brand', async (req, res) => {
-  // Paleta editada pela tela /settings.html (banco) tem prioridade sobre
-  // BRAND_COLOR do .env — o .env continua funcionando como fallback pra
-  // quem nunca abriu a tela de Configurações (nunca editou = null no banco
-  // = usa o padrão de sempre pra aquele papel específico).
-  let dbSettings = {};
-  try {
-    dbSettings = await settings.get();
-  } catch (err) {
-    console.error('[brand] falha ao ler paleta do banco:', err.message);
-  }
+app.get('/api/brand', (req, res) => {
   res.json({
     name: process.env.BRAND_NAME || null,
     subtitle: process.env.BRAND_SUBTITLE || null,
-    color: dbSettings.accentColor || process.env.BRAND_COLOR || null,
-    colorDim: dbSettings.accentColorDim || null,
-    green: dbSettings.greenColor || null,
-    red: dbSettings.redColor || null,
-    bg: dbSettings.bgColor || null,
     instagramUrl: process.env.BRAND_INSTAGRAM_URL || null,
     linkedinUrl: process.env.BRAND_LINKEDIN_URL || null,
     address: process.env.BRAND_ADDRESS || null,

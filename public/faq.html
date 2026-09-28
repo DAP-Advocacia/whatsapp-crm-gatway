@@ -25,155 +25,8 @@
   if (localStorage.getItem('theme') === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
   }
-  // Paleta customizada (tela Configurações) — aplica do cache local ANTES
-  // do primeiro paint, pra não piscar a cor padrão antes da de verdade
-  // chegar (o fetch de /api/brand mais abaixo é assíncrono). Esse mesmo
-  // fetch atualiza o cache pra próxima navegação ficar sem flash também.
-  (function () {
-    // `bg` (e --surface/--surface-2/--border derivadas dela) SAIU deste
-    // mapa em 2026-08-30 — fundo agora é responsabilidade EXCLUSIVA do
-    // tema claro/escuro (ver html[data-theme="light"] no <style> e o
-    // switch no rodapé), nunca mais da paleta pessoal. Antes disso, os
-    // dois mecanismos escreviam a MESMA variável --bg em momentos
-    // diferentes — uma corrida real que só piorou quando um 3º
-    // concorrente (tema) também precisaria escrever ali. Cor de DESTAQUE
-    // (gold/green/red) continua igual nos dois temas, por decisão de
-    // produto — só isso a paleta pessoal ainda controla. Mesmo fix já
-    // validado em public/chat.html (HANDOFF Parte FL).
-    var MAP = { gold: '--gold', goldDim: '--gold-dim', green: '--green', red: '--red' };
-    // Alguns estilos usam um tom translúcido dessas cores (ex: fundo do item
-    // de menu ativo) — rgba() não aceita um hex direto, então mantemos a
-    // versão "216,171,79" em variável à parte pra esses casos acompanharem
-    // a paleta escolhida em vez de ficarem sempre no dourado padrão.
-    var RGB_MAP = { gold: '--gold-rgb', green: '--green-rgb', red: '--red-rgb' };
-    function hexToRgbStr(hex) {
-      var n = parseInt(hex.slice(1), 16);
-      return ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255);
-    }
-    // 2 caches SEPARADOS (HANDOFF Parte DP) — 'palette_' pro brand global,
-    // 'personalPalette_' pra paleta por usuário. 'personalPalette_' tem
-    // PRIORIDADE sobre 'palette_' (pessoal sobre brand global) — resolve
-    // os DOIS prefixos juntos pra cada variável, nunca aplica um prefixo
-    // isoladamente no style (ver bug corrigido em chat.html, Parte FL).
-    // Ausência dos DOIS caches é tratada como remoção explícita (não só
-    // "não mexe") — sem isso, "Restaurar padrão" em Configurações nunca
-    // revertia a cor numa aba já aberta.
-    // Cor de fundo personalizada, DE VOLTA (2026-09-01) — mas redesenhada
-    // pra não repetir a corrida de 2026-08-30: 1 cor POR TEMA (bgDark/
-    // bgLight), cada uma só lida/aplicada quando o TEMA correspondente
-    // está ativo agora — nunca os 2 mecanismos escrevendo --bg de forma
-    // independente. deriveSurfacePalette deriva --surface/--surface-2/
-    // --border a partir do fundo escolhido (mesma técnica de deriveDim
-    // em settings.html — canais RGB, sem HSL), testado e validado ali.
-    function deriveSurfacePalette(bgHex, isLight) {
-      var num = parseInt(bgHex.slice(1), 16);
-      var ch = function (shift) { return (num >> shift) & 0xff; };
-      var clamp = function (v) { return Math.max(0, Math.min(255, Math.round(v))); };
-      var toHex = function (r, g, b) {
-        return '#' + [r, g, b].map(function (v) { return clamp(v).toString(16).padStart(2, '0'); }).join('');
-      };
-      var towardWhite = function (v, frac) { return v + (255 - v) * frac; };
-      var towardDark = function (v, frac) { return v * (1 - frac); };
-      if (isLight) {
-        var surface = toHex(towardWhite(ch(16), 1), towardWhite(ch(8), 1), towardWhite(ch(0), 1));
-        var tooDark = ch(16) < 40 && ch(8) < 40 && ch(0) < 40;
-        var step2 = tooDark ? towardWhite : towardDark;
-        var surface2 = toHex(step2(ch(16), 0.14), step2(ch(8), 0.14), step2(ch(0), 0.14));
-        var border = toHex(step2(ch(16), 0.30), step2(ch(8), 0.30), step2(ch(0), 0.30));
-        return { surface: surface, surface2: surface2, border: border };
-      }
-      var tooLight = ch(16) > 215 && ch(8) > 215 && ch(0) > 215;
-      var step = tooLight ? towardDark : towardWhite;
-      var surfaceD = toHex(step(ch(16), 0.027), step(ch(8), 0.027), step(ch(0), 0.027));
-      var surface2D = toHex(step(ch(16), 0.08), step(ch(8), 0.08), step(ch(0), 0.08));
-      var borderD = toHex(step(ch(16), 0.18), step(ch(8), 0.18), step(ch(0), 0.18));
-      return { surface: surfaceD, surface2: surface2D, border: borderD };
-    }
-
-    function applyCachedBgPalette() {
-      var isLight = document.documentElement.getAttribute('data-theme') === 'light';
-      var suffix = isLight ? 'Light' : 'Dark';
-      var cached = localStorage.getItem('personalPalette_bg' + suffix) || localStorage.getItem('palette_bg' + suffix);
-      if (cached) {
-        var derived = deriveSurfacePalette(cached, isLight);
-        document.documentElement.style.setProperty('--bg', cached);
-        document.documentElement.style.setProperty('--surface', derived.surface);
-        document.documentElement.style.setProperty('--surface-2', derived.surface2);
-        document.documentElement.style.setProperty('--border', derived.border);
-      } else {
-        ['--bg', '--surface', '--surface-2', '--border'].forEach(function (v) {
-          document.documentElement.style.removeProperty(v);
-        });
-      }
-    }
-
-    window.__applyBgPalette = function (key, hex, prefix) {
-      prefix = prefix || 'palette_';
-      if (hex) localStorage.setItem(prefix + key, hex);
-      else localStorage.removeItem(prefix + key);
-      applyCachedBgPalette();
-    };
-
-    function applyCachedPalette() {
-      Object.keys(MAP).forEach(function (k) {
-        var cached = localStorage.getItem('personalPalette_' + k) || localStorage.getItem('palette_' + k);
-        if (cached) document.documentElement.style.setProperty(MAP[k], cached);
-        else document.documentElement.style.removeProperty(MAP[k]);
-        if (RGB_MAP[k]) {
-          var cachedRgb = localStorage.getItem('personalPalette_' + k + '_rgb') || localStorage.getItem('palette_' + k + '_rgb');
-          if (cachedRgb) document.documentElement.style.setProperty(RGB_MAP[k], cachedRgb);
-          else document.documentElement.style.removeProperty(RGB_MAP[k]);
-        }
-      });
-    }
-    // `skipVisual` (parâmetro histórico, HANDOFF Parte EO): MANTIDO só
-    // pela assinatura (chamadores antigos ainda passam esse 3º argumento),
-    // mas não tem mais efeito — __applyPalette nunca mais toca
-    // document.documentElement.style diretamente: grava só o cache do
-    // prefixo certo e delega toda aplicação visual pra
-    // applyCachedPalette() acima, que sempre resolve a prioridade entre
-    // os dois prefixos corretamente antes de tocar o DOM.
-    window.__applyPalette = function (b, prefix) {
-      prefix = prefix || 'palette_';
-      var values = { gold: b.color, goldDim: b.colorDim, green: b.green, red: b.red };
-      Object.keys(MAP).forEach(function (k) {
-        if (values[k]) {
-          localStorage.setItem(prefix + k, values[k]);
-          if (RGB_MAP[k]) localStorage.setItem(prefix + k + '_rgb', hexToRgbStr(values[k]));
-        } else {
-          localStorage.removeItem(prefix + k);
-          if (RGB_MAP[k]) localStorage.removeItem(prefix + k + '_rgb');
-        }
-      });
-      applyCachedPalette();
-    };
-    applyCachedPalette();
-    applyCachedBgPalette();
-    // Cache ÓRFÃO de uma versão anterior (bg/surface/surface-2/border
-    // salvos por usuários que customizaram fundo antes do tema claro
-    // existir) — limpo aqui, uma vez, pra não competir silenciosamente
-    // com o tema nem ficar lixo morto em localStorage pra sempre. Nunca
-    // escreve nada nessas chaves de novo depois desta versão.
-    ['palette_', 'personalPalette_'].forEach(function (prefix) {
-      ['bg', 'surface', 'surface2', 'border'].forEach(function (k) {
-        localStorage.removeItem(prefix + k);
-      });
-    });
-    // Sincronia entre abas (2026-08-30, bug real corrigido primeiro em
-    // chat.html): o evento 'storage' só dispara em OUTRAS abas da mesma
-    // origem, nunca na que fez a escrita — sem isso, uma aba desta página
-    // já aberta nunca refletia uma mudança de paleta salva por Configurações
-    // noutra aba, só via F5.
-    window.addEventListener('storage', function (e) {
-      if (!e.key || (e.key.indexOf('palette_') !== 0 && e.key.indexOf('personalPalette_') !== 0)) return;
-      applyCachedPalette();
-      applyCachedBgPalette();
-    });
-    // Exposta fora do IIFE — o handler de clique do switch de tema
-    // (bloco de script mais abaixo) precisa reaplicar a cor de fundo certa
-    // assim que o tema muda de ativo.
-    window.__applyBgPaletteRefresh = applyCachedBgPalette;
-  })();
+  // Paleta personalizada REMOVIDA no redesign visual (Fase 1, 2026-09-25)
+  // — a paleta do app é fixa no código (public/assets/theme.css).
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
@@ -754,9 +607,6 @@
         localStorage.setItem('theme', 'light');
       }
       syncThemeToggleUI();
-      // Cor de fundo personalizada é POR TEMA (ver <head>) — reaplica a
-      // cor certa pro tema que acabou de virar ativo.
-      if (window.__applyBgPaletteRefresh) window.__applyBgPaletteRefresh();
     });
   }
 
@@ -1006,43 +856,6 @@
   // guardava o ownerId em nenhuma variável de módulo antes disso.
   let myOwnerId = null;
 
-  // Guardado numa Promise (não só disparado) — o fetch de brand real fica
-  // mais abaixo, no fim do arquivo (mesmo lugar de sempre); esta Promise só
-  // é resolvida por ele. A paleta PESSOAL (applyPersonalPalette, chamada
-  // dentro de init()) precisa rodar DEPOIS desta ter aplicado a global —
-  // sem essa ordem garantida, uma corrida entre os dois fetches poderia
-  // fazer a pessoal ser sobrescrita de volta pra global por acidente
-  // (HANDOFF Parte DL).
-  // window.resolveBrandReady (não `let`) - ver comentário completo em dashboard.html.
-  // BUG REAL corrigido 2026-08-25: o fetch de /api/brand que resolve isto
-  // vive num <script> SEPARADO mais abaixo - `let` não é visível entre
-  // blocos <script> distintos, cada um é o escopo de uma função própria.
-  // A chamada antiga (resolveBrandReady() sem window., dentro de um
-  // .finally() sem try/catch) lançava ReferenceError silenciosamente
-  // engolido - brandReady nunca resolvia, e applyPersonalPalette (que
-  // faz await brandReady antes de aplicar a paleta pessoal) ficava
-  // pendurada pra sempre, sem nenhum erro visível.
-  let brandReady;
-  window.resolveBrandReady = null;
-  brandReady = new Promise((resolve) => { window.resolveBrandReady = resolve; });
-
-  // Paleta POR USUÁRIO (tela Configurações/Aparência, HANDOFF Parte DL) —
-  // sobrepõe a paleta global/marca, só se este owner já tiver salvo
-  // alguma cor própria (campo null mantém o que já foi aplicado antes).
-  async function applyPersonalPalette() {
-    await brandReady;
-    try {
-      const res = await apiFetch(`${API_BASE}/settings`);
-      if (!res.ok) return;
-      const p = await res.json();
-      if (window.__applyPalette) {
-                // bg não é mais parte da paleta pessoal (ver comentário no <head>)
-        // — o backend pode continuar devolvendo p.bgColor por enquanto
-        // (campo legado, ver src/settings.js), simplesmente ignorado aqui.
-        window.__applyPalette({ color: p.accentColor, colorDim: p.accentColorDim, green: p.greenColor, red: p.redColor }, 'personalPalette_');
-      }
-    } catch {}
-  }
 
   // MODO DEMO (ver src/demoModeGate.js, src/demoData.js) — dados 100%
   // fictícios, sem tocar Supabase/Bitrix. Ligado via `?demo=1` na URL (o
@@ -1305,7 +1118,6 @@
       myOwnerId = await resolveOwner();
       startPresenceHeartbeat();
       revealAdminNavItemIfSuperAdmin();
-      applyPersonalPalette(); // fire-and-forget, não atrasa o resto do boot
       await loadFaq();
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
@@ -1316,12 +1128,7 @@
   fetch('/api/brand').then((r) => r.json()).then((b) => {
     if (b.name) document.querySelectorAll('.firm-name').forEach((el) => { el.textContent = b.name; });
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach((el) => { el.textContent = b.subtitle; });
-    // __applyPalette (ver <head>) grava só o cache 'palette_' aqui e
-    // resolve a prioridade certa entre brand global e paleta pessoal por
-    // conta própria — não precisa mais de skipVisual (ver bug corrigido
-    // 2026-08-30 no <head>, mesmo fix de public/chat.html, HANDOFF Parte FL).
-    if (window.__applyPalette) window.__applyPalette(b, 'palette_');
-  }).catch(() => {}).finally(() => { if (window.resolveBrandReady) window.resolveBrandReady(); });
+  }).catch(() => {});
 })();
 </script>
 </body>

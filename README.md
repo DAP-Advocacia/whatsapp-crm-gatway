@@ -337,30 +337,27 @@ Os itens ficam agrupados em três seções visuais (`.nav-section`, com rótulo
 `.nav-section-label` — some quando a sidebar está recolhida): **Workspace**
 (Dashboard, Chat, Campanha, Contatos, Landing Page, Onboarding, Sugestões,
 FAQ), **Configuração** (Aparência, Instâncias, Apresentação — três abas
-soltas, sem hierarquia entre elas; "Aparência" é o link antigo
-"Configurações", renomeado porque a página edita a paleta de cores do app) e
-**Admin** (Auditoria de Conversas + Admin — as 2 telas de acesso restrito
-do sistema, isoladas numa seção própria desde a HANDOFF Parte DO, 2026-08-18;
-antes ficavam misturadas em Workspace/Configuração). A seção Admin fica
-inteira escondida (não só os 2 itens individualmente) até que pelo menos
-um deles seja revelado pra quem está logado — super admin vê os 2, quem só
-tem grant de Auditoria de Conversas vê só esse. A revelação anima via
+soltas, sem hierarquia entre elas) e **Admin** (Auditoria de Conversas +
+Admin — as 2 telas de acesso restrito do sistema, isoladas numa seção
+própria desde a HANDOFF Parte DO, 2026-08-18; antes ficavam misturadas
+em Workspace/Configuração). A seção Admin fica inteira escondida (não só
+os 2 itens individualmente) até que pelo menos um deles seja revelado
+pra quem está logado — super admin vê os 2, quem só tem grant de
+Auditoria de Conversas vê só esse. A revelação anima via
 `max-height`/`transition` (HANDOFF Parte DQ, 2026-08-20) em vez de
 aparecer com `display:none → block` instantâneo — sem isso, a sidebar
 "pulava" de repente quando a confirmação de acesso chegava (2 requests
 de rede sequenciais em `admin.html`: confirmar com o Bitrix, depois
-confirmar super admin), bem na área que a pessoa estava olhando. A paleta
-editada ali é **por usuário** desde a HANDOFF Parte DL (2026-08-18) —
-antes era um único registro global pra toda a instalação; hoje cada
-`ownerId` tem a própria linha em `user_palette` e só vê a própria cor,
-nas telas internas (nome/subtítulo/cor de fallback da marca em
-`GET /api/brand` continuam globais via `.env`, sem relação com esta
-mudança — ver a tabela de rotas mais abaixo). Cache local
-(`localStorage`) do brand global e da paleta pessoal fica em chaves
-SEPARADAS (`palette_*` vs `personalPalette_*`, HANDOFF Parte DP,
-2026-08-18) — antes usava as mesmas chaves pras duas, o que causava
-um flash visível "cor pessoal → cor global → cor pessoal" a cada
-navegação pra quem tinha paleta pessoal configurada.
+confirmar super admin), bem na área que a pessoa estava olhando.
+
+**Paleta de cores por usuário — REMOVIDA no redesign visual (2026-09-25).**
+"Aparência" (link antigo "Configurações") existiu entre 2026-08-18 e
+2026-09-25 como uma tela de edição de paleta por `ownerId` (tabela
+`user_palette`); a partir do redesign, a paleta do app é fixa no código
+(`public/assets/theme.css`), sem exceção por usuário nem por instalação
+(`BRAND_COLOR` do `.env` também removido). "Aparência" hoje só tem o
+painel "Token de API". A tabela `user_palette` continua no banco, sem
+leitura/escrita, por precaução (ver `db/schema.sql`).
 
 A paleta pessoal controla só a cor de DESTAQUE (`--gold`/`--gold-dim`/
 `--green`/`--red`) — fundo/superfície/texto são responsabilidade
@@ -2206,7 +2203,7 @@ e `src/authz.js` para a implementação completa.
 | Rota | Método | Uso |
 |---|---|---|
 | `/api/auth/verify` | POST | Body `{ accessToken }` (o `access_token` de `BX24.getAuth()`). Verifica contra o Bitrix de verdade (domínio fixo do servidor, `BITRIX_PORTAL_DOMAIN`) e devolve `{ ownerId, token, expiresIn }` — o `token` é o que vai em todo `Authorization: Bearer` daqui pra frente. |
-| `/api/brand` | GET | Pública, sem autenticação (só config de exibição). Devolve `{name, subtitle, color, instagramUrl, linkedinUrl, address}` a partir de `BRAND_NAME`/`BRAND_SUBTITLE`/`BRAND_COLOR`/`BRAND_INSTAGRAM_URL`/`BRAND_LINKEDIN_URL`/`BRAND_ADDRESS` no `.env` (`null` em cada campo não definido). As 8 páginas com sidebar usam só `name`/`subtitle`/`color`; `lead-form.html` usa todos os 6 campos (os 3 últimos alimentam a coluna "Siga-nos" e o mapa do rodapé, ver §11.5) — sem nenhuma variável definida, nada muda (é o caso da Durão hoje). |
+| `/api/brand` | GET | Pública, sem autenticação (só config de exibição). Devolve `{name, subtitle, instagramUrl, linkedinUrl, address}` a partir de `BRAND_NAME`/`BRAND_SUBTITLE`/`BRAND_INSTAGRAM_URL`/`BRAND_LINKEDIN_URL`/`BRAND_ADDRESS` no `.env` (`null` em cada campo não definido). As páginas com sidebar usam só `name`/`subtitle`; `lead-form.html` usa todos os 5 campos (os 3 últimos alimentam a coluna "Siga-nos" e o mapa do rodapé, ver §11.5) — sem nenhuma variável definida, nada muda. Não devolve mais cor (`color`/`colorDim`/`green`/`red`/`bg`) desde o redesign visual — a paleta do app é fixa no código, sem exceção por instalação. |
 | `/api-docs` | GET | Pública, sem autenticação (documentação interativa da API — Swagger UI, a partir de `src/openapi.js`). Nenhum dado real é servido aqui, só a descrição das rotas; as chamadas de verdade continuam exigindo o token de sempre. **Tema visual customizado** (`SWAGGER_CUSTOM_CSS` em `src/server.js`) reaplica a MESMA paleta dourada/escura do resto do app por cima do tema claro padrão do Swagger UI (`customCss` do `swagger-ui-express`, sem nenhum asset/build extra) — nunca uma identidade visual nova. `swaggerOptions`: `docExpansion:'list'` (tags abertas, operações fechadas — mais fácil de navegar com muitos endpoints), `filter:true` (caixa de busca), `tryItOutEnabled:false` (exige clique em "Try it out" antes de editar parâmetro, evita disparo acidental de request real numa API que já usa um token de 90 dias). |
 
 Por trás dos panos: `requireAuth` (middleware nos routers) só confirma que o
@@ -2472,10 +2469,12 @@ recebem `session`/`owner` alheio pra checar.
 
 ### `/api/settings/*` (`src/routes/settings.js`)
 
+`GET`/`PUT /api/settings` (paleta de cores por usuário) foram **removidas
+no redesign visual (2026-09-25)** — a paleta do app é fixa no código. A
+rota hoje só tem o Token de API:
+
 | Rota | Método | Uso |
 |---|---|---|
-| `settings` | GET | Paleta de cores do `ownerId` autenticado (**por usuário** desde a HANDOFF Parte DL, 2026-08-18 — antes era um singleton global, tabela `app_settings`; hoje cada owner tem a própria linha em `user_palette`, `null` em cada campo ainda não configurado por aquela pessoa). |
-| `settings` | PUT | Body `{ accentColor?, accentColorDim?, greenColor?, redColor?, bgColor?, bgColorDark?, bgColorLight? }` (cada campo hex ou `null` pra restaurar o padrão) — grava só na linha do `ownerId` autenticado, upsert (`insert ... on conflict do update`). `bgColor` (singular) congelada desde 2026-08-30, nunca mais lida — `bgColorDark`/`bgColorLight` (Parte FR) são a cor de fundo personalizada ATUAL, 1 por tema (claro/escuro), cada uma só aplicada quando o tema correspondente está ativo (ver `applyCachedBgPalette` em `public/settings.html` e nas páginas com sidebar) — nunca competindo com o CSS do tema, evitando a corrida real que a versão original (`bgColor` único) causava. |
 | `settings/api-token` | POST | Gera um novo token de API de validade longa (`API_TOKEN_TTL_DAYS`, padrão 90 dias) pro dono autenticado — devolve `{ token, expiresAt }`. Mesmo formato/verificação de `issueAppToken` (`src/auth.js`), só que pensado pra uso fora do navegador (scripts, Postman, Power Query), não pro login da própria SPA. Não é persistido/revogável no servidor — gerar de novo não invalida os anteriores, cada um expira sozinho no próprio prazo. UI em `/settings.html`, seção "Token de API"; rotas documentadas de forma interativa em `GET /api-docs` (Swagger UI, `src/openapi.js`). |
 
 ### `/api/lead-forms/*` (CRUD autenticado — `src/routes/leadForms.js`)

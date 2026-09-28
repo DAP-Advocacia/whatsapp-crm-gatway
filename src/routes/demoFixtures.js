@@ -91,11 +91,6 @@ function createDemoFixturesRouter() {
     totalMatching: demoData.conversationAnalysisConversations().total,
   })));
 
-  // ---------------------------------------------------------------
-  // montado em /api/settings
-  // ---------------------------------------------------------------
-  router.get('/api/settings/', only((req, res) => res.json(demoData.settings)));
-
   return router;
 }
 
