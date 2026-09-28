@@ -205,8 +205,8 @@
     text-decoration: none;
     white-space: nowrap;
   }
-  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
-  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  .credit-badge:hover{ color: var(--text); border-color: var(--text-faint); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   html.sidebar-collapsed #app{ margin-left: var(--sidebar-w-collapsed); }
 
   /* ======================================================
@@ -233,9 +233,9 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
   }
-  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-mark{ width:32px; height:32px; color: var(--text); flex-shrink:0; }
   .logo-text{ display:flex; flex-direction:column; gap:3px; }
-  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--text); letter-spacing:.01em; }
   .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
   html.sidebar-collapsed .logo-text{ display:none; }
   html.sidebar-collapsed .sidebar-logo{ padding: 8px; }
@@ -243,7 +243,7 @@
   .sidebar-toggle{
     position:absolute; top:20px; right:-14px;
     width:28px; height:28px; border-radius:50%;
-    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    background:var(--gold); border:2px solid var(--bg); color:var(--on-accent);
     display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
     box-shadow: 0 2px 8px rgba(0,0,0,.4);
     transition: transform .15s ease, filter .15s ease;
@@ -302,7 +302,7 @@
      menor; ver mesmo raciocínio em .painel-kpi-card .value). */
   .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold-on-light); }
   .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
-  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--text); }
   .nav-item.active .nav-icon{ color: var(--gold); }
   .nav-label{ overflow:hidden; text-overflow:ellipsis; }
   html.sidebar-collapsed .nav-label{ display:none; }
@@ -347,7 +347,7 @@
     background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
     transition: color .15s, background .15s;
   }
-  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--text); }
   .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
   .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
   .nav-subitems{ display:none; flex-direction:column; }
@@ -378,7 +378,7 @@
     color:var(--text-faint); display:flex; align-items:center; justify-content:center;
     flex-shrink:0;
   }
-  #enableNativeNotifIconBtn:hover{ background:var(--surface-2); color:var(--gold); }
+  #enableNativeNotifIconBtn:hover{ background:var(--surface-2); color:var(--text); }
   #enableNativeNotifIconBtn svg{ width:18px; height:18px; }
 
   .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
@@ -424,7 +424,7 @@
 
   .btn{
     background: var(--gold);
-    color: #1a1408;
+    color: var(--on-accent);
     border: none;
     border-radius: 9px;
     padding: 8px 14px;
@@ -435,8 +435,8 @@
   }
   .btn:hover{ filter: brightness(1.08); }
   .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
-  .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter: none; }
-  .btn.secondary:hover svg{ color: var(--gold); }
+  .btn.secondary:hover{ border-color: var(--text-faint); color: var(--text); filter: none; }
+  .btn.secondary:hover svg{ color: var(--text); }
 
   .empty{ color: var(--text-faint); font-size: 12.5px; padding: 14px; text-align:center; }
 
@@ -489,8 +489,8 @@
     background: none; border: none; color: var(--text-muted); font-size: 11.5px;
     padding: 5px 11px; border-radius: 7px; cursor: pointer; white-space:nowrap;
   }
-  .archive-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
-  .archive-filter button:not(.active):hover{ color: var(--gold); }
+  .archive-filter button.active{ background: var(--gold); color: var(--on-accent); font-weight: 600; }
+  .archive-filter button:not(.active):hover{ color: var(--text); }
   /* Mesmo visual do pill de dentro de .archive-filter, mas como botão solo
      (não faz parte do grupo mutuamente exclusivo Ativas/Arquivadas). Vários
      pills soltos (Pendentes, Grupos) dividem a linha com .archive-filter e
@@ -503,8 +503,8 @@
     border-radius: 9px; padding: 5px 11px; font-size: 11.5px; color: var(--text-muted);
     cursor: pointer; align-self: flex-start; flex-shrink:0; white-space:nowrap;
   }
-  .archive-filter-standalone.active{ background: var(--gold); color: #1a1408; font-weight: 600; border-color: var(--gold); }
-  .archive-filter-standalone:not(.active):hover{ color: var(--gold); }
+  .archive-filter-standalone.active{ background: var(--gold); color: var(--on-accent); font-weight: 600; border-color: var(--gold); }
+  .archive-filter-standalone:not(.active):hover{ color: var(--text); }
 
   /* ---------- Modais (novo grupo) ---------- */
   .overlay{
@@ -549,7 +549,7 @@
   .shortcuts-item{ display:flex; gap: 10px; align-items:flex-start; }
   .shortcuts-item-icon{
     width: 28px; height: 28px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border);
-    display:flex; align-items:center; justify-content:center; flex-shrink:0; color: var(--gold);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; color: var(--text-muted);
   }
   .shortcuts-item-icon svg{ width: 15px; height: 15px; }
   .shortcuts-item-body{ min-width:0; }
@@ -590,7 +590,7 @@
     padding:3px; border-radius:6px; flex-shrink:0; opacity:0; transition: opacity .12s, color .12s, background .12s;
   }
   .conv-item:hover .conv-item-action-btn{ opacity:1; }
-  .conv-item-action-btn:hover{ background:var(--surface); color:var(--gold); }
+  .conv-item-action-btn:hover{ background:var(--surface); color:var(--text); }
   .conv-item-action-btn.muted{ opacity:1; color:var(--text-muted); }
   /* Pendente MANUAL (ver db/schema.sql, pending_manual) — cor dourada
      pra diferenciar do badge automático abaixo (.conv-item-pending, sem
@@ -675,7 +675,7 @@
   .painel-head p{ font-size:12.5px; color:var(--text-muted); margin:4px 0 0; }
   .painel-kpi-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(180px,1fr)); gap:12px; margin-bottom:22px; }
   .painel-kpi-card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
-  .painel-kpi-card .value{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--gold-on-light); }
+  .painel-kpi-card .value{ font-family:'Fraunces',serif; font-size:26px; font-weight:600; color:var(--text); }
   .painel-kpi-card .label{ font-size:12px; color:var(--text-muted); margin-top:4px; }
   .painel-panel{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; margin-bottom:20px; }
   .painel-panel h3{ font-family:'Fraunces',serif; font-weight:600; font-size:14.5px; margin:0 0 14px; }
@@ -701,7 +701,7 @@
   .assignment-btn.secondary{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); }
   .tag-chips{ display:flex; gap:6px; flex-wrap:wrap; }
   .tag-add-btn{ background:var(--surface-2); border:1px solid var(--border); color:var(--text-muted); font-size:11px; padding:4px 10px; border-radius:100px; cursor:pointer; }
-  .tag-add-btn:hover{ border-color:var(--gold-dim); color:var(--gold); }
+  .tag-add-btn:hover{ border-color:var(--text-faint); color:var(--text); }
   .tag-add-form{ display:flex; gap:6px; align-items:center; }
   .tag-add-form input{ width:160px; padding:5px 9px; font-size:12px; }
   .tag-add-form .btn{ padding:5px 12px; font-size:11.5px; }
@@ -718,7 +718,7 @@
     background: var(--surface-2); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center;
     font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px;
-    color: var(--gold); flex-shrink: 0; position: relative;
+    color: var(--text-muted); flex-shrink: 0; position: relative;
   }
   .avatar.xs{ width:22px; height:22px; font-size:9px; }
   .avatar.sm{ width:34px; height:34px; font-size:13px; }
@@ -775,7 +775,7 @@
   .contact-stats{ display:flex; border-bottom:1px solid var(--border); }
   .contact-stat{ flex:1; text-align:center; padding:12px 4px; border-left:1px solid var(--border); }
   .contact-stat:first-child{ border-left:none; }
-  .contact-stat-value{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; color:var(--gold); }
+  .contact-stat-value{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; color:var(--text); }
   .contact-stat-label{ font-size:10px; color:var(--text-faint); text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
 
   /* Navegação por seções do painel de detalhes (abaixo dos KPIs de
@@ -899,7 +899,7 @@
     margin:auto 10px 10px; padding:11px 12px; border-radius:9px; background:var(--surface-2); border:1px solid var(--border);
     transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
-  .contact-summary:hover{ transform: translateY(-2px); border-color: var(--gold-dim); box-shadow: 0 6px 16px rgba(0,0,0,.28); }
+  .contact-summary:hover{ transform: translateY(-2px); border-color: var(--text-faint); box-shadow: 0 6px 16px rgba(0,0,0,.28); }
   .contact-summary-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
   /* Rosto de sentimento (ver renderSentimentFace) — ícone SVG pequeno ao
      lado do rótulo "Resumo da conversa", cor conforme o ânimo do contato
@@ -931,7 +931,7 @@
      conversa específica. */
   .contact-summary-label{ font-size:11px; font-weight:600; color:var(--text-muted); display:flex; align-items:center; gap:5px; }
   .contact-summary-headline{ font-size:13.5px; font-weight:700; color:var(--text); margin:0 0 3px; line-height:1.35; }
-  .contact-summary-subtitle{ font-size:11px; font-weight:600; color:var(--gold); margin:0 0 8px; line-height:1.35; }
+  .contact-summary-subtitle{ font-size:11px; font-weight:600; color:var(--text); margin:0 0 8px; line-height:1.35; }
   .contact-summary-text{ font-size:12px; line-height:1.5; color:var(--text-muted); margin:0; }
   .contact-summary-text.empty-summary{ color:var(--text-faint); font-style:italic; }
   .contact-summary-meta{ font-size:9.5px; color:var(--text-faint); margin:6px 0 0; }
@@ -939,7 +939,7 @@
     background:none; border:none; color:var(--gold-dim); font-size:9.5px; cursor:pointer;
     padding:0; text-decoration:underline; font-family:inherit; margin-left:6px;
   }
-  .contact-summary-history-link:hover{ color:var(--gold); }
+  .contact-summary-history-link:hover{ color:var(--text); }
 
   /* Modal de histórico de resumos — cada versão é um bloco próprio,
      reaproveita as classes .contact-summary-* já usadas no painel. */
@@ -968,14 +968,14 @@
     display:block; width:100%; text-align:left; background:none; border:none; color:var(--text);
     font-size:12.5px; padding:8px 12px; cursor:pointer; font-family:inherit; border-radius:6px;
   }
-  .export-menu button:hover{ background:var(--surface); color:var(--gold); }
+  .export-menu button:hover{ background:var(--surface); color:var(--text); }
   .icon-btn{
     width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border);
     background: var(--surface-2); color: var(--text-muted);
     display: flex; align-items: center; justify-content: center; cursor: pointer;
     transition: border-color .15s, color .15s;
   }
-  .icon-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .icon-btn:hover{ border-color: var(--text-faint); color: var(--text); }
   .icon-btn svg{ width: 17px; height: 17px; }
   .icon-btn.recording{ background: var(--red); border-color: var(--red); color: #fff; animation: recPulse 1.2s ease-in-out infinite; }
   .icon-btn.active{ background: rgba(var(--gold-rgb),.14); border-color: var(--gold-dim); color: var(--gold); }
@@ -1031,7 +1031,7 @@
     color: var(--text-muted); display: flex; align-items: center; justify-content: center;
     cursor: pointer; font-size: 12.5px; padding: 0; transition: background .15s, color .15s;
   }
-  .bubble-action-btn:hover{ background: var(--gold-dim); color: var(--bg); }
+  .bubble-action-btn:hover{ background: var(--text-faint); color: var(--bg); }
   .emoji-picker{ display: flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 100px; padding: 3px; }
   .emoji-opt{ width: 25px; height: 25px; border: none; background: none; font-size: 15px; cursor: pointer; border-radius: 50%; }
   .emoji-opt:hover{ background: var(--surface); transform: scale(1.15); }
@@ -1039,11 +1039,11 @@
   /* Mensagem citada ("responder") — pequeno bloco acima do conteúdo, dentro
      do próprio balão. */
   .quoted-block{
-    border-left: 3px solid var(--gold-dim); background: rgba(0,0,0,.14); border-radius: 6px;
+    border-left: 3px solid var(--text-faint); background: rgba(0,0,0,.14); border-radius: 6px;
     padding: 5px 8px; margin-bottom: 6px; font-size: 12px; line-height: 1.3; cursor: pointer;
   }
-  .bubble-row.theirs .quoted-block{ background: rgba(var(--dots-rgb),.06); border-left-color: var(--gold); }
-  .quoted-author{ font-weight: 600; color: var(--gold); margin-bottom: 1px; font-size: 11.5px; }
+  .bubble-row.theirs .quoted-block{ background: rgba(var(--dots-rgb),.06); border-left-color: var(--text-faint); }
+  .quoted-author{ font-weight: 600; color: var(--text); margin-bottom: 1px; font-size: 11.5px; }
   .quoted-text{
     opacity: .8; overflow: hidden; text-overflow: ellipsis;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -1061,9 +1061,9 @@
     background: var(--surface-2); border-top: 1px solid var(--border); flex-shrink: 0;
   }
   .reply-preview-bar[hidden]{ display: none; }
-  .reply-preview-bar .bar-icon{ color: var(--gold); flex-shrink: 0; }
+  .reply-preview-bar .bar-icon{ color: var(--text-muted); flex-shrink: 0; }
   .reply-preview-body{ flex: 1; min-width: 0; }
-  .reply-preview-author{ font-size: 11.5px; font-weight: 600; color: var(--gold); }
+  .reply-preview-author{ font-size: 11.5px; font-weight: 600; color: var(--text); }
   .reply-preview-text{ font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bubble{
     /* 68% ficava enorme em monitores largos (uma mensagem de texto comum
@@ -1139,10 +1139,10 @@
     min-height: 90px;
   }
   .media-error .media-retry-btn{
-    background: none; border: 1px solid var(--border); color: var(--gold-dim);
+    background: none; border: 1px solid var(--border); color: var(--text-muted);
     font-size: 12px; padding: 5px 12px; border-radius: 100px; cursor: pointer; font-family: inherit;
   }
-  .media-error .media-retry-btn:hover{ color: var(--gold); border-color: var(--gold-dim); }
+  .media-error .media-retry-btn:hover{ color: var(--text); border-color: var(--text-faint); }
 
   /* Cartão de documento (PDF, PPT, DOCX, planilha, zip...) — o WhatsApp não
      tem como renderizar um anexo genérico como mídia embutida, então mostra
@@ -1188,10 +1188,10 @@
 
   /* ---------- Estados vazio/carregando/erro ---------- */
   .state-screen{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 30px; text-align: center; color: var(--text-muted); }
-  .state-screen .state-icon{ width: 46px; height: 46px; color: var(--gold-dim); }
+  .state-screen .state-icon{ width: 46px; height: 46px; color: var(--text-faint); }
   .state-screen h3{ font-family: 'Fraunces', serif; font-weight: 500; font-size: 16px; color: var(--text); margin: 4px 0 0; }
   .state-screen p{ font-size: 12.5px; max-width: 280px; margin: 0; color: var(--text-faint); }
-  .spinner{ width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--gold); animation: spin .8s linear infinite; }
+  .spinner{ width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--text-faint); animation: spin .8s linear infinite; }
   @keyframes spin{ to{ transform: rotate(360deg); } }
 
   /* ---------- Composer ---------- */
@@ -1211,10 +1211,10 @@
   .composer textarea::placeholder{ color: var(--text-faint); }
   .composer textarea::-webkit-scrollbar{ width: 6px; }
   .composer textarea::-webkit-scrollbar-track{ background: transparent; }
-  .composer textarea::-webkit-scrollbar-thumb{ background: var(--gold-dim); border-radius: 100px; }
-  .composer textarea::-webkit-scrollbar-thumb:hover{ background: var(--gold); }
+  .composer textarea::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 100px; }
+  .composer textarea::-webkit-scrollbar-thumb:hover{ background: var(--text-faint); }
   .send-btn{
-    width: 40px; height: 40px; border-radius: 11px; border: none; background: var(--gold); color: #1a1408;
+    width: 40px; height: 40px; border-radius: 11px; border: none; background: var(--gold); color: var(--on-accent);
     display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
     transition: filter .15s, transform .1s;
   }

@@ -46,6 +46,7 @@
     --accent: #3d8073;
     --accent-rgb: 61,128,115;
     --accent-hover: #4a9686;
+    --on-accent: #ffffff;
 
     --gold: var(--accent);
     --gold-rgb: var(--accent-rgb);
@@ -77,6 +78,7 @@
     --accent: #3d7566;
     --accent-rgb: 61,117,102;
     --accent-hover: #2f5c50;
+    --on-accent: #ffffff;
 
     --gold: var(--accent);
     --gold-rgb: var(--accent-rgb);
@@ -162,7 +164,7 @@
   .shortcuts-item{ display:flex; gap: 10px; align-items:flex-start; }
   .shortcuts-item-icon{
     width: 28px; height: 28px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border);
-    display:flex; align-items:center; justify-content:center; flex-shrink:0; color: var(--gold);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; color: var(--text-muted);
   }
   .shortcuts-item-icon svg{ width: 15px; height: 15px; }
   .shortcuts-item-body{ min-width:0; }
@@ -210,9 +212,9 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
   }
-  .logo-mark{ width:32px; height:32px; color: var(--gold); flex-shrink:0; }
+  .logo-mark{ width:32px; height:32px; color: var(--text); flex-shrink:0; }
   .logo-text{ display:flex; flex-direction:column; gap:3px; }
-  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--gold); letter-spacing:.01em; }
+  .logo-text .firm-name{ font-family:'Fraunces',serif; font-weight:700; font-size:12px; line-height:1.3; color:var(--text); letter-spacing:.01em; }
   .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.15em; text-transform:uppercase; color:var(--text-faint); }
   html.sidebar-collapsed .logo-text{ display:none; }
   html.sidebar-collapsed .sidebar-logo{ padding: 20px 8px; }
@@ -220,7 +222,7 @@
   .sidebar-toggle{
     position:absolute; top:20px; right:-14px;
     width:28px; height:28px; border-radius:50%;
-    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    background:var(--gold); border:2px solid var(--bg); color:var(--on-accent);
     display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
     box-shadow: 0 2px 8px rgba(0,0,0,.4);
     transition: transform .15s ease, filter .15s ease;
@@ -274,7 +276,7 @@
   .nav-item:hover{ background: var(--surface-2); color: var(--text); }
   .nav-item.active{ background: rgba(var(--gold-rgb),.12); color: var(--gold); }
   .nav-icon{ display:inline-flex; flex-shrink:0; width:19px; height:19px; transition: transform .18s ease, color .18s ease; }
-  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--gold); }
+  .nav-item:hover .nav-icon{ transform: scale(1.16); color: var(--text); }
   .nav-item.active .nav-icon{ color: var(--gold); }
   .nav-label{ overflow:hidden; text-overflow:ellipsis; }
   html.sidebar-collapsed .nav-label{ display:none; }
@@ -302,7 +304,7 @@
     background:transparent; border:none; color:var(--text-faint); cursor:pointer; border-radius:6px;
     transition: color .15s, background .15s;
   }
-  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--gold); }
+  .nav-caret-btn:hover{ background:var(--surface-2); color:var(--text); }
   .nav-caret-btn svg{ width:14px; height:14px; transition: transform .18s ease; }
   .nav-group.open .nav-caret-btn svg{ transform: rotate(180deg); }
   .nav-subitems{ display:none; flex-direction:column; }
@@ -331,7 +333,7 @@
     color:var(--text-faint); display:flex; align-items:center; justify-content:center;
     flex-shrink:0;
   }
-  #enableNativeNotifIconBtn:hover{ background:var(--surface-2); color:var(--gold); }
+  #enableNativeNotifIconBtn:hover{ background:var(--surface-2); color:var(--text); }
   #enableNativeNotifIconBtn svg{ width:18px; height:18px; }
 
   .toast-stack{ position:fixed; bottom:22px; right:22px; display:flex; flex-direction:column; gap:10px; z-index:100; max-width:340px; }
@@ -385,16 +387,16 @@
     font-family: inherit;
   }
   .refresh-btn svg{ width: 13px; height: 13px; }
-  .refresh-btn:hover{ border-color: var(--gold-dim); color: var(--gold); }
+  .refresh-btn:hover{ border-color: var(--text-faint); color: var(--text); }
   .refresh-btn:hover svg{ transform: rotate(-90deg); transition: transform .3s ease; }
 
   .btn{
-    background: var(--gold); color: #1a1408; border: none; border-radius: 9px;
+    background: var(--gold); color: var(--on-accent); border: none; border-radius: 9px;
     padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer;
   }
   .btn:hover{ filter: brightness(1.08); }
   .btn.secondary{ background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
-  .btn.secondary:hover{ border-color: var(--gold-dim); color: var(--gold); filter:none; }
+  .btn.secondary:hover{ border-color: var(--text-faint); color: var(--text); filter:none; }
 
   .overlay{
     position: fixed; inset: 0; background: rgba(10,8,5,.6);
@@ -426,8 +428,8 @@
     cursor: pointer;
     font-family: inherit;
   }
-  .origin-filter button.active{ background: var(--gold); color: #1a1408; font-weight: 600; }
-  .origin-filter button:not(.active):hover{ color: var(--gold); }
+  .origin-filter button.active{ background: var(--gold); color: var(--on-accent); font-weight: 600; }
+  .origin-filter button:not(.active):hover{ color: var(--text); }
 
   /* ======================================================
      Ícone informativo (ⓘ) + tooltip custom — regra global: KPI/gráfico/
@@ -449,7 +451,7 @@
     transition: color .14s, border-color .14s;
   }
   .info-icon svg{ width: 10px; height: 10px; }
-  .info-icon:hover, .info-icon:focus-visible{ color: var(--gold); border-color: var(--gold-dim); outline: none; }
+  .info-icon:hover, .info-icon:focus-visible{ color: var(--text); border-color: var(--text-faint); outline: none; }
 
   .info-pop{
     position: fixed; z-index: 95; max-width: 280px;
@@ -493,12 +495,12 @@
      curtos sobre os números do time (ver GET /api/whatsapp/insights). */
   .insights-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
   .insights-head h2{ font-family:'Fraunces',serif; font-weight:600; font-size:14px; margin:0; display:flex; align-items:center; gap:7px; }
-  .insights-head h2 svg{ width:15px; height:15px; color:var(--gold); }
+  .insights-head h2 svg{ width:15px; height:15px; color:var(--text-muted); }
   .insights-refresh{
     background:none; border:1px solid var(--border); color:var(--text-muted); border-radius:7px;
     padding:5px 10px; font-size:11.5px; cursor:pointer; font-family:inherit; display:flex; align-items:center; gap:5px;
   }
-  .insights-refresh:hover:not(:disabled){ border-color:var(--gold-dim); color:var(--gold); }
+  .insights-refresh:hover:not(:disabled){ border-color:var(--text-faint); color:var(--text); }
   .insights-refresh:disabled{ opacity:.5; cursor:not-allowed; }
   .insights-refresh svg{ width:12px; height:12px; }
   .insights-refresh.spinning svg{ animation: spin .8s linear infinite; }
@@ -555,7 +557,7 @@
     font-family: 'Fraunces', serif;
     font-size: 26px;
     font-weight: 600;
-    color: var(--gold);
+    color: var(--text);
     line-height: 1.1;
     margin-top: 9px;
     letter-spacing: -.01em;
@@ -647,7 +649,7 @@
     padding: 15px 16px;
   }
   .respo-stat .rs-label{ font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
-  .respo-stat .rs-value{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px; color: var(--gold); margin-top: 6px; line-height: 1.1; }
+  .respo-stat .rs-value{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px; color: var(--text); margin-top: 6px; line-height: 1.1; }
   .respo-stat .rs-sub{ font-size: 10.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.4; }
   .respo-note{ font-size: 11px; color: var(--text-faint); margin: 12px 0 0; line-height: 1.5; }
 
@@ -677,7 +679,6 @@
   .live-card{
     background: var(--surface);
     border: 1px solid var(--border);
-    border-top: 2px solid var(--gold-dim);
     border-radius: var(--radius);
     padding: 15px 16px;
   }
@@ -690,8 +691,8 @@
     color: var(--text); display: inline-flex; align-items: center; gap: 6px;
   }
   .live-card-count{
-    font-size: 10.5px; font-weight: 600; color: var(--gold);
-    background: rgba(var(--gold-rgb), .12); border-radius: 100px;
+    font-size: 10.5px; font-weight: 600; color: var(--text-muted);
+    background: var(--surface-2); border-radius: 100px;
     padding: 2px 8px; white-space: nowrap;
   }
   .live-list{ display: flex; flex-direction: column; }
@@ -705,14 +706,14 @@
     transition: background .12s;
   }
   .live-conv:hover{ background: var(--surface-2); }
-  .live-conv:focus-visible{ outline: 2px solid var(--gold-dim); outline-offset: -2px; }
+  .live-conv:focus-visible{ outline: 2px solid var(--text-faint); outline-offset: -2px; }
   .live-conv:first-child{ padding-top: 2px; }
   .live-conv:last-child{ padding-bottom: 2px; border-bottom: none; }
   .live-avatar{
     width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
     background: var(--surface-2); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center;
-    font-family: 'Fraunces', serif; font-weight: 600; font-size: 13px; color: var(--gold);
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 13px; color: var(--text-muted);
   }
   .live-avatar svg{ width: 16px; height: 16px; }
   .live-conv-body{ min-width: 0; flex: 1; }
@@ -742,7 +743,7 @@
     font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 100px;
     background: var(--surface-2); color: var(--text-muted);
   }
-  .live-badge.unread{ background: rgba(var(--gold-rgb), .15); color: var(--gold); }
+  .live-badge.unread{ background: var(--surface); color: var(--text); }
   .live-more{
     font-size: 11px; color: var(--text-faint); text-align: center;
     padding-top: 11px; margin-top: 4px; border-top: 1px solid var(--border);
@@ -775,7 +776,7 @@
     width: 38px; height: 38px; border-radius: 50%; position: relative;
     background: var(--surface-2); border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center;
-    font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; color: var(--gold);
+    font-family: 'Fraunces', serif; font-weight: 600; font-size: 14px; color: var(--text-muted);
   }
   .agent-avatar .agent-dot{
     position: absolute; right: -1px; bottom: -1px; width: 9px; height: 9px; border-radius: 50%;
@@ -865,8 +866,8 @@
     text-decoration: none;
     white-space: nowrap;
   }
-  .credit-badge:hover{ color: var(--gold); border-color: var(--gold-dim); }
-  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--gold); flex-shrink: 0; }
+  .credit-badge:hover{ color: var(--text); border-color: var(--text-faint); }
+  .credit-badge .dot{ width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   /* Banner de MODO DEMO — achado de segurança (2026-08-31): sem aviso
      visível, um usuário real que passou por ?demo=1 uma vez fica "preso"
      vendo dados fictícios por até 4h sem perceber. Mostrado só via JS
