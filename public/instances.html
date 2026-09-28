@@ -617,7 +617,7 @@
       <span class="firm-name">DapZap</span>
     </div>
     <button class="sidebar-toggle" id="sidebarToggle" title="Recolher/expandir menu">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 6 8.5 12 14.5 18"/></svg>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><line x1="10" y1="4" x2="10" y2="20"/></svg>
     </button>
   </div>
 
@@ -723,7 +723,7 @@
   <div class="panel">
     <div class="panel-head">
       <h2>Conexões ativas <span id="instanceCount" style="font-weight:400;font-size:13px;color:var(--text-faint);"></span></h2>
-      <button class="btn" id="newInstanceBtn">+ Nova instância</button>
+      <button class="btn" id="newInstanceBtn">+ Conectar outro WhatsApp</button>
     </div>
     <div id="instancesWrap">
       <p class="empty">Carregando…</p>
@@ -809,7 +809,7 @@
 
 <div class="overlay" id="newInstanceModal">
   <div class="modal">
-    <h3>Nova instância</h3>
+    <h3>Conectar outro WhatsApp</h3>
     <input type="text" id="newInstanceInput" placeholder="Ex: Vendas, Suporte…">
     <div class="modal-actions">
       <button class="btn secondary" id="newInstanceCancel">Cancelar</button>
@@ -890,7 +890,7 @@
       { icon: 'sidebar', title: "Sidebar retrátil", desc: "O botão redondo na borda da sidebar recolhe o menu pra só ícones — útil em telas menores." },
     ],
     page: [
-      { icon: 'export', title: "Conectar via QR Code", desc: "\"+ Nova instância\" gera um QR pra parear um número de WhatsApp novo." },
+      { icon: 'export', title: "Conectar via QR Code", desc: "\"+ Conectar outro WhatsApp\" gera um QR pra parear um número de WhatsApp novo." },
       { icon: 'users', title: "Delegar acesso", desc: "Dê acesso a uma instância pra outro usuário sem transferir a titularidade dela." },
     ],
   };
@@ -1599,7 +1599,7 @@
         ` : ''}
         <div class="instance-actions">
           ${i.needsAttention ? `<button type="button" data-reconnect="${i.id}">Tentar reconectar</button>` : ''}
-          ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Ver QR</button>` : ''}
+          ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Conectar WhatsApp</button>` : ''}
           <button type="button" class="instance-history-btn" data-history="${i.id}" data-label="${escapeHtml(i.label)}">Ver histórico</button>
           ${i.delegated ? '' : `
             <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
