@@ -20,9 +20,9 @@
   // Tema claro/escuro (2026-08-30) — preferência POR NAVEGADOR (mesmo
   // padrão de sidebarCollapsed acima, localStorage puro, sem round-trip
   // ao servidor), aplicada ANTES do primeiro paint pra nunca piscar o
-  // tema errado. Padrão 'dark' se nunca escolhido (comportamento atual
-  // do projeto, sem mudança pra quem não mexer no switch novo).
-  if (localStorage.getItem('theme') !== 'dark') {
+  // tema errado. Padrão 'dark' (feedback do usuário, 2026-09-28: o tema
+  // escuro repintado ficou bom o bastante pra voltar a ser o padrão).
+  if (localStorage.getItem('theme') === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
   }
   // Paleta personalizada REMOVIDA no redesign visual (Fase 1, 2026-09-25)
@@ -237,7 +237,7 @@
     display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center;
     padding: 8px 12px; gap:8px; border-bottom:1px solid var(--border); flex-shrink:0;
   }
-  .logo-mark{ width:32px; height:32px; flex-shrink:0; object-fit:contain; }
+  .logo-mark{ width:44px; height:44px; flex-shrink:0; object-fit:contain; }
   .logo-text{ display:flex; flex-direction:column; gap:3px; }
   .logo-text .firm-name{ font-family:'Inter',sans-serif; font-weight:700; font-size:14px; line-height:1.3; color:var(--text); letter-spacing:-.01em; }
   .logo-text .firm-sub{ font-family:'Inter',sans-serif; font-weight:500; font-size:8px; letter-spacing:.03em; color:var(--text-faint); }
