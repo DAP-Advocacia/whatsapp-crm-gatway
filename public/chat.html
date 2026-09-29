@@ -5267,14 +5267,27 @@
   }
 
   async function hydrateOneMedia(el, url) {
-    if (!url.startsWith('/')) { setMediaSrc(el, url); return; }
-    if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); return; }
+    if (!url.startsWith('/')) { setMediaSrc(el, url); hideMediaError(el); return; }
+    if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); hideMediaError(el); return; }
     try {
       const res = await apiFetch(url);
-      if (!res.ok) throw new Error('falha ao buscar mídia');
+      if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
       const blob = await res.blob();
+      // Corpo vazio (ex: redirect pra signed URL que expirou/falhou mas
+      // respondeu 200 sem conteúdo) nunca toca/renderiza — sem essa checagem
+      // o áudio/vídeo ficava com um blob inválido e só o listener `error`
+      // nativo (mais lento, às vezes nunca dispara pra áudio) pegava isso.
+      if (blob.size === 0) throw new Error('mídia vazia');
       const blobUrl = URL.createObjectURL(blob);
       mediaBlobCache.set(url, blobUrl);
+      // Escondida ANTES de trocar o src: se um erro nativo antigo (de uma
+      // tentativa anterior que falhou) já tinha aberto a caixa de "não foi
+      // possível carregar", o sucesso desta tentativa precisa fechá-la de
+      // volta — antes disso nunca acontecia, e o áudio ficava tocável mas
+      // com a mensagem de erro presa na tela (relatado pelo usuário
+      // 2026-09-29: "depois de 1-2 min os áudios carregaram, mas continua
+      // como não foi possível carregar").
+      hideMediaError(el);
       setMediaSrc(el, blobUrl);
     } catch (err) {
       console.error('Erro ao carregar mídia:', url, err);
@@ -5705,7 +5718,28 @@
         const isActive = state.active && state.active.sessionId === id && state.active.phone === phone;
         if (isActive) {
           const alreadyShown = state.messages.some((m) => m.id === payload.message.id);
-          if (!alreadyShown) { state.messages.push(payload.message); renderMessages(); scheduleSummaryRefresh(); }
+          if (!alreadyShown) {
+            // Eco de mensagem enviada por NÓS pode chegar pelo socket ANTES
+            // da resposta HTTP de /send(-media) voltar — nesse instante a
+            // otimista ainda tem id 'tmp-...' (resolveOptimisticId só roda
+            // depois), então o dedupe por id acima não pega e a mensagem
+            // real virava uma SEGUNDA linha na tela por um frame, até a
+            // resposta HTTP chegar e remover a otimista (usuário reportou:
+            // "aparece duas rápido, uma some, fica só a certa" — nunca teve
+            // duplicata de verdade, só esse flash visual). Substitui a
+            // otimista pendente em vez de empurrar uma nova.
+            const pendingOptimistic = payload.message.direction === 'out'
+              ? state.messages.find((m) => typeof m.id === 'string' && m.id.startsWith('tmp-'))
+              : null;
+            if (pendingOptimistic) {
+              const idx = state.messages.indexOf(pendingOptimistic);
+              state.messages[idx] = payload.message;
+            } else {
+              state.messages.push(payload.message);
+            }
+            renderMessages();
+            scheduleSummaryRefresh();
+          }
         }
 
         // Notifica só quando NÃO é a conversa aberta, é mensagem recebida (não

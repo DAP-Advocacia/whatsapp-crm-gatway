@@ -1398,8 +1398,13 @@
 
       try {
         const res = await apiFetch(url);
-        if (!res.ok) throw new Error('falha ao buscar mídia');
+        if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
         const blob = await res.blob();
+        // Corpo vazio (ex: redirect pra signed URL que falhou mas respondeu
+        // 200 sem conteúdo) nunca toca/renderiza — mesmo achado de
+        // chat.html (2026-09-29): sem essa checagem o elemento ficava com
+        // um blob inválido, silenciosamente.
+        if (blob.size === 0) throw new Error('mídia vazia');
         const blobUrl = URL.createObjectURL(blob);
         mediaBlobCache.set(url, blobUrl);
         setMediaSrc(el, blobUrl);
@@ -2241,7 +2246,23 @@
           // própria aba já exibiu de forma otimística ao enviar
           const alreadyShown = state.messages.some((m) => m.id === payload.message.id);
           if (!alreadyShown) {
-            state.messages.push(payload.message);
+            // Eco do que a própria aba enviou pode chegar pelo socket ANTES
+            // da resposta HTTP de send/send-media voltar — nesse instante a
+            // otimista ainda tem id 'tmp-...' (resolveOptimisticId só roda
+            // depois), então o dedupe por id acima não pega e a mensagem
+            // real virava uma SEGUNDA linha por um frame, até a resposta
+            // HTTP remover a otimista (mesmo achado de chat.html,
+            // 2026-09-29 — "pisca duas, uma some"). Substitui a otimista
+            // pendente em vez de empurrar uma nova.
+            const pendingOptimistic = payload.message.direction === 'out'
+              ? state.messages.find((m) => typeof m.id === 'string' && m.id.startsWith('tmp-'))
+              : null;
+            if (pendingOptimistic) {
+              const idx = state.messages.indexOf(pendingOptimistic);
+              state.messages[idx] = payload.message;
+            } else {
+              state.messages.push(payload.message);
+            }
             renderMessages();
           }
         }

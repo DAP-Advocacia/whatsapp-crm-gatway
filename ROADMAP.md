@@ -536,3 +536,67 @@ Validação: sintaxe de todos os `<script>` inline via `vm.Script` (sem
 erro), HTTP 200 nas 21 páginas via servidor local, grep confirma zero
 ocorrência restante de `credit-badge" href` e 21/21 com
 `BX24.openPath('/company/personal/user/5305/')`.
+
+## 10. Uso real em produção (Caio/testegabriel) — 3 bugs de chat (2026-09-29)
+
+Usuário testou o chat de verdade com um contato externo (Caio Araujo) e
+reportou 3 problemas com prints do nosso painel + WhatsApp Web real do
+outro lado (prova de que o envio/recebimento em si funcionava, só a
+exibição no nosso app que falhava).
+
+**(a) Áudio sempre "Não foi possível carregar o áudio" (envio e
+recebimento), mesmo tendo "carregado" depois de 1-2 min.** Causa raiz
+em `hydrateOneMedia()` (`chat.html`): o caminho de SUCESSO nunca
+chamava `hideMediaError(el)` — só o `catch` chamava `showMediaError`.
+Se qualquer tentativa anterior (fetch falho, evento `error` nativo do
+elemento) já tinha mostrado a caixa de erro, uma tentativa posterior
+bem-sucedida trocava o `src`/blob mas a caixa de erro ficava presa na
+tela pra sempre (o áudio ficava tocável de fato, só a UI que nunca
+avisava). Também sem proteção contra `blob.size === 0` (corpo vazio —
+ex: signed URL do Supabase expirada respondendo 200 sem conteúdo),
+que geraria um blob inválido silenciosamente.
+
+Corrigido: `hideMediaError(el)` chamado em TODOS os caminhos de
+sucesso de `hydrateOneMedia` (URL direta, cache, fetch novo), e
+`blob.size === 0` agora lança erro explícito (cai no catch, mostra a
+caixa com botão "Tentar de novo" de forma correta, em vez de silêncio).
+Aplicado em `chat.html` (com a UI de erro completa) e `index.html`
+(mini-chat, só a checagem de blob vazio — esse arquivo não tem a UI de
+`.media-error`, mídia lá é best-effort silencioso).
+
+**(b) Imagem aparece mas com "Não foi possível carregar a imagem /
+Tentar de novo" grudado embaixo.** Mesma causa raiz de (a) — a imagem
+às vezes carrega numa segunda tentativa, mas a caixa de erro da
+primeira tentativa nunca era escondida. Resolvido pela mesma correção
+de `hideMediaError` no caminho de sucesso.
+
+**(c) "Bug rápido": mensagem enviada pisca em duplicidade (aparecem
+duas, uma some, fica só a certa) — sem duplicata real salva.** Causa
+raiz: mensagem otimista (`id: 'tmp-...'`) inserida na hora do envio,
+ANTES da resposta HTTP de `/send`/`/send-media` voltar. Se o eco da
+mensagem chegar pelo WebSocket nesse meio-tempo (comum — o socket
+costuma ser mais rápido que o round-trip HTTP completo), o dedupe por
+id (`payload.message.id === m.id`) não reconhecia a otimista (ids
+diferentes: `tmp-...` vs id real), então o socket empurrava uma
+SEGUNDA entrada. Só quando a resposta HTTP chegava depois,
+`resolveOptimisticId` removia a otimista (já havia lógica pra isso,
+mas só cobria a duplicata *persistente* — não o flash visual de
+1 frame com as duas na tela ao mesmo tempo).
+
+Corrigido: handler do socket agora, ao receber uma mensagem própria
+(`direction === 'out'`) sem correspondência ainda, procura uma
+otimista pendente (id começando com `tmp-`) e SUBSTITUI o item no
+array em vez de empurrar um novo — nunca há um frame com as duas.
+`resolveOptimisticId` continua funcionando sem alteração (o filtro por
+referência de objeto simplesmente não encontra mais nada pra remover,
+o que é inofensivo). Aplicado em `chat.html` e `index.html` (mesma
+lógica duplicada nos dois arquivos).
+
+Validação: sintaxe de scripts inline OK (`vm.Script`) nos dois
+arquivos, HTTP 200, teste isolado em Node simulando as duas ordens de
+chegada possíveis (socket antes/depois da resposta HTTP) e o caso de
+mensagem recebida no meio — 3/3 cenários sem duplicata e sem perda de
+mensagem.
+
+Figurinha com legenda "não importa muito" pro usuário — não investigado
+(fora de prioridade, por pedido dele).
