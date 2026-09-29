@@ -335,12 +335,21 @@ commits separados por item.
    redesign (Fases 0-3) só cobriu as 4 páginas do menu principal
    (chat/contacts/dashboard/instances); `index.html` ficou de fora do
    escopo até agora.
-2. **Conversas demoram a aparecer no Chat** — reportado como lentidão
-   perceptível ao abrir a lista de conversas. Ainda não investigado se é
-   regressão do redesign ou comportamento pré-existente (ex: efeito
-   colateral do mesmo excesso de sessões do item 5, agora corrigido —
-   reavaliar depois da correção de sessões órfãs estar em produção há
-   um tempo).
+2. **Conversas demoram a aparecer no Chat — RESOLVIDO (2026-09-29)**.
+   Causa raiz encontrada em `store.listConversations` (`src/store.js`):
+   a query monta a lista de conversas (até 200) com uma subquery LATERAL
+   por linha que conta notificações não lidas, filtrando por
+   `target->>'sessionId'`/`target->>'phone'` (campos dentro de uma
+   coluna `jsonb`) — **sem nenhum índice** pra esse acesso. Isso forçava
+   um table scan completo da tabela `notifications` inteira, uma vez
+   PARA CADA conversa retornada — o custo cresce tanto com o número de
+   conversas quanto com o histórico de notificações acumulado (o print
+   do usuário mostrava 155+11 notificações só numa conta). Bug
+   pré-existente, não regressão do redesign. Corrigido com um índice de
+   expressão parcial (`idx_notifications_unread_target`, `db/schema.sql`)
+   casando exatamente o filtro da subquery — aplicado em produção via
+   `node db/migrate.js` (operação aditiva seguro, `create index if not
+   exists`, não mexe em nenhum dado existente).
 3. **Item "Como usar (vídeo)" ainda aparece na sidebar** (a partir de
    Contatos em diante) — precisa ser removido/substituído pelo item
    novo "Como usar?" (página de tutorial ilustrado, ver `public/how-to.html`,

@@ -488,6 +488,19 @@ create table if not exists notifications (
 
 create index if not exists idx_notifications_owner_created on notifications (owner_id, created_at desc);
 create index if not exists idx_notifications_owner_unread on notifications (owner_id, read);
+-- Índice de expressão (2026-09-29) — GET /conversations (ver
+-- store.listConversations) faz uma subquery LATERAL de contagem de não
+-- lidas por CONVERSA (até 200 por chamada), filtrando por
+-- target->>'sessionId'/target->>'phone'. Sem este índice, cada uma
+-- dessas subqueries fazia table scan completo em `notifications` — na
+-- prática, uma varredura da tabela inteira MULTIPLICADA por até 200,
+-- toda vez que a lista de conversas era carregada. Usuário reportou
+-- lentidão real pra abrir o Chat. Filtro composto (not read primeiro,
+-- já que a subquery sempre filtra read=false) casa exatamente com o
+-- WHERE da query.
+create index if not exists idx_notifications_unread_target
+  on notifications ((target->>'sessionId'), (target->>'phone'))
+  where read = false;
 
 -- Histórico de AÇÕES reais por pessoa, pro Admin (modal Detalhado, tela
 -- Usuários, ver HANDOFF Parte DB) — deliberadamente SEM conteúdo digitado
