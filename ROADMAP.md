@@ -403,3 +403,53 @@ commits separados por item.
    ancoradas embaixo quando a conversa tem poucas) sem quebrar o
    cálculo de overflow do container — `.messages > :first-child{
    margin-top: auto }` em vez de `justify-content` no pai.
+
+## 7. Altura de página inconsistente entre abas — RESOLVIDO (2026-09-29)
+
+Usuário reportou: a altura da página varia dependendo da aba clicada —
+ficou muito perceptível em `how-to.html` (bastante conteúdo, ficava bem
+mais alta que o resto) mas existia em todas as páginas de conteúdo
+(`dashboard`, `contacts`, `instances`, `notifications`, e as 12 páginas
+"antigas" fora do menu enxuto). Causa: `html, body{ min-height: 100% }`
+sem `overflow` travado — cada página crescia conforme o próprio
+conteúdo, e o `<body>` inteiro rolava. Diferente de `chat.html` (já
+usava altura fixa de viewport com painéis internos rolando).
+
+Corrige travando `html, body{ height: 100%; overflow: hidden }` (nunca
+mais o documento rola) e `#app{ height: 100vh; overflow-y: auto;
+box-sizing: border-box }` (a área de conteúdo é quem rola por dentro,
+sempre do tamanho exato da tela) — preservando o `max-width`/
+`margin-left`/`padding` específico de cada página (variam entre 720px
+e 1180px conforme o layout). Aplicado nas 17 páginas com o padrão
+antigo (`dashboard`, `contacts`, `instances`, `notifications`, `admin`,
+`agent-examples`, `agente-ia`, `campaign`, `campaign-metrics`,
+`campaign-schedule`, `conversation-analysis`, `faq`, `lead-metrics`,
+`onboarding`, `settings`, `sites`, `suggestions`) — `chat.html`,
+`how-to.html` e `index.html` já usavam (ou já foram corrigidas para
+usar) esse padrão de altura fixa antes.
+
+Validação: teste via Playwright em 6 páginas representativas —
+`html.scrollHeight === html.clientHeight` (documento nunca rola) em
+todas, `#app` rola internamente só quando o conteúdo excede a tela
+(confirmado tanto o caso "rola" quanto "não precisa rolar"). Sintaxe OK
+e HTTP 200 nas 24 páginas do projeto.
+
+## 8. Mini-chat do card do Bitrix — área vazia à direita (2026-09-29)
+
+Usuário reportou (print real, dentro de um card de Negócio): uma faixa
+vertical clara e uma área preta totalmente vazia no canto direito da
+tela do mini-chat (`public/index.html`), como se o conteúdo não
+preenchesse a largura real do iframe do placement. Confirmado com o
+usuário que **já existia antes do redesign** (não é regressão desta
+sessão).
+
+Causa provável: `#app`/`html`/`body` não tinham `width: 100%`
+explícito — em determinadas larguras de iframe do Bitrix, o
+`display:flex` sem width podia não esticar para a largura real
+disponível. Corrigido adicionando `width: 100%` explícito em `html`,
+`body` e `#app`.
+
+**Não totalmente confirmado ainda** — já que o ambiente real de teste é
+o iframe do Bitrix (não reproduzível fora dele), pedir ao usuário para
+validar dentro de um card real depois do próximo deploy antes de
+considerar fechado.

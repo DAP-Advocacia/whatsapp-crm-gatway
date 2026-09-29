@@ -125,16 +125,26 @@
   *{ scrollbar-color: var(--border) var(--bg); scrollbar-width: thin; }
   html, body{
     margin: 0;
-    min-height: 100%;
+    height: 100%;
+    overflow: hidden;
     background: var(--bg);
     color: var(--text);
     font-family: 'Inter', -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+  /* Altura fixa de viewport (2026-09-29, usuário reportou altura da
+     página variando entre abas — "Como usar?" tem bastante conteúdo e
+     ficava bem mais alta que o resto, criando uma inconsistência
+     visível). html/body nunca rolam (overflow:hidden acima); #app é a
+     área que rola por dentro, sempre do mesmo tamanho (100vh) não
+     importa quanto conteúdo a página tenha. */
   #app{
     max-width: 900px;
+    height: 100vh;
+    overflow-y: auto;
     margin-left: max(var(--sidebar-w), calc((100vw + var(--sidebar-w) - 900px) / 2));
     padding: 28px 20px 70px;
+    box-sizing: border-box;
     transition: margin-left .2s ease;
   }
   html.sidebar-collapsed #app{ margin-left: max(var(--sidebar-w-collapsed), calc((100vw + var(--sidebar-w-collapsed) - 900px) / 2)); }
