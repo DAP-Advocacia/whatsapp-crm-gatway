@@ -1013,9 +1013,9 @@
       </div>
       <div class="composer-hint" id="composerHint">Enter envia · Shift+Enter quebra linha</div>
       <div class="credit-row">
-        <a class="credit-badge" href="https://www.linkedin.com/in/gabriel-alves-787208250/" target="_blank" rel="noopener">
+        <button type="button" class="credit-badge" id="creditBadgeBtn">
           <span class="dot"></span> Desenvolvido por Gabriel Alves
-        </a>
+        </button>
       </div>
     `;
 
@@ -1056,6 +1056,12 @@
         : '/crm/deal/details/' + state.dealId + '/';
       BX24.openPath(path);
     });
+    const creditBadgeBtnEl = document.getElementById('creditBadgeBtn');
+    if (creditBadgeBtnEl) {
+      creditBadgeBtnEl.addEventListener('click', () => {
+        if (window.BX24 && typeof BX24.openPath === 'function') BX24.openPath('/company/personal/user/5305/');
+      });
+    }
     const instanceSelectEl = document.getElementById('instanceSelect');
     if (instanceSelectEl) {
       instanceSelectEl.addEventListener('change', (e) => switchInstance(e.target.value));

@@ -918,7 +918,7 @@
         </div>
         <div class="credit-row">
           <span>Relatório preparado para diretoria e CEO · Agosto de 2026</span>
-          <span class="credit-badge"><span class="dot"></span>Desenvolvido por <a href="https://www.linkedin.com/in/gabriel-alves-787208250/" target="_blank" rel="noopener">Gabriel Alves</a></span>
+          <span class="credit-badge" id="creditBadgeBtn" style="cursor:pointer"><span class="dot"></span>Desenvolvido por Gabriel Alves</span>
         </div>
       </div>
     </section>
@@ -1054,6 +1054,13 @@
     });
   }
 })();
+</script>
+<script>
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('#creditBadgeBtn');
+    if (!btn || !window.BX24 || typeof BX24.openPath !== 'function') return;
+    BX24.openPath('/company/personal/user/5305/');
+  });
 </script>
 </body>
 </html>

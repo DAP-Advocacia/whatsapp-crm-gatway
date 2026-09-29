@@ -936,9 +936,9 @@
   </div>
 
   <div class="credit-row">
-    <a class="credit-badge" href="https://www.linkedin.com/in/gabriel-alves-787208250/" target="_blank" rel="noopener">
+    <button type="button" class="credit-badge" id="creditBadgeBtn">
       <span class="dot"></span> Desenvolvido por Gabriel Alves
-    </a>
+    </button>
   </div>
 </div>
 
@@ -2685,6 +2685,13 @@
     if (b.subtitle) document.querySelectorAll('.firm-sub').forEach((el) => { el.textContent = b.subtitle; });
   }).catch(() => {});
 })();
+</script>
+<script>
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('#creditBadgeBtn');
+    if (!btn || !window.BX24 || typeof BX24.openPath !== 'function') return;
+    BX24.openPath('/company/personal/user/5305/');
+  });
 </script>
 </body>
 </html>

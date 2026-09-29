@@ -457,13 +457,58 @@ preenchesse a largura real do iframe do placement. Confirmado com o
 usuário que **já existia antes do redesign** (não é regressão desta
 sessão).
 
-Causa provável: `#app`/`html`/`body` não tinham `width: 100%`
-explícito — em determinadas larguras de iframe do Bitrix, o
-`display:flex` sem width podia não esticar para a largura real
-disponível. Corrigido adicionando `width: 100%` explícito em `html`,
-`body` e `#app`.
+Causa provável (tentativa 1): `#app`/`html`/`body` não tinham
+`width: 100%` explícito — em determinadas larguras de iframe do
+Bitrix, o `display:flex` sem width podia não esticar para a largura
+real disponível. Corrigido adicionando `width: 100%` explícito em
+`html`, `body` e `#app` (commit `18e2fc7`).
 
-**Não totalmente confirmado ainda** — já que o ambiente real de teste é
-o iframe do Bitrix (não reproduzível fora dele), pedir ao usuário para
-validar dentro de um card real depois do próximo deploy antes de
-considerar fechado.
+**Atualização (mesmo dia, novo print pós-deploy)**: usuário confirmou
+que o corte persiste, idêntico, mesmo com o `width:100%` em produção.
+Isso descarta a hipótese de CSS interno. Conclusão revisada: a área
+vazia não está dentro do nosso `<iframe>` — é espaço reservado pelo
+próprio Bitrix ao redor da aba `CRM_DEAL_DETAIL_TAB`/
+`CRM_CONTACT_DETAIL_TAB` (o layout padrão de card do Bitrix reserva
+uma coluna à direita para o painel de atividades/timeline nativo,
+fora do controle do app hospedado). `BX24.fitWindow()` (já chamado)
+só ajusta ALTURA do iframe — não existe, no SDK do Bitrix, um
+equivalente para pedir largura total da aba; isso é decidido pelo
+layout do card no portal, não pelo app.
+
+**Não é mais tratado como bug de CSS nosso.** Não há mais tentativa de
+correção via `public/index.html` planejada — próximo passo, se o
+usuário quiser mesmo assim reduzir esse espaço, é verificar dentro do
+próprio Bitrix (Configurações → CRM → editor de card) se dá pra
+desabilitar/encolher aquele painel lateral para esse tipo de card,
+fora do escopo deste repositório.
+
+## 9. Crédito "Desenvolvido por Gabriel Alves" — abrir usuário do Bitrix na lateral (2026-09-29)
+
+Pedido do usuário: a badge de crédito fixa (rodapé de todas as 21
+páginas com sidebar/mini-chat) linkava para o LinkedIn pessoal, abrindo
+em nova guia (`target="_blank"`). Trocar para abrir o usuário 5305
+(perfil no próprio Bitrix) num slider/lateral, sem sair do CRM.
+
+Corrigido: `<a class="credit-badge" href="...linkedin..." target="_blank">`
+virou `<button type="button" class="credit-badge" id="creditBadgeBtn">`
+(ou `<span id="creditBadgeBtn">` em `apresentacao.html`, que já tem um
+link de contato separado — "Falar com o responsável técnico" — mantido
+como está, fora do escopo deste pedido). Um listener por delegação de
+evento (`document.addEventListener('click', ...)`) filtra por
+`#creditBadgeBtn` e chama `BX24.openPath('/company/personal/user/5305/')`
+— mesmo mecanismo já usado no projeto para abrir card de negócio/contato
+(`BX24.openPath`), que o Bitrix sempre abre num slider lateral, nunca em
+nova guia. Em `index.html` (mini-chat, template literal recriado a cada
+`renderChat()`), o listener é religado a cada render, no mesmo bloco que
+já faz isso para `openCrmBtn`/`themeToggleBtn`.
+
+Aplicado nas 21 páginas: as 18 padrão (`admin`, `agent-examples`,
+`agente-ia`, `campaign-metrics`, `campaign-schedule`, `campaign`,
+`contacts`, `conversation-analysis`, `dashboard`, `faq`, `how-to`,
+`instances`, `lead-metrics`, `notifications`, `onboarding`, `settings`,
+`sites`, `suggestions`) + `chat.html` + `index.html` + `apresentacao.html`.
+
+Validação: sintaxe de todos os `<script>` inline via `vm.Script` (sem
+erro), HTTP 200 nas 21 páginas via servidor local, grep confirma zero
+ocorrência restante de `credit-badge" href` e 21/21 com
+`BX24.openPath('/company/personal/user/5305/')`.
