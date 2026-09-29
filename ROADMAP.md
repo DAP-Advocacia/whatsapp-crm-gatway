@@ -600,3 +600,45 @@ mensagem.
 
 Figurinha com legenda "não importa muito" pro usuário — não investigado
 (fora de prioridade, por pedido dele).
+
+## 11. Áudio/imagem ainda com erro preso — causa raiz real era o proxy de mídia (2026-09-29, mesmo dia)
+
+A correção do item 10 (a)/(b) (`hideMediaError` no caminho de sucesso)
+não resolveu — usuário voltou com novo print mostrando exatamente o
+mesmo sintoma (imagem visível, caixa de erro grudada embaixo, mesmo
+"depois de uns minutos"). Isso indicava que a causa raiz não era só a
+UI nunca escondendo o erro — tinha um fetch que FALHAVA de verdade,
+intermitentemente, sem relação com o conteúdo do arquivo em si.
+
+Causa raiz real, encontrada revisando `GET /media/:filename`
+(`src/routes/whatsapp.js`): a rota fazia `res.redirect(302, signedUrl)`
+pro Supabase Storage. O frontend busca essa rota via `fetch()` com
+header `Authorization: Bearer <token>` (autenticação do nosso próprio
+app, ver `apiFetch`/`hydrateOneMedia`). Um redirect 302 seguido
+automaticamente por `fetch()` vira uma requisição CROSS-ORIGIN pro
+domínio do Supabase — que só funciona se o bucket tiver CORS liberado
+pra origem do app. Isso é intermitente/dependente de configuração
+externa ao nosso código (cache de preflight do navegador, propagação
+de config de CORS no Supabase), o que bate com o sintoma relatado
+("às vezes funciona, às vezes não", sem relação com o arquivo).
+
+Corrigido trocando o redirect por PROXY: a rota agora baixa os bytes
+do Supabase Storage no próprio servidor (`downloadMediaByFilename`,
+nova função em `src/media.js`, usa `.storage.from(BUCKET).download()`
+— mesmo SDK que `downloadMedia` já usava server-to-server pro
+scheduler/agente de IA) e reenvia direto na resposta
+(`res.set('Content-Type', ...); res.send(buffer)`), com
+`Cache-Control: private, max-age=3600`. O `fetch()` do frontend nunca
+mais sai do nosso próprio domínio — elimina de vez a dependência de
+CORS do bucket.
+
+`getSignedMediaUrl` (gera URL assinada) mantida no arquivo, só não é
+mais usada por essa rota — reserva pra eventual uso futuro.
+`downloadMedia` (usada por `scheduler.js`/`agentDispatch.js`,
+server-to-server, formato de entrada diferente — recebe a URL relativa
+inteira) não foi tocada.
+
+Validação: sintaxe OK (`node -c` nos dois arquivos), rota testada
+localmente (responde 401 sem token, confirma que carrega e roteia sem
+erro; teste do caminho de sucesso depende de credencial real do
+Supabase de produção, não reproduzível localmente).

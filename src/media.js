@@ -71,12 +71,28 @@ async function saveMedia(sessionId, id, buffer, mimetype) {
   return `/api/whatsapp/media/${encodeURIComponent(filename)}`;
 }
 
-// Signed URL de curta duração pra um arquivo já salvo — usada pela rota
-// GET /media/:filename (redireciona pra ela em vez de expor o filename cru).
+// Signed URL de curta duração pra um arquivo já salvo — mantida só pra
+// eventual uso futuro fora do proxy (ver downloadMediaByFilename abaixo,
+// que é o que GET /media/:filename usa hoje).
 async function getSignedMediaUrl(filename, expiresIn = 300) {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(filename, expiresIn);
   if (error) throw error;
   return data.signedUrl;
+}
+
+// Baixa os bytes de um arquivo já salvo, a partir do FILENAME já resolvido
+// (formato "<sessionId>/<id>.<ext>", igual ao que req.params.filename chega
+// em GET /media/:filename já decodificado pelo Express — não confundir com
+// downloadMedia abaixo, que recebe a URL relativa /api/whatsapp/media/...
+// inteira e só usa o ÚLTIMO segmento). Usado pra servir a mídia via proxy
+// (bytes passam pelo nosso servidor) em vez de redirect 302 pro Supabase —
+// evita depender de CORS do bucket, que causava "Não foi possível carregar"
+// intermitente no fetch() autenticado do frontend (usuário reportou
+// 2026-09-29, ver ROADMAP item 10).
+async function downloadMediaByFilename(filename) {
+  const { data, error } = await supabase.storage.from(BUCKET).download(filename);
+  if (error) throw error;
+  return { buffer: Buffer.from(await data.arrayBuffer()), contentType: data.type };
 }
 
 // Busca os bytes de uma mídia já salva a partir do caminho relativo devolvido
@@ -105,4 +121,4 @@ async function deleteMedia(relativeUrl) {
   if (error) throw error;
 }
 
-module.exports = { saveMedia, getSignedMediaUrl, downloadMedia, deleteMedia };
+module.exports = { saveMedia, getSignedMediaUrl, downloadMediaByFilename, downloadMedia, deleteMedia };

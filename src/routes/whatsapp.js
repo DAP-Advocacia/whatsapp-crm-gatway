@@ -2,7 +2,7 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const store = require('../store');
 const { logMessageToTimeline, logConversationSummaryToTimeline } = require('../bitrix');
-const { saveMedia, getSignedMediaUrl } = require('../media');
+const { saveMedia, downloadMediaByFilename } = require('../media');
 const { computeMetrics, computeTeamMetrics, getOwnNumbersBySession } = require('../metrics');
 const { createCampaign, getCampaign, runCampaign } = require('../campaigns');
 const { computeCampaignMetrics } = require('../campaignStore');
@@ -745,14 +745,26 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // Bucket "media" do Supabase Storage é privado — mídia de conversa não é
   // mais servida via URL pública permanente. Qualquer usuário autenticado
   // deste portal (não só o dono da conversa — já resolve o problema real,
-  // que era mídia 100% pública sem nenhuma autenticação) pode pedir a signed
-  // URL de um arquivo, que expira em poucos minutos. `requireAuth` (server.js)
-  // já protege essa rota, igual a todas as outras de /api/whatsapp.
+  // que era mídia 100% pública sem nenhuma autenticação) pode pedir esse
+  // arquivo. `requireAuth` (server.js) já protege essa rota, igual a todas
+  // as outras de /api/whatsapp.
+  //
+  // PROXY dos bytes (não redirect) — antes fazia `res.redirect(302, signedUrl)`
+  // pro Supabase Storage; o frontend busca essa rota via fetch() autenticado
+  // (Authorization: Bearer, ver hydrateOneMedia em chat.html/index.html), e
+  // um redirect cross-origin nesse fetch depende do bucket do Supabase ter
+  // CORS liberado pro domínio do app — causava "Não foi possível carregar"
+  // intermitente (áudio/imagem às vezes carregava, às vezes não, sem relação
+  // com o arquivo em si). Baixando aqui e reenviando os bytes direto, o
+  // fetch nunca sai do nosso próprio domínio (usuário reportou 2026-09-29,
+  // ver ROADMAP item 10/11).
   // ---------------------------------------------------------------
   router.get('/media/:filename', async (req, res) => {
     try {
-      const url = await getSignedMediaUrl(req.params.filename);
-      res.redirect(302, url);
+      const { buffer, contentType } = await downloadMediaByFilename(req.params.filename);
+      res.set('Content-Type', contentType || 'application/octet-stream');
+      res.set('Cache-Control', 'private, max-age=3600');
+      res.send(buffer);
     } catch (err) {
       console.error('[media] erro:', err.message);
       res.status(404).json({ error: 'mídia não encontrada' });
