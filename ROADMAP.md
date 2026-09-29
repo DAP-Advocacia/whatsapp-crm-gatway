@@ -350,12 +350,21 @@ commits separados por item.
    casando exatamente o filtro da subquery — aplicado em produção via
    `node db/migrate.js` (operação aditiva seguro, `create index if not
    exists`, não mexe em nenhum dado existente).
-3. **Item "Como usar (vídeo)" ainda aparece na sidebar** (a partir de
-   Contatos em diante) — precisa ser removido/substituído pelo item
-   novo "Como usar?" (página de tutorial ilustrado, ver `public/how-to.html`,
-   ainda não publicada). Risco: o botão `tutorialVideoReopenBtn` e o
-   modal `tutorialVideoModal` estão duplicados em várias páginas (mesmo
-   padrão de `SHORTCUTS_CONTENT`) — remover exige tocar em cada uma.
+3. **Item "Como usar (vídeo)" na sidebar — RESOLVIDO (2026-09-29)**.
+   Removido o botão `tutorialVideoReopenBtn`, a função
+   `bindTutorialVideoModal()` e o modal `tutorialVideoModal` (CSS + HTML)
+   das 17 páginas que tinham (confirmado hash idêntico nas 13 páginas
+   fora do menu enxuto, processadas em lote com um script Node — mesmo
+   texto/estrutura byte-a-byte nas 13). Nas 4 páginas do menu enxuto
+   (`chat`, `contacts`, `dashboard`, `instances`) e na própria
+   `how-to.html`, o botão vira/já era um link para `/how-to.html`
+   ("Como usar?"), mantendo a mesma posição visual na sidebar. Nas
+   outras 13 páginas antigas (fora do escopo do redesign), o item foi
+   só removido, sem substituto (não fazia sentido linkar pra uma sidebar
+   que ainda não tem a estrutura nova). Vídeo em si
+   (`public/video/video-onboarding.mp4`) não foi apagado do disco, só
+   parou de ser referenciado — pode ser removido numa limpeza futura se
+   não for mais usado em lugar nenhum.
 4. **Aba Notificações (`public/notifications.html`) não foi migrada** —
    confirmado visual antigo completo (dourado, sidebar antiga com todos
    os itens). Ficou fora do escopo das Fases 0-3 (só as 4 páginas do
