@@ -475,12 +475,36 @@ só ajusta ALTURA do iframe — não existe, no SDK do Bitrix, um
 equivalente para pedir largura total da aba; isso é decidido pelo
 layout do card no portal, não pelo app.
 
-**Não é mais tratado como bug de CSS nosso.** Não há mais tentativa de
-correção via `public/index.html` planejada — próximo passo, se o
-usuário quiser mesmo assim reduzir esse espaço, é verificar dentro do
-próprio Bitrix (Configurações → CRM → editor de card) se dá pra
-desabilitar/encolher aquele painel lateral para esse tipo de card,
-fora do escopo deste repositório.
+**Correção real encontrada (mesmo dia, terceira tentativa)**: usuário
+esclareceu que a área vazia tem a cor do próprio app (não preto do
+Bitrix) e é parecida com o drawer de notas internas — pista certa.
+Causa raiz confirmada: `.notes-drawer{ display:flex; ... }` no CSS
+tem a mesma especificidade que a regra padrão do navegador
+`[hidden]{ display:none }`, e por vir depois na cascata, VENCE —
+então o `<div class="notes-drawer" id="notesDrawer" hidden>` fica
+sempre renderizado (`position:fixed; right:0; width:100%;
+max-width:360px; background:var(--bg)`), mesmo com `hidden=true`
+setado via JS (`openNotesDrawer()`/`closeNotesDrawer()`, que só
+mexem na propriedade `.hidden`, nunca em classe). É exatamente a
+"parede" sólida cobrindo a lateral direita do mini-chat — o painel de
+nota interna (funcionalidade real do chat, não lixo) que nunca deveria
+aparecer fora de quando o usuário clica no botão de nota, mas ficava
+sempre visível e vazio.
+
+Mesma classe de bug já historicamente corrigida em `chat.html` (ver
+`.composer[hidden]`, `.export-menu[hidden]`, `.reply-preview-bar[hidden]`
+— comentário lá já alertava "correção já feita... só faltou" em outros
+seletores). Passou despercebido em `index.html` quando o drawer de
+notas foi replicado ali.
+
+Corrigido adicionando `.notes-drawer[hidden]{ display: none; }` logo
+abaixo da regra `.notes-drawer{...}` (maior especificidade, sempre
+vence). Validado: HTML de teste com `hidden=true` confirma
+`getComputedStyle(...).display === 'none'`. Sintaxe OK, HTTP 200.
+
+A hipótese de "limitação do Bitrix" (parágrafo anterior) estava
+**errada** — mantida acima só como registro do processo de
+investigação; não se aplica mais.
 
 ## 9. Crédito "Desenvolvido por Gabriel Alves" — abrir usuário do Bitrix na lateral (2026-09-29)
 

@@ -650,6 +650,11 @@
     background: var(--bg); border-left: 1px solid var(--border); z-index: 190;
     display: flex; flex-direction: column; box-shadow: -20px 0 60px rgba(0,0,0,.4);
   }
+  /* Mesmo bug/fix de .composer[hidden] em chat.html — sem isso, o
+     `display:flex` acima vence o [hidden] do navegador e o drawer fica
+     sempre visível (mesmo vazio), cobrindo metade do mini-chat com uma
+     "parede" sólida (reportado pelo usuário 2026-09-29). */
+  .notes-drawer[hidden]{ display: none; }
   .notes-drawer-head{
     display: flex; align-items: center; justify-content: space-between;
     padding: 16px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
