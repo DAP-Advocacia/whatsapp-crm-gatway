@@ -286,3 +286,82 @@ roadmap:
 - **Mídia "pendente" de agendamentos** fica órfã no Storage depois do
   disparo (o disparo real sobe cópia própria). Considerar limpeza
   periódica se o volume crescer.
+
+## 5. Incidente — sessões nunca pareadas sobrecarregando o boot (2026-09-28)
+
+**RESOLVIDO** (correção em produção, commit `85226da` em `src/sessions.js`,
+2026-09-28). Registrado aqui porque é exatamente o risco já antecipado
+no item 2 acima ("Escalonar a reconexão em massa de sessões no boot"),
+só que materializado em escala muito maior que a esperada.
+
+**O que aconteceu**: depois do deploy do redesign visual (Fase 0-3, ver
+`docs/design-system.md`), o usuário reportou pico de CPU no EasyPanel e,
+logo em seguida, um WhatsApp novo não conseguia completar o pareamento
+(QR escaneado, celular confirmava, mas a tela ficava presa em
+"Status: connecting" e nunca fechava). Investigação encontrou **566
+pastas** em `auth_session/` no servidor de produção — cruzado com a
+tabela `instances` no banco, a esmagadora maioria são instâncias
+"Principal" criadas automaticamente ao longo de meses (a tela de
+Conexões cria uma na primeira visita de cada usuário do Bitrix) mas
+**nunca pareadas de verdade** (ninguém escaneou o QR). `startAllExisting()`
+tentava reconectar TODA pasta com `creds.json`, sem distinguir isso de
+uma sessão real — cada boot virava centenas de tentativas de conexão
+simultâneas/escalonadas ao WhatsApp, sobrecarregando CPU/rede e
+(hipótese mais provável) levando o WhatsApp a atrasar/recusar conexões
+vindas do mesmo IP, incluindo pareamentos novos legítimos.
+
+**Correção aplicada**: filtro por `creds.registered` (campo nativo do
+Baileys, só vira `true` depois que o QR é escaneado com sucesso — ver
+`initAuthCreds` em `node_modules/@whiskeysockets/baileys/lib/Utils/auth-utils.js`).
+Sessões nunca pareadas (ou com `creds.json` corrompido) deixam de
+entrar na lista de reconexão do boot.
+
+**Pendente, não crítico**: a limpeza física das ~566 pastas órfãs já
+acumuladas em disco não foi feita — a correção só impede que o
+problema volte a crescer daqui pra frente. Fazer essa limpeza é uma
+ação manual separada (mexe direto em dado de produção em disco),
+avaliar quando houver tempo dedicado a isso, cruzando de novo pasta
+por pasta contra a tabela `instances` antes de apagar qualquer coisa.
+
+## 6. Redesign visual — pendências reportadas em uso real (2026-09-29)
+
+Lista de ajustes reportados pelo usuário depois de usar a versão nova
+em produção por um dia. Nenhum implementado ainda nesta entrada —
+registrado primeiro para não perder o contexto, execução entra em
+commits separados por item.
+
+1. **Mini-chat dentro do card do Bitrix (`public/index.html`) não recebeu
+   o redesign** — ainda no visual antigo (dourado/escuro original). O
+   redesign (Fases 0-3) só cobriu as 4 páginas do menu principal
+   (chat/contacts/dashboard/instances); `index.html` ficou de fora do
+   escopo até agora.
+2. **Conversas demoram a aparecer no Chat** — reportado como lentidão
+   perceptível ao abrir a lista de conversas. Ainda não investigado se é
+   regressão do redesign ou comportamento pré-existente (ex: efeito
+   colateral do mesmo excesso de sessões do item 5, agora corrigido —
+   reavaliar depois da correção de sessões órfãs estar em produção há
+   um tempo).
+3. **Item "Como usar (vídeo)" ainda aparece na sidebar** (a partir de
+   Contatos em diante) — precisa ser removido/substituído pelo item
+   novo "Como usar?" (página de tutorial ilustrado, ver `public/how-to.html`,
+   ainda não publicada). Risco: o botão `tutorialVideoReopenBtn` e o
+   modal `tutorialVideoModal` estão duplicados em várias páginas (mesmo
+   padrão de `SHORTCUTS_CONTENT`) — remover exige tocar em cada uma.
+4. **Aba Notificações (`public/notifications.html`) não foi migrada** —
+   confirmado visual antigo completo (dourado, sidebar antiga com todos
+   os itens). Ficou fora do escopo das Fases 0-3 (só as 4 páginas do
+   menu novo foram tratadas) — mas como o sino de notificação é acessível
+   de qualquer tela do app novo, o contraste de visual é muito visível.
+5. **App abre direto em "Análises" em vez de "Chat"** — a página raiz/
+   inicial do app (fora do card do Bitrix) deveria abrir no Chat por
+   padrão, já que é a tela mais usada no dia a dia (mesmo raciocínio que
+   já motivou reordenar Chat/Contatos antes de Análises no menu, Fase 3).
+   Precisa achar onde esse redirect/página-padrão é decidido.
+6. **Painel de detalhes do contato (lateral direita do Chat) sem opção de
+   recolher/expandir** — pedido de nova funcionalidade, não bug. Fica
+   sempre com a largura fixa atual.
+7. **Scroll para cima na conversa não funciona** — dentro de uma conversa
+   aberta no Chat, não dá pra rolar pra cima pra ver mensagens antigas.
+   Pode ser regressão do redesign (CSS de overflow) ou bug pré-existente
+   — precisa investigar antes de mexer, já que `chat.html` teve bastante
+   CSS de layout tocado nas Fases 0-3.
