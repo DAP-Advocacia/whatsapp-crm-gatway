@@ -1397,7 +1397,10 @@
       }
 
       try {
-        const res = await apiFetch(url);
+        // cache:'no-store' — resposta ruim cacheada pelo navegador antes do
+        // arquivo existir de verdade ficava presa no disco (mesmo achado de
+        // chat.html, 2026-09-29, ver ROADMAP item 12).
+        const res = await apiFetch(url, { cache: 'no-store' });
         if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
         const blob = await res.blob();
         // Corpo vazio (ex: redirect pra signed URL que falhou mas respondeu

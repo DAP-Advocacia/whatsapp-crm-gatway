@@ -642,3 +642,49 @@ Validação: sintaxe OK (`node -c` nos dois arquivos), rota testada
 localmente (responde 401 sem token, confirma que carrega e roteia sem
 erro; teste do caminho de sucesso depende de credencial real do
 Supabase de produção, não reproduzível localmente).
+
+## 12. Causa raiz DEFINITIVA — cache do navegador preso, não CORS (2026-09-29, mesmo dia)
+
+A correção do item 11 (proxy em vez de redirect) também não resolveu —
+usuário confirmou "continua a mesma coisa" com novo print. Pedido
+então print do DevTools (Network, filtro "media") pra parar de
+especular e ver o erro real.
+
+**Achado decisivo**: TODAS as requisições de mídia (`fetch` a partir
+de `chat.html:1977`) retornavam **status 200**, servidas do
+**"disk cache"** do próprio navegador — não do servidor. Ou seja, a
+requisição nem chegava a sair do navegador; ele respondia direto do
+cache local, com um corpo antigo (vazio/inválido).
+
+Causa raiz: a correção do item 11 adicionou
+`res.set('Cache-Control', 'private, max-age=3600')` na rota
+`GET /media/:filename`. Qualquer resposta ruim que essa URL já tivesse
+retornado ANTES da correção (ex: 404 por corrida de upload, ou falha
+do redirect/CORS antigo) ficou cacheada no disco do navegador do
+usuário por até 1h — e como o filename de cada mensagem é único e
+nunca muda, o navegador nunca mais perguntou ao servidor pra aquela
+URL específica, nem quando o usuário clicava "Tentar de novo" (o clique
+disparava um novo `fetch`, mas o browser respondia do cache sem rede).
+Isso explica por que a correção anterior "não teve efeito nenhum" pro
+usuário mesmo estando correta no servidor — o navegador dele nunca
+chegou a testá-la de fato pras mensagens já vistas antes.
+
+Corrigido em duas camadas (defesa dupla, pra cobrir tanto o servidor
+quanto qualquer cache HTTP intermediário):
+1. Servidor: `Cache-Control: no-store` (em vez de `private,
+   max-age=3600`) tanto no sucesso quanto no erro 404 de
+   `GET /media/:filename`.
+2. Frontend: `apiFetch(url, { cache: 'no-store' })` em
+   `hydrateOneMedia` (`chat.html` e `index.html`) — o próprio `fetch()`
+   do navegador é instruído a nunca reaproveitar cache de disco pra
+   essa URL, mesmo que algum proxy/CDN intermediário no meio do
+   caminho tentasse permitir cache.
+
+**Isso NÃO limpa cache já salvo em navegadores que já viram o erro
+antes desta correção** — só previne que aconteça de novo daqui pra
+frente. Usuário/atendentes que já tiveram esse problema precisam de
+UM hard refresh (Ctrl+Shift+R) ou limpar cache do site uma vez, depois
+disso o problema não deve mais voltar a acontecer (nem em mensagens
+novas, nem reabrindo as antigas).
+
+Validação: sintaxe OK (`node -c`/`vm.Script`) nos 3 arquivos alterados.

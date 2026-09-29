@@ -763,10 +763,22 @@ function createWhatsappRouter({ sessions, broadcast }) {
     try {
       const { buffer, contentType } = await downloadMediaByFilename(req.params.filename);
       res.set('Content-Type', contentType || 'application/octet-stream');
-      res.set('Cache-Control', 'private, max-age=3600');
+      // SEM Cache-Control permissivo aqui de propósito — uma versão anterior
+      // desta rota usava `private, max-age=3600`, e qualquer resposta salva
+      // no cache do navegador ANTES da mídia existir de verdade (ex: 404
+      // batido durante a corrida de upload, ou a versão antiga desta rota
+      // que fazia redirect e podia falhar por CORS) ficava presa lá por até
+      // 1h, servida direto do disco sem nunca mais perguntar ao servidor —
+      // "Tentar de novo" clicado pelo usuário parecia não fazer nada porque
+      // o navegador respondia do cache, sem nem chegar aqui (usuário
+      // reportou 2026-09-29: continuava idêntico mesmo após o deploy da
+      // correção anterior; Network do DevTools confirmou "disk cache" nas
+      // requisições de mídia). `no-store` força sempre buscar de novo.
+      res.set('Cache-Control', 'no-store');
       res.send(buffer);
     } catch (err) {
       console.error('[media] erro:', err.message);
+      res.set('Cache-Control', 'no-store');
       res.status(404).json({ error: 'mídia não encontrada' });
     }
   });

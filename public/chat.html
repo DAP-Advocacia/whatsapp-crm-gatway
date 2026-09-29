@@ -5270,7 +5270,16 @@
     if (!url.startsWith('/')) { setMediaSrc(el, url); hideMediaError(el); return; }
     if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); hideMediaError(el); return; }
     try {
-      const res = await apiFetch(url);
+      // cache:'no-store' de propósito — uma resposta ruim (404/vazia) cacheada
+      // pelo próprio navegador ANTES do arquivo existir de verdade ficava presa
+      // no disco por até 1h (Cache-Control antigo do servidor), e nem o botão
+      // "Tentar de novo" resolvia (o fetch nem chegava a bater no servidor —
+      // usuário reportou 2026-09-29, confirmado via Network do DevTools
+      // mostrando "disk cache" nessas requisições). O servidor também não
+      // manda mais Cache-Control permissivo nessa rota, mas isso sozinho não
+      // limpa entradas já cacheadas em navegadores antigos — daqui pra frente
+      // o próprio fetch nunca reaproveita cache do disco pra essa URL.
+      const res = await apiFetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
       const blob = await res.blob();
       // Corpo vazio (ex: redirect pra signed URL que expirou/falhou mas
