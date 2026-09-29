@@ -367,6 +367,20 @@ commits separados por item.
    (`public/video/video-onboarding.mp4`) não foi apagado do disco, só
    parou de ser referenciado — pode ser removido numa limpeza futura se
    não for mais usado em lugar nenhum.
+
+   **Bug de inconsistência corrigido (2026-09-29, mesmo dia)**: ao criar
+   `how-to.html`, o link "Como usar?" foi colocado na seção
+   "Configuração" (junto de "Conexões do WhatsApp"), marcado `active`
+   ali — diferente das outras páginas, onde o link fica na posição fixa
+   de baixo (junto de "Atalhos e recursos"/"Notificações"). Usuário
+   reportou com 2 prints: o item "salta" de lugar entre `chat.html`
+   (embaixo) e `how-to.html` (lá em cima, sumindo da posição de baixo),
+   o que também contribuía pra sensação de altura/estrutura inconsistente
+   entre abas. Corrigido: `how-to.html` agora só tem "Conexões do
+   WhatsApp" na seção Configuração (igual todas as outras) e o link
+   "Como usar?" na MESMA posição fixa de baixo, marcado `active` só
+   nesta página — mesmo padrão que "Notificações" já usa (o ícone/link
+   fixo vira `active` na própria página de destino, sem mudar de lugar).
 4. **Aba Notificações (`public/notifications.html`) não foi migrada** —
    confirmado visual antigo completo (dourado, sidebar antiga com todos
    os itens). Ficou fora do escopo das Fases 0-3 (só as 4 páginas do
