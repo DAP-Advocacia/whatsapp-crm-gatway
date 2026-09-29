@@ -330,11 +330,13 @@ em produção por um dia. Nenhum implementado ainda nesta entrada —
 registrado primeiro para não perder o contexto, execução entra em
 commits separados por item.
 
-1. **Mini-chat dentro do card do Bitrix (`public/index.html`) não recebeu
-   o redesign** — ainda no visual antigo (dourado/escuro original). O
-   redesign (Fases 0-3) só cobriu as 4 páginas do menu principal
-   (chat/contacts/dashboard/instances); `index.html` ficou de fora do
-   escopo até agora.
+1. **Mini-chat dentro do card do Bitrix — RESOLVIDO (2026-09-29)**.
+   `public/index.html` recebeu a mesma paleta verde-petróleo + cinza-
+   chumbo neutro já validada em `chat.html` (tema claro como padrão,
+   wallpaper do feed de mensagens, redução de uso de verde — mantido só
+   em ação primária/item selecionado/indicador de estado). Essa página
+   não tem sidebar (é só o card embutido), então não precisou do corte
+   de menu nem da troca de logo.
 2. **Conversas demoram a aparecer no Chat — RESOLVIDO (2026-09-29)**.
    Causa raiz encontrada em `store.listConversations` (`src/store.js`):
    a query monta a lista de conversas (até 200) com uma subquery LATERAL
