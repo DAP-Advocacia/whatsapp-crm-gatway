@@ -352,11 +352,14 @@ commits separados por item.
    os itens). Ficou fora do escopo das Fases 0-3 (só as 4 páginas do
    menu novo foram tratadas) — mas como o sino de notificação é acessível
    de qualquer tela do app novo, o contraste de visual é muito visível.
-5. **App abre direto em "Análises" em vez de "Chat"** — a página raiz/
-   inicial do app (fora do card do Bitrix) deveria abrir no Chat por
-   padrão, já que é a tela mais usada no dia a dia (mesmo raciocínio que
-   já motivou reordenar Chat/Contatos antes de Análises no menu, Fase 3).
-   Precisa achar onde esse redirect/página-padrão é decidido.
+5. **App abre direto em "Análises" em vez de "Chat" — RESOLVIDO (2026-09-29)**.
+   Causa: `public/index.html`, tratamento do erro `NO_PLACEMENT` (app
+   aberto pelo ícone na sidebar do Bitrix, fora de um card de Negócio)
+   redirecionava explicitamente para `/dashboard.html` — decisão de
+   produto anterior ("único ponto de entrada sem card específico, é
+   onde a Análise de Conversas mora"). Trocado para `/chat.html`, mesmo
+   raciocínio que já motivou reordenar Chat/Contatos antes de Análises
+   no menu lateral (Fase 3).
 6. **Painel de detalhes do contato (lateral direita do Chat) sem opção de
    recolher/expandir** — pedido de nova funcionalidade, não bug. Fica
    sempre com a largura fixa atual.

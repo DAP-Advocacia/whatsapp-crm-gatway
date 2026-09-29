@@ -2382,13 +2382,16 @@
       console.error(err);
       if (err?.code === 'NO_PLACEMENT') {
         // Aberto pelo próprio ícone do app (fora de um Negócio) — esse é o
-        // único ponto de entrada que não depende de um card específico, então
-        // é onde a Análise de Conversas (dashboard.html) mora.
+        // único ponto de entrada que não depende de um card específico.
+        // Chat é a tela mais usada no dia a dia (mesmo raciocínio que já
+        // motivou reordenar Chat/Contatos antes de Análises no menu lateral,
+        // Fase 3 do redesign, 2026-09-29) — antes abria em Análises
+        // (dashboard.html), decisão de produto anterior.
         renderState('nophone', {
-          title: 'Abrindo Análise de Conversas…',
+          title: 'Abrindo o Chat…',
           desc: 'Este app também funciona como a aba "WhatsApp" dentro de um card de Negócio no CRM.',
         });
-        window.location.replace('/dashboard.html');
+        window.location.replace('/chat.html');
       } else if (err?.code === 'NO_CONTACT' || err?.code === 'NO_PHONE') {
         renderState('nophone', {
           title: 'Sem telefone vinculado',
