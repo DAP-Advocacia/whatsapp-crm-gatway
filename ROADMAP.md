@@ -380,9 +380,12 @@ commits separados por item.
    onde a Análise de Conversas mora"). Trocado para `/chat.html`, mesmo
    raciocínio que já motivou reordenar Chat/Contatos antes de Análises
    no menu lateral (Fase 3).
-6. **Painel de detalhes do contato (lateral direita do Chat) sem opção de
-   recolher/expandir** — pedido de nova funcionalidade, não bug. Fica
-   sempre com a largura fixa atual.
+6. **Painel de detalhes do contato — JÁ RESOLVIDO, feature já existia
+   (2026-09-29)**. O botão de ícone "ⓘ" no cabeçalho da conversa
+   (`#toggleDetailsBtn`, `public/chat.html`) já mostra/esconde o painel
+   por completo — confirmado com o usuário que essa funcionalidade
+   atende, sem precisar de um modo "mini" intermediário (como o colapso
+   da sidebar principal). Nenhuma mudança de código necessária.
 7. **Scroll para cima na conversa não funciona — RESOLVIDO (2026-09-29)**.
    Causa raiz: bug PRÉ-EXISTENTE (confirmado no commit `a24476c`, antes
    de qualquer trabalho do redesign) — `.messages{ justify-content:
