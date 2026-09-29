@@ -360,8 +360,20 @@ commits separados por item.
 6. **Painel de detalhes do contato (lateral direita do Chat) sem opção de
    recolher/expandir** — pedido de nova funcionalidade, não bug. Fica
    sempre com a largura fixa atual.
-7. **Scroll para cima na conversa não funciona** — dentro de uma conversa
-   aberta no Chat, não dá pra rolar pra cima pra ver mensagens antigas.
-   Pode ser regressão do redesign (CSS de overflow) ou bug pré-existente
-   — precisa investigar antes de mexer, já que `chat.html` teve bastante
-   CSS de layout tocado nas Fases 0-3.
+7. **Scroll para cima na conversa não funciona — RESOLVIDO (2026-09-29)**.
+   Causa raiz: bug PRÉ-EXISTENTE (confirmado no commit `a24476c`, antes
+   de qualquer trabalho do redesign) — `.messages{ justify-content:
+   flex-end }` combinado com `overflow-y: auto` é uma combinação
+   historicamente problemática do flexbox: o Chromium não recalcula
+   `scrollHeight` corretamente quando o conteúdo excede a área visível,
+   então `scrollHeight` ficava igual a `clientHeight` mesmo com
+   centenas de mensagens — nenhum scroll possível. Invisível em
+   qualquer teste com poucas mensagens (não há overflow real pra
+   expor o bug), por isso nunca foi percebido antes. Confirmado com
+   teste isolado via Playwright (200 bubble-rows de teste,
+   `scrollHeight`/`clientHeight` idênticos com `flex-end`, valor real
+   restaurado e scroll funcional trocando para `margin-top: auto` no
+   primeiro filho). Corrige mantendo o mesmo efeito visual (mensagens
+   ancoradas embaixo quando a conversa tem poucas) sem quebrar o
+   cálculo de overflow do container — `.messages > :first-child{
+   margin-top: auto }` em vez de `justify-content` no pai.
