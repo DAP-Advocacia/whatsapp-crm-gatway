@@ -92,7 +92,7 @@ async function runOnce() {
       await sendBitrixNotification(
         emp.id,
         `Oi, ${firstName}! 👋 Notei que você ainda não conectou seu WhatsApp no DapZap. ` +
-          'Acesse o app e vá em "Conexões do WhatsApp" para escanear o QR Code e começar a usar — leva menos de 1 minuto.'
+          'Veja o passo a passo aqui: https://bitrix.dapadvocacia.com.br/company/personal/user/5305/blog/15670/'
       );
       lastRemindedDate.set(ownerId, today);
       sentCount++;

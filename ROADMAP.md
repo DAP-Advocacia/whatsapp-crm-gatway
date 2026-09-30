@@ -1097,3 +1097,11 @@ Validado com o mesmo teste isolado, adaptado pra confirmar
 explicitamente que `im.message.add` NUNCA é mais chamado (o mock lança
 erro se for) e que `im.notify.personal.add` recebe os parâmetros
 certos — PASS.
+
+**Atualização (mesmo dia, 3ª correção)**: usuário publicou um anúncio no
+Feed do Bitrix (tutorial passo a passo com print + link do app) pra
+quem respondeu não sabendo como conectar. Texto do lembrete atualizado
+pra apontar pro link desse post
+(`https://bitrix.dapadvocacia.com.br/company/personal/user/5305/blog/15670/`)
+em vez de só instruir genericamente "vá em Conexões do WhatsApp" — dá
+o passo a passo completo pra quem clicar.
