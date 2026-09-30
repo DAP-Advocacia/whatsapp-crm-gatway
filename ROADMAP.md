@@ -688,3 +688,52 @@ disso o problema não deve mais voltar a acontecer (nem em mensagens
 novas, nem reabrindo as antigas).
 
 Validação: sintaxe OK (`node -c`/`vm.Script`) nos 3 arquivos alterados.
+
+## 13. Segunda causa de sobrecarga: sessões pareadas mas mortas, reconectando pra sempre (2026-09-30)
+
+Enquanto investigava o item 12, pedido acesso aos logs do container via
+SSH pra ver `GET /media/:filename` ao vivo — os logs revelaram outro
+problema, sem relação direta com mídia, mas potencialmente relevante
+pra ela (servidor sobrecarregado pode atrasar/falhar outras
+requisições): dezenas de sessões (`_491`, `_106922`, `_174806`,
+`_145374`, `_178968`, `_192667`, `_8465`, entre outras) em loop
+constante `connecting` → `offline` (statusCode 408, timeout) →
+`tentativa N, próxima em 300s`, com N chegando a 137-142 (mais de 11h
+tentando sem parar).
+
+Diferente do incidente do item 5 (sessões NUNCA pareadas, corrigido
+filtrando por `creds.registered` no boot, `sessions.js`): estas JÁ tem
+`creds.registered=true` (passaram no filtro), mas estão mortas na
+prática (número trocado de aparelho, instância de teste abandonada,
+etc). O código de reconexão (`src/whatsapp.js`, handler de
+`connection.update`) já tinha backoff exponencial (3s → 5min) e parava
+de insistir sozinho pra códigos claramente permanentes (403 forbidden,
+440 connectionReplaced, 500 badSession — mesma proteção do HANDOFF
+Parte CQ, depois de um incidente quase idêntico anterior). Mas um
+código 408 (timeout) repetido pra sempre não é permanente nem
+temporário de verdade — cai no `else` genérico, que só cresce o
+INTERVALO entre tentativas, nunca desiste de vez. Sem teto de
+tentativas TOTAIS, uma sessão morta reconecta pra sempre, a cada 5min,
+indefinidamente.
+
+Corrigido: novo teto `MAX_CONSECUTIVE_FAILURES` (constante no topo de
+`whatsapp.js`, configurável via env `MAX_RECONNECT_ATTEMPTS`, padrão
+20 — com o backoff exponencial até 5min, já representa mais de 1h30
+tentando, tempo generoso pra qualquer instabilidade de rede real se
+resolver sozinha). Ao atingir o teto, a sessão é tratada como os
+códigos permanentes: `needsAttention=true`, para de reconectar sozinha,
+fica visível na tela de Instâncias com o botão "Tentar reconectar" já
+existente (zera o contador e tenta nas credenciais salvas — sem
+escanear QR de novo, caso volte a funcionar) — nada é apagado
+automaticamente, decisão de reconectar ou remover fica com o usuário
+(pedido explícito: "se estão abandonadas... pode remover, inclusive
+deveria colocar algo com limite de tentativas, tipo tentou 5 vezes
+remove" — implementado como "para de insistir sozinho e marca pra
+atenção manual", não como remoção automática, que seria destrutivo
+demais pra tomar sem confirmação).
+
+Validação: sintaxe OK (`node -c`).
+
+Usuário sinalizou separadamente que o fluxo de "parar instância
+Principal" não está muito intuitivo hoje — vai detalhar depois, ainda
+não implementado/investigado.

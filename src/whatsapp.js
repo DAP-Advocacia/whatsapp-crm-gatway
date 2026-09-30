@@ -15,6 +15,15 @@ const { EventEmitter } = require('events');
 const { saveMedia } = require('./media');
 const { convertToOggOpus } = require('./audioConvert');
 
+// Teto de tentativas de reconexão CONSECUTIVAS pra um código "temporário"
+// (não um dos PERMANENT_CODES abaixo) — ver comentário no handler de
+// 'connection.update' (2026-09-30). Com o backoff exponencial até 5min de
+// teto, 20 tentativas já passam de 1h30 insistindo — tempo generoso pra
+// qualquer instabilidade de rede real se resolver sozinha, mas finito o
+// bastante pra não deixar uma sessão morta (número trocado de aparelho,
+// instância de teste abandonada) reconectando pra sempre.
+const MAX_CONSECUTIVE_FAILURES = Number(process.env.MAX_RECONNECT_ATTEMPTS || 20);
+
 /**
  * Encapsula UMA sessão de WhatsApp pessoal (um número).
  * Emite eventos que o resto da aplicação escuta:
@@ -200,6 +209,26 @@ class WhatsAppGateway extends EventEmitter {
           this.lastDisconnectReason = reason;
           console.error(
             `[whatsapp:${sessionLabel}] desconexão PERMANENTE (${reason}) — parando de reconectar sozinho, precisa de ação manual.`
+          );
+        } else if (this.consecutiveFailures + 1 >= MAX_CONSECUTIVE_FAILURES) {
+          // Teto de tentativas totais (não só de intervalo entre elas) —
+          // achado 2026-09-30: sessões já pareadas um dia mas mortas/
+          // inacessíveis (número trocado de aparelho, instância de teste
+          // abandonada) caem sempre num código "temporário" (408 timeout),
+          // nunca um dos PERMANENT_CODES acima, e ficavam reconectando pra
+          // sempre a cada 5min — uma chegou a 142 tentativas (~11h+)
+          // seguidas. Com dezenas de sessões assim ao mesmo tempo, é o
+          // mesmo padrão de sobrecarga do incidente de sessões nunca
+          // pareadas (ver sessions.js::startAllExisting), só que em runtime
+          // em vez de no boot — não pegava naquela correção porque estas JÁ
+          // tem creds.registered=true. Trata como PERMANENT_CODES: para de
+          // insistir sozinho, marca precisando de atenção — não apaga nada
+          // (decisão destrutiva demais pra automatizar; usuário decide
+          // reconectar manualmente ou remover a instância).
+          this.needsAttention = true;
+          this.lastDisconnectReason = 'timeout persistente';
+          console.error(
+            `[whatsapp:${sessionLabel}] ${MAX_CONSECUTIVE_FAILURES} tentativas seguidas sem sucesso — parando de reconectar sozinho, precisa de ação manual.`
           );
         } else {
           // queda de conexão temporária (rede, timeout, etc) -> tenta
