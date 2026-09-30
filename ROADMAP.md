@@ -959,3 +959,45 @@ Playwright `page.click()` real não foi usado nesse teste específico
 por um modal de atalhos genérico, pré-existente e sem relação com esta
 mudança, interceptando cliques na primeira visita da página em
 ambiente de teste limpo).
+
+## 18. Item 17 incompleto — GET /instances ainda recriava a "Principal" (2026-09-30)
+
+Usuário testou com 2 colaboradores reais (Henrique Gomes, Caio Marques)
+que nunca conectaram nada, e o aviso novo do item 17 não apareceu —
+continuava mostrando a instância "Principal" órfã, e nem removê-la
+manualmente resolvia (voltava sozinha). Rodado o script de limpeza
+(item de manutenção, ver `db/cleanup-orphan-instances.js`) ANTES desta
+correção: 239 instâncias órfãs removidas de fato (confirmado, banco
+caiu de 425 para 186) — mas a causa raiz continuava ativa, recriando
+órfãs novas a cada acesso.
+
+Causa raiz: o item 17 só removeu `ensureDefault` do fluxo de
+`instances.html` (criando `GET /instances/status`, que não o chama) —
+mas `GET /instances` (a rota ORIGINAL, ainda usada por `chat.html` e
+`index.html`) continuava chamando `ensureDefault` incondicionalmente.
+Como o app sempre abre pelo Chat (confirmado com o usuário: "todo
+mundo sempre abre o dapzap pelo chat"), a "Principal" era recriada ali
+ANTES da pessoa sequer chegar em Conexões — por isso o aviso nunca
+aparecia (a rota que o Chat consulta já devolvia `hasInstance` como
+tendo 1 instância) e remover manualmente não resolvia (o próximo
+carregamento do Chat recriava de novo).
+
+Corrigido removendo `ensureDefault` de `GET /instances` também (a
+única rota que ainda faltava) — agora só `listAccessible` roda, sem
+side-effect nenhum. `chat.html` já tratava corretamente `!list.length`
+(item 17, `renderEmptyView(true)`), então não precisou de mudança ali.
+`POST /instances` (criar instância EXTRA, ação explícita do botão "+
+Conectar outro WhatsApp") trocado de `ensureDefault` para
+`listByOwner` — só precisa contar quantas instâncias já existem pro
+limite, não precisa (e não deve) criar nada.
+
+De quebra, `index.html` (mini-chat embutido no card) ganhou um código
+de erro próprio (`NO_INSTANCE`) pro mesmo caso de "zero instâncias" —
+antes caía no erro genérico "Não foi possível abrir a conversa", agora
+mostra "Nenhum WhatsApp conectado ainda" com instrução clara.
+
+A limpeza já feita (239 instâncias removidas) continua válida — com
+esta correção, novas órfãs não voltam a ser criadas a cada reload do
+Chat.
+
+Validação: sintaxe OK (`node -c`/`vm.Script`) em todos os 3 arquivos.

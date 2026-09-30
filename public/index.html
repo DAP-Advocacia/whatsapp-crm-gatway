@@ -2468,7 +2468,11 @@
 
       state.instances = await loadInstances(state.ownerId, phone);
       state.session = pickBestInstance(state.instances, instanceStorageKey(entityType, id));
-      if (!state.session) throw new Error('nenhuma instância de WhatsApp disponível');
+      if (!state.session) {
+        const err = new Error('nenhuma instância de WhatsApp disponível');
+        err.code = 'NO_INSTANCE';
+        throw err;
+      }
 
       await ensureConnected();
     } catch (err) {
@@ -2489,6 +2493,15 @@
         renderState('nophone', {
           title: 'Sem telefone vinculado',
           desc: 'Este negócio não tem um contato com telefone cadastrado. Adicione um número de WhatsApp no card para liberar o chat.',
+        });
+      } else if (err?.code === 'NO_INSTANCE') {
+        // Mesmo caso do aviso novo em chat.html (ver renderEmptyView) —
+        // ninguém conectou WhatsApp ainda pra este usuário. Antes caía no
+        // "else" genérico ("Não foi possível abrir a conversa"), confuso
+        // pra quem nunca usou a ferramenta (2026-09-30).
+        renderState('nophone', {
+          title: 'Nenhum WhatsApp conectado ainda',
+          desc: 'Conecte um número em "Conexões do WhatsApp" para começar a atender por aqui.',
         });
       } else {
         renderState('error', {

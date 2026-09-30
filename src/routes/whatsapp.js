@@ -302,7 +302,19 @@ function createWhatsappRouter({ sessions, broadcast }) {
     // arquivo.
     const phone = typeof req.query.phone === 'string' ? req.query.phone.slice(0, 30) || null : null;
     try {
-      await instancesStore.ensureDefault(owner); // garante que o próprio dono tem ao menos 1
+      // SEM ensureDefault aqui de propósito (removido 2026-09-30) — chamava
+      // sempre, incondicionalmente, então o simples fato de abrir o Chat
+      // (chat.html, ponto de entrada padrão do app) já recriava a
+      // "Principal" no Postgres mesmo pra quem nunca conectou nada. Isso
+      // não pegava na correção do item 17 (GET /instances/status, usada só
+      // por instances.html) porque chat.html/index.html continuavam
+      // batendo NESTA rota, que recriava a instância de novo antes mesmo
+      // da pessoa abrir a tela de Conexões — usuário confirmou com dois
+      // colaboradores reais (Henrique/Caio) que a Principal órfã voltava a
+      // aparecer e nem sumia removendo manualmente (porque a cada reload
+      // do Chat ela era recriada de novo). A instância "Principal" só é
+      // persistida de verdade pelo fluxo de QR + POST /instances/confirm-default
+      // (ver instances.html), nunca mais implicitamente aqui.
       const list = await instancesStore.listAccessible(owner); // próprias + delegadas (ver instance_delegates)
       const ownNumbers = getOwnNumbersBySession();
       const sessionsWithHistory = phone
@@ -414,7 +426,14 @@ function createWhatsappRouter({ sessions, broadcast }) {
   router.post('/instances', requireOwnerMatch((req) => req.body?.owner), async (req, res) => {
     const { owner, label } = req.body || {};
     try {
-      const existing = await instancesStore.ensureDefault(owner);
+      // listByOwner (não ensureDefault) — este endpoint só precisa CONTAR
+      // quantas instâncias já existem pro limite abaixo; ensureDefault
+      // criaria uma "Principal" vazia por engano se chamado aqui sem
+      // nenhuma instância ainda existir (ex: botão "+ Conectar outro
+      // WhatsApp" clicado antes de confirmar a Principal via QR — ver
+      // POST /instances/confirm-default e a remoção de ensureDefault de
+      // GET /instances, mesmo motivo, 2026-09-30).
+      const existing = await instancesStore.listByOwner(owner);
       if (existing.length >= MAX_INSTANCES_PER_OWNER) {
         return res.status(400).json({ error: `Limite de ${MAX_INSTANCES_PER_OWNER} instâncias por usuário atingido — remova uma existente antes de criar outra.` });
       }
