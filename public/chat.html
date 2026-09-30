@@ -5266,29 +5266,49 @@
     if (box) box.hidden = true;
   }
 
-  async function hydrateOneMedia(el, url) {
-    if (!url.startsWith('/')) { setMediaSrc(el, url); hideMediaError(el); return; }
-    if (mediaBlobCache.has(url)) { setMediaSrc(el, mediaBlobCache.get(url)); hideMediaError(el); return; }
-    try {
+  // Busca os bytes de uma URL de mídia UMA ÚNICA VEZ, não importa quantos
+  // elementos/chamadas concorrentes peçam a mesma URL ao mesmo tempo —
+  // achado 2026-09-30: confirmado via log do servidor (GET /media/:filename)
+  // que o MESMO arquivo era buscado 3-4x em sequência rápida pro mesmo
+  // envio de mensagem (renderMessages() roda de novo a cada evento —
+  // otimista local, eco do socket, resposta HTTP do /send-media — e cada
+  // chamada recria o <img> do zero via innerHTML, disparando hydrateMedia
+  // de novo). O servidor sempre respondia 200 com bytes corretos (não era
+  // bug de rede/CORS/cache HTTP, as 3 hipóteses anteriores) — o problema
+  // era puramente o CLIENTE disparando fetches redundantes e concorrentes
+  // pra mesma mídia, cujas respostas fora de ordem podiam deixar um
+  // elemento com o `src` trocado depois de outro já ter escondido o erro,
+  // reabrindo a caixa por cima da imagem já carregada.
+  const mediaFetchPromises = new Map();
+  function fetchMediaBlobUrl(url) {
+    if (mediaBlobCache.has(url)) return Promise.resolve(mediaBlobCache.get(url));
+    if (mediaFetchPromises.has(url)) return mediaFetchPromises.get(url);
+    const promise = (async () => {
       // cache:'no-store' de propósito — uma resposta ruim (404/vazia) cacheada
       // pelo próprio navegador ANTES do arquivo existir de verdade ficava presa
       // no disco por até 1h (Cache-Control antigo do servidor), e nem o botão
       // "Tentar de novo" resolvia (o fetch nem chegava a bater no servidor —
       // usuário reportou 2026-09-29, confirmado via Network do DevTools
-      // mostrando "disk cache" nessas requisições). O servidor também não
-      // manda mais Cache-Control permissivo nessa rota, mas isso sozinho não
-      // limpa entradas já cacheadas em navegadores antigos — daqui pra frente
-      // o próprio fetch nunca reaproveita cache do disco pra essa URL.
+      // mostrando "disk cache" nessas requisições).
       const res = await apiFetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
       const blob = await res.blob();
-      // Corpo vazio (ex: redirect pra signed URL que expirou/falhou mas
-      // respondeu 200 sem conteúdo) nunca toca/renderiza — sem essa checagem
-      // o áudio/vídeo ficava com um blob inválido e só o listener `error`
-      // nativo (mais lento, às vezes nunca dispara pra áudio) pegava isso.
+      // Corpo vazio (ex: resposta sem conteúdo) nunca toca/renderiza — sem
+      // essa checagem o áudio/vídeo ficava com um blob inválido.
       if (blob.size === 0) throw new Error('mídia vazia');
       const blobUrl = URL.createObjectURL(blob);
       mediaBlobCache.set(url, blobUrl);
+      return blobUrl;
+    })();
+    mediaFetchPromises.set(url, promise);
+    promise.finally(() => mediaFetchPromises.delete(url));
+    return promise;
+  }
+
+  async function hydrateOneMedia(el, url) {
+    if (!url.startsWith('/')) { setMediaSrc(el, url); hideMediaError(el); return; }
+    try {
+      const blobUrl = await fetchMediaBlobUrl(url);
       // Escondida ANTES de trocar o src: se um erro nativo antigo (de uma
       // tentativa anterior que falhou) já tinha aberto a caixa de "não foi
       // possível carregar", o sucesso desta tentativa precisa fechá-la de

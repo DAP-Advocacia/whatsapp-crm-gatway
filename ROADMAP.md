@@ -737,3 +737,60 @@ Validação: sintaxe OK (`node -c`).
 Usuário sinalizou separadamente que o fluxo de "parar instância
 Principal" não está muito intuitivo hoje — vai detalhar depois, ainda
 não implementado/investigado.
+
+## 14. Causa raiz REAL do erro de mídia — fetch duplicado no cliente (2026-09-30)
+
+As três correções anteriores (itens 10-12: hideMediaError, proxy em vez
+de redirect, Cache-Control no-store) não resolveram — usuário
+confirmou de novo "continua do mesmo jeito", com print mostrando
+exatamente o mesmo sintoma (imagem visível + caixa de erro grudada
+embaixo). Adicionado log temporário em `GET /media/:filename`
+(`[media] pedido`/`[media] ok`) e pedido acesso direto aos logs do
+container via SSH (`docker logs`) pra ter certeza absoluta, em vez de
+continuar corrigindo às cegas.
+
+**Achado definitivo**: os logs mostraram que o SERVIDOR SEMPRE
+respondeu certo — toda mídia testada (imagem nova enviada, e o
+histórico inteiro da conversa ao recarregar a página) retornou HTTP
+200 com bytes corretos, sem uma única falha. Só que a MESMA imagem
+recém-enviada apareceu no log **3-4 vezes seguidas** (`[media]
+pedido`/`[media] ok` repetido pro mesmo filename, em rajada). Ou seja:
+nunca foi bug de rede, CORS ou cache HTTP (as três hipóteses
+anteriores, todas descartadas por evidência real, não suposição) — o
+cliente estava disparando MÚLTIPLOS fetches concorrentes e redundantes
+pra mesma mídia.
+
+Causa raiz: `renderMessages()` roda várias vezes em sequência rápida
+pro mesmo envio de mensagem (mensagem otimista local → eco do
+WebSocket → resposta HTTP do `/send-media`), e cada chamada recria
+TODOS os elementos de mídia do zero via `innerHTML`, disparando
+`hydrateMedia()`/`hydrateOneMedia()` de novo — antes da primeira
+chamada terminar de popular `mediaBlobCache`, a segunda/terceira já
+checavam o cache como vazio e disparavam seu próprio fetch. Com
+respostas chegando fora de ordem, uma tentativa mais lenta podia
+`setMediaSrc`/`hideMediaError` DEPOIS de outra já ter deixado o
+elemento num estado diferente — inclusive `showMediaError` reabrindo a
+caixa por cima de uma imagem que uma tentativa concorrente já tinha
+carregado com sucesso. Detalhe que também explica a aparência do bug:
+`.media-error` no CSS não é `position:absolute` — é um bloco normal
+dentro do balão, então quando ficava visível ele aparecia EMBAIXO da
+imagem (não sobreposto), exatamente como reportado nos prints.
+
+Corrigido com deduplicação por Promise: `mediaFetchPromises` (novo Map,
+paralelo ao `mediaBlobCache` já existente) garante que só UMA busca de
+rede rode por URL por vez — qualquer chamada concorrente reaproveita a
+MESMA Promise em vez de disparar um fetch próprio; a Promise se
+autolimpa do Map ao terminar (sucesso ou erro), então uma tentativa
+seguinte de verdade (ex: botão "Tentar de novo") ainda funciona
+normalmente. Aplicado em `chat.html` e `index.html` (mesma lógica
+duplicada nos dois arquivos, mini-chat não tem a UI de erro mas tinha
+o mesmo desperdício de fetch).
+
+Removido o log de diagnóstico temporário do item anterior (cumpriu o
+papel, confirmou que o servidor nunca foi a causa).
+
+Validação: sintaxe OK (`node -c`/`vm.Script`) nos 3 arquivos. Teste
+isolado em Node simulando 4 chamadas concorrentes pra mesma URL contra
+um "servidor" fake que conta requisições — confirmado 1 única chamada
+de rede real, todos os 4 callers recebendo o mesmo resultado, e uma
+5ª chamada posterior usando o cache sem nova rede.

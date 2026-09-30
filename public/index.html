@@ -1380,6 +1380,36 @@
     else el.src = value;
   }
 
+  // Deduplica fetches concorrentes pra mesma URL — achado 2026-09-30 (ver
+  // mesma correção em chat.html): renderMessages() roda várias vezes em
+  // sequência rápida pro mesmo envio (otimista local, eco do socket,
+  // resposta HTTP), cada vez recriando os elementos via innerHTML e
+  // disparando hydrateMedia de novo antes do fetch anterior popular o
+  // cache — sem isso, a mesma mídia era buscada 3-4x em paralelo.
+  const mediaFetchPromises = new Map();
+  function fetchMediaBlobUrl(url) {
+    if (mediaBlobCache.has(url)) return Promise.resolve(mediaBlobCache.get(url));
+    if (mediaFetchPromises.has(url)) return mediaFetchPromises.get(url);
+    const promise = (async () => {
+      // cache:'no-store' — resposta ruim cacheada pelo navegador antes do
+      // arquivo existir de verdade ficava presa no disco (mesmo achado de
+      // chat.html, 2026-09-29, ver ROADMAP item 12).
+      const res = await apiFetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
+      const blob = await res.blob();
+      // Corpo vazio nunca toca/renderiza — mesmo achado de chat.html
+      // (2026-09-29): sem essa checagem o elemento ficava com um blob
+      // inválido, silenciosamente.
+      if (blob.size === 0) throw new Error('mídia vazia');
+      const blobUrl = URL.createObjectURL(blob);
+      mediaBlobCache.set(url, blobUrl);
+      return blobUrl;
+    })();
+    mediaFetchPromises.set(url, promise);
+    promise.finally(() => mediaFetchPromises.delete(url));
+    return promise;
+  }
+
   async function hydrateMedia(container) {
     const els = container.querySelectorAll('[data-media-url]');
     for (const el of els) {
@@ -1391,25 +1421,8 @@
         continue;
       }
 
-      if (mediaBlobCache.has(url)) {
-        setMediaSrc(el, mediaBlobCache.get(url));
-        continue;
-      }
-
       try {
-        // cache:'no-store' — resposta ruim cacheada pelo navegador antes do
-        // arquivo existir de verdade ficava presa no disco (mesmo achado de
-        // chat.html, 2026-09-29, ver ROADMAP item 12).
-        const res = await apiFetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error('falha ao buscar mídia (HTTP ' + res.status + ')');
-        const blob = await res.blob();
-        // Corpo vazio (ex: redirect pra signed URL que falhou mas respondeu
-        // 200 sem conteúdo) nunca toca/renderiza — mesmo achado de
-        // chat.html (2026-09-29): sem essa checagem o elemento ficava com
-        // um blob inválido, silenciosamente.
-        if (blob.size === 0) throw new Error('mídia vazia');
-        const blobUrl = URL.createObjectURL(blob);
-        mediaBlobCache.set(url, blobUrl);
+        const blobUrl = await fetchMediaBlobUrl(url);
         setMediaSrc(el, blobUrl);
       } catch (err) {
         console.error('Erro ao carregar mídia:', url, err);

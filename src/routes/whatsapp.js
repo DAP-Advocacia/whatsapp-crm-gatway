@@ -760,18 +760,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ver ROADMAP item 10/11).
   // ---------------------------------------------------------------
   router.get('/media/:filename', async (req, res) => {
-    // Log temporário de diagnóstico (2026-09-30) — remover depois de
-    // confirmar em produção se a rota está sendo alcançada e o que
-    // devolve; usuário reportou erro "Não foi possível carregar"
-    // persistente mesmo após duas correções anteriores (ver ROADMAP
-    // itens 11/12), e os logs do container não tinham NENHUMA linha
-    // desta rota durante o teste, nem de sucesso nem de erro (só havia
-    // log no catch) — sem visibilidade não dá pra confirmar se a
-    // requisição chega até aqui.
-    console.log('[media] pedido:', req.params.filename);
     try {
       const { buffer, contentType } = await downloadMediaByFilename(req.params.filename);
-      console.log('[media] ok:', req.params.filename, 'bytes=' + buffer.length, 'contentType=' + contentType);
       res.set('Content-Type', contentType || 'application/octet-stream');
       // SEM Cache-Control permissivo aqui de propósito — uma versão anterior
       // desta rota usava `private, max-age=3600`, e qualquer resposta salva
