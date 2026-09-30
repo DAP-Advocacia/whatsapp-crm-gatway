@@ -1076,3 +1076,24 @@ tinha rodado ainda.
 
 Validado de novo com o mesmo teste isolado (3 cenários) — lógica
 intacta, só a visibilidade/timing mudou.
+
+**Atualização (mesmo dia, 2ª correção)**: com os logs em mãos,
+confirmado que o lembrete de fato chegou — só que como MENSAGEM DE
+CHAT, saindo do perfil pessoal do dono do webhook (Bruno), não como
+notificação do sistema. Usuário esclareceu: "a ideia era notificação e
+não mensagem direta". Causa: `im.message.add` sempre sai em nome de
+quem autentica a chamada (o dono do webhook) — não existe parâmetro
+pra mascarar isso como "sistema".
+
+Corrigido trocando pra `im.notify.personal.add` (notificação real do
+Bitrix, aparece no sino, atribuída ao app/sistema — não a uma pessoa).
+`sendBitrixIm` renomeada pra `sendBitrixNotification`, parâmetros
+trocados de `DIALOG_ID` pra `USER_ID` (formato da API de notificação,
+diferente da API de mensagem), adicionado `TAG` único por dia+usuário
+(defesa extra de dedupe do lado do Bitrix — o dedupe real continua
+sendo `lastRemindedDate` em memória, TAG é só redundância).
+
+Validado com o mesmo teste isolado, adaptado pra confirmar
+explicitamente que `im.message.add` NUNCA é mais chamado (o mock lança
+erro se for) e que `im.notify.personal.add` recebe os parâmetros
+certos — PASS.

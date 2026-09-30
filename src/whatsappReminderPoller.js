@@ -17,12 +17,20 @@ const { ownerIdFor } = require('./auth');
  *   contratado ainda em treinamento.
  * - Repete 1x por dia até a pessoa conectar (dedupe por dia civil, não por
  *   intervalo fixo de 24h corridas — ver lastRemindedDate).
- * - Canal: IM nativo do Bitrix (im.message.add), não os 4 canais de
+ * - Canal: NOTIFICAÇÃO nativa do Bitrix (im.notify.personal.add — aparece
+ *   no sino de notificações do sistema), não os 4 canais de
  *   alertDispatcher.notifyAttention — decisão explícita do usuário, já
  *   que quem nunca conectou WhatsApp não pode ser alcançado pelo canal
  *   WhatsApp de sistema (whatsappAlert precisa de outra instância do
  *   mesmo dono já online) e Web Push exige opt-in prévio que essa pessoa
  *   nunca teria motivo de ter dado ainda.
+ *   Trocado de im.message.add pra im.notify.personal.add em 2026-09-30
+ *   (mesmo dia) — a 1ª versão usava im.message.add, que chega como
+ *   MENSAGEM DE CHAT saindo do perfil do dono do webhook (ex: Bruno),
+ *   não como notificação do sistema — usuário apontou que não era a
+ *   intenção original ("a ideia era notificação e não mensagem direta").
+ *   im.notify.personal.add aparece no sino de notificações, atribuído ao
+ *   próprio app/sistema, não a uma pessoa.
  */
 
 const GRACE_PERIOD_MS = 24 * 60 * 60 * 1000; // 1 dia
@@ -39,12 +47,19 @@ function todayKey() {
   return new Date().toISOString().slice(0, 10);
 }
 
-async function sendBitrixIm(bitrixUserId, message) {
-  const result = await callBitrixHR('im.message.add', {
-    DIALOG_ID: String(bitrixUserId),
+// im.notify.personal.add — notificação do SISTEMA (sino do Bitrix),
+// diferente de im.message.add (mensagem de chat, sairia do perfil do
+// dono do webhook). TAG dedupe pelo lado do Bitrix por padrão (mesmo
+// TAG no mesmo dia não duplica no sino) — como já temos dedupe próprio
+// por dia civil (lastRemindedDate), TAG aqui é só defesa extra, não a
+// fonte da verdade do dedupe.
+async function sendBitrixNotification(bitrixUserId, message) {
+  const result = await callBitrixHR('im.notify.personal.add', {
+    USER_ID: String(bitrixUserId),
     MESSAGE: message,
+    TAG: `whatsapp-reminder-${todayKey()}-${bitrixUserId}`,
   });
-  if (!result) throw new Error('im.message.add falhou (ver log de callBitrixHR acima)');
+  if (!result) throw new Error('im.notify.personal.add falhou (ver log de callBitrixHR acima)');
 }
 
 async function runOnce() {
@@ -74,7 +89,7 @@ async function runOnce() {
 
       eligibleCount++;
       const firstName = (emp.name || '').split(' ')[0] || 'tudo bem';
-      await sendBitrixIm(
+      await sendBitrixNotification(
         emp.id,
         `Oi, ${firstName}! 👋 Notei que você ainda não conectou seu WhatsApp no DapZap. ` +
           'Acesse o app e vá em "Conexões do WhatsApp" para escanear o QR Code e começar a usar — leva menos de 1 minuto.'
