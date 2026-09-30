@@ -49,10 +49,15 @@ async function sendBitrixIm(bitrixUserId, message) {
 
 async function runOnce() {
   const employees = await listEmployees();
-  if (!employees) return; // BITRIX_HR_WEBHOOK_URL não configurada — feature inativa, mesmo padrão do resto do módulo
+  if (!employees) {
+    console.log('[whatsapp-reminder-poller] listEmployees() retornou null — BITRIX_HR_WEBHOOK_URL não configurada ou falhou, pulando este tick.');
+    return;
+  }
 
   const today = todayKey();
   const now = Date.now();
+  let eligibleCount = 0;
+  let sentCount = 0;
 
   for (const emp of employees) {
     try {
@@ -67,6 +72,7 @@ async function runOnce() {
       const instances = await instancesStore.listByOwner(ownerId);
       if (instances.length) continue; // já conectou pelo menos 1 — nada a lembrar
 
+      eligibleCount++;
       const firstName = (emp.name || '').split(' ')[0] || 'tudo bem';
       await sendBitrixIm(
         emp.id,
@@ -74,17 +80,27 @@ async function runOnce() {
           'Acesse o app e vá em "Conexões do WhatsApp" para escanear o QR Code e começar a usar — leva menos de 1 minuto.'
       );
       lastRemindedDate.set(ownerId, today);
+      sentCount++;
+      console.log(`[whatsapp-reminder-poller] lembrete enviado pra ${emp.name || emp.id} (bitrixUserId=${emp.id}).`);
     } catch (err) {
       console.error(`[whatsapp-reminder-poller] falha ao lembrar ${emp.id} (${emp.name || 'sem nome'}):`, err.message);
     }
   }
+  // Log sempre (não só em erro) — sem isso não dava pra saber se o tick
+  // rodou e não tinha ninguém elegível, ou se nem chegou a rodar ainda
+  // (achado real 2026-09-30: usuário testou reiniciando o container e não
+  // via NENHUM log, sem conseguir distinguir "não rodou ainda" de "rodou
+  // e não encontrou ninguém").
+  console.log(`[whatsapp-reminder-poller] tick concluído — ${employees.length} funcionário(s) no Bitrix, ${eligibleCount} elegível(is) hoje, ${sentCount} lembrete(s) enviado(s) com sucesso.`);
 }
 
-// Uma vez por hora é suficiente pra garantir que todo mundo recebe o
-// lembrete do dia mesmo que o processo reinicie no meio da janela — o
-// dedupe por dia civil (lastRemindedDate) evita repetir dentro do mesmo
-// dia mesmo rodando com essa frequência.
+// Roda 1x imediatamente no boot (além do setInterval) — sem isso, um
+// deploy/restart ficava até 1h sem nenhum lembrete sair, mesmo que já
+// houvesse gente elegível o dia inteiro (achado real 2026-09-30: usuário
+// reiniciou o container pra testar e nada aconteceu, porque setInterval
+// só dispara pela primeira vez DEPOIS do intervalo completo).
 function startPolling(intervalMs = 60 * 60 * 1000) {
+  runOnce().catch((err) => console.error('[whatsapp-reminder-poller] falha no tick inicial:', err.message));
   setInterval(() => {
     runOnce().catch((err) => console.error('[whatsapp-reminder-poller] falha no tick:', err.message));
   }, intervalMs);

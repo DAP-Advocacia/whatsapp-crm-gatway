@@ -1053,3 +1053,26 @@ e não duplica numa segunda rodada no mesmo dia — 3/3 corretos.
 Validação de ponta a ponta (chamada real ao Bitrix) pendente — depende
 da confirmação do escopo "im" no webhook, fora do que dá pra testar
 localmente.
+
+**Atualização (mesmo dia)**: usuário confirmou o escopo "im" já
+habilitado e reiniciou o container pra testar — nenhuma mensagem
+chegou, e os logs não tinham NENHUMA linha de
+`[whatsapp-reminder-poller]`, nem sucesso nem erro. Causa: `startPolling()`
+usava só `setInterval`, que só dispara a PRIMEIRA vez depois do
+intervalo completo (1h) — igual todos os outros pollers do projeto
+(`instanceBanPoller`, `dealStagePoller`), nenhum roda imediatamente no
+boot. Reiniciar o container não era suficiente pra ver resultado antes
+de 1h, e não havia log nenhum no caminho "rodou e não achou ninguém"
+pra diferenciar de "ainda não rodou".
+
+Corrigido: `startPolling()` agora chama `runOnce()` uma vez imediatamente
+antes de armar o `setInterval` — sem isso, um deploy/restart ficava até
+1h sem nenhum lembrete sair, mesmo com gente elegível o dia inteiro.
+Adicionado log incondicional ao final de cada tick (`N funcionário(s),
+M elegível(is), K enviado(s)`) e um log de sucesso por envio — antes só
+logava em caso de erro, tornando impossível diagnosticar à distância se
+o job estava rodando sem achar ninguém elegível ou simplesmente não
+tinha rodado ainda.
+
+Validado de novo com o mesmo teste isolado (3 cenários) — lógica
+intacta, só a visibilidade/timing mudou.
