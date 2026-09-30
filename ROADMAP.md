@@ -851,3 +851,36 @@ ESPECIFICIDADE CSS do seletor envolvido com `[hidden]`/`[disabled]`
 ANTES de assumir que a lógica de negócio está errada — este mesmo
 padrão de bug já apareceu 2 vezes neste projeto (aqui e no item 9) e é
 completamente invisível olhando só o JavaScript.
+
+## 16. Melhorias pedidas após confirmar o fix do item 15: loading + imagem em tela cheia (2026-09-30)
+
+Usuário confirmou que o erro sumiu ("agora foi, sumiu a mensagem de
+erro"), com dois pedidos de melhoria (não bugs):
+
+**(a) Spinner enquanto a imagem/vídeo carrega.** Antes do fix do item
+15, a moldura ficava preta e vazia por ~1s a cada carregamento — sem
+saber que ia carregar, "parece um erro" pra quem usa. Adicionado
+`.media-loading` (novo elemento por mídia, reaproveita a mesma moldura
+`.media-frame`), com um spinner simples via CSS (`@keyframes
+mediaSpin`). `hideMediaLoading(el)` chamado tanto no sucesso
+(`hideMediaError`) quanto no erro de verdade (`showMediaError`) — o
+spinner nunca fica visível junto de nenhum dos dois estados finais.
+Só imagem/vídeo (não áudio — o player nativo já é pequeno e não dá a
+mesma sensação de "vazio quebrado").
+
+**(b) Clique na imagem abre em tela cheia.** Antes só dava pra ver a
+foto grande clicando com o botão direito > "Abrir imagem em nova
+guia". Criado um lightbox próprio (`#imageLightbox`, sem depender do
+`.modal` genérico do projeto, que tem largura máxima fixa pensada pra
+formulário) — fundo preto quase opaco, imagem centralizada com
+`object-fit:contain`, botão X e fecha com Escape ou clique fora da
+imagem. Marcado via `data-lightbox` no `<img>` de mensagem (não em
+`img` de qualquer outro lugar da página, ex: avatares). Listener de
+clique por delegação a nível de módulo (mesmo padrão já usado pro menu
+de exportar) — funciona mesmo com `renderMessages()` recriando os
+elementos a cada render, sem precisar religar nada.
+
+Validação: sintaxe OK. Teste isolado em Playwright: (1) spinner some e
+o layout ajusta pra altura real da imagem ao "carregar"; (2) lightbox
+abre ao clicar na imagem, fecha com Escape, fecha com botão X, fecha
+ao clicar fora da imagem — 4/4 cenários corretos.

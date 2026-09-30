@@ -516,6 +516,24 @@
     display: none; align-items: center; justify-content: center; z-index: 55; padding: 20px;
   }
   .overlay.open{ display: flex; }
+  /* Lightbox de imagem em tela cheia (2026-09-30, pedido do usuário — antes
+     só dava pra ver a foto grande com botão direito > abrir em nova guia).
+     Overlay próprio (não reaproveita .modal, que tem largura máxima fixa e
+     padding pensados pra formulário/texto) — z-index mais alto que os
+     modais comuns pra sempre ficar por cima de qualquer coisa aberta. */
+  .image-lightbox{
+    position: fixed; inset: 0; background: rgba(0,0,0,.9);
+    display: none; align-items: center; justify-content: center; z-index: 200; padding: 24px;
+    cursor: zoom-out;
+  }
+  .image-lightbox.open{ display: flex; }
+  .image-lightbox img{ max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .image-lightbox-close{
+    position: absolute; top: 16px; right: 20px; width: 38px; height: 38px; border-radius: 50%;
+    background: rgba(255,255,255,.12); border: none; color: #fff; font-size: 22px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .image-lightbox-close:hover{ background: rgba(255,255,255,.22); }
   .modal{
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
     padding: 20px; width: 100%; max-width: 420px; max-height: 84vh; overflow-y: auto;
@@ -1171,6 +1189,28 @@
   }
   .media-error .media-retry-btn:hover{ color: var(--text); border-color: var(--text-faint); }
 
+  /* Spinner enquanto a imagem/vídeo busca o blob (2026-09-30, pedido do
+     usuário após o fix do item 15 — sem isso, a imagem ficava com a moldura
+     preta vazia por ~1s/carregamento, e mesmo sem ser mais um bug de
+     verdade, "parece um erro" pra quem não sabe que vai carregar). Mesmo
+     elemento .media-error é reaproveitado: variante neutra (sem texto de
+     erro, sem botão), alternada por JS entre "carregando" e "erro de
+     verdade" — ver showMediaLoading/hideMediaLoading. */
+  .media-loading{
+    display: flex; align-items: center; justify-content: center; min-height: 90px;
+  }
+  .media-loading[hidden]{ display: none; }
+  .media-loading .spinner{
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.25); border-top-color: rgba(255,255,255,.8);
+    animation: mediaSpin .7s linear infinite;
+  }
+  @keyframes mediaSpin{ to{ transform: rotate(360deg); } }
+  /* Imagem/vídeo clicável abre em tela cheia (ver openImageLightbox) — só
+     depois de carregado (cursor não muda enquanto .media-loading está
+     visível, CSS puro via :not, sem precisar de JS a mais). */
+  .media-frame img[data-lightbox]{ cursor: zoom-in; }
+
   /* Cartão de documento (PDF, PPT, DOCX, planilha, zip...) — o WhatsApp não
      tem como renderizar um anexo genérico como mídia embutida, então mostra
      nome + ícone, igual ao próprio app. */
@@ -1542,6 +1582,11 @@
 </div>
 
 <div class="painel-view" id="painelView" hidden></div>
+
+<div class="image-lightbox" id="imageLightbox">
+  <button type="button" class="image-lightbox-close" id="imageLightboxClose">&times;</button>
+  <img id="imageLightboxImg" alt="imagem em tamanho grande" />
+</div>
 
 <div class="overlay shortcuts-modal" id="shortcutsModal">
   <div class="modal">
@@ -5227,11 +5272,11 @@
     // Parte DW).
     if (msg.type === 'image' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" alt="imagem" /><div class="media-error" hidden><span>Não foi possível carregar a imagem.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
+      return `<div class="media-frame"><img data-media-url="${escapeHtml(msg.mediaUrl)}" data-lightbox alt="imagem" /><div class="media-loading"><span class="spinner"></span></div><div class="media-error" hidden><span>Não foi possível carregar a imagem.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'video' && msg.mediaUrl) {
       const caption = msg.text ? `<div class="caption-text">${escapeHtml(msg.text)}</div>` : '';
-      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video><div class="media-error" hidden><span>Não foi possível carregar o vídeo.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
+      return `<div class="media-frame"><video controls data-media-url="${escapeHtml(msg.mediaUrl)}"></video><div class="media-loading"><span class="spinner"></span></div><div class="media-error" hidden><span>Não foi possível carregar o vídeo.</span><button type="button" class="media-retry-btn">Tentar de novo</button></div></div>${caption}`;
     }
     if (msg.type === 'audio' && msg.mediaUrl) {
       // msg.text numa mensagem de áudio é SEMPRE transcrição gerada por IA
@@ -5270,12 +5315,24 @@
   // video/img/audio (nunca <a>, que não tem esse tipo de falha).
   function showMediaError(el) {
     el.style.display = 'none';
+    hideMediaLoading(el);
     const box = el.parentElement && el.parentElement.querySelector('.media-error');
     if (box) box.hidden = false;
   }
   function hideMediaError(el) {
     el.style.display = '';
+    hideMediaLoading(el);
     const box = el.parentElement && el.parentElement.querySelector('.media-error');
+    if (box) box.hidden = true;
+  }
+  // Spinner visível enquanto o fetch da mídia está em voo (pedido do
+  // usuário 2026-09-30 — sem isso a moldura ficava preta/vazia por até uns
+  // segundos, "parecendo um erro" pra quem não sabe que vai carregar).
+  // hideMediaLoading é chamado tanto no sucesso (hideMediaError) quanto no
+  // erro de verdade (showMediaError) — o spinner nunca deve continuar
+  // visível junto de nenhum dos dois estados finais.
+  function hideMediaLoading(el) {
+    const box = el.parentElement && el.parentElement.querySelector('.media-loading');
     if (box) box.hidden = true;
   }
 
@@ -6042,6 +6099,36 @@
     if (!e.target.closest('.export-menu') && e.target !== exportBtn && !exportBtn?.contains(e.target)) {
       exportMenu.hidden = true;
     }
+  });
+
+  // Lightbox de imagem em tela cheia ao clicar (2026-09-30, pedido do
+  // usuário — antes só dava pra ver grande com botão direito > abrir em
+  // nova guia). Delegação a nível de módulo (não dentro de renderMessages,
+  // que recria os <img> a cada render) — busca o elemento no momento do
+  // clique. `[data-lightbox]` marca só as imagens de mensagem de verdade
+  // (o atributo é removido pelo hydrateMedia ao trocar data-media-url pelo
+  // src real, mas data-lightbox continua — são atributos independentes).
+  const imageLightbox = document.getElementById('imageLightbox');
+  const imageLightboxImg = document.getElementById('imageLightboxImg');
+  const imageLightboxClose = document.getElementById('imageLightboxClose');
+  function openImageLightbox(src) {
+    imageLightboxImg.src = src;
+    imageLightbox.classList.add('open');
+  }
+  function closeImageLightbox() {
+    imageLightbox.classList.remove('open');
+    imageLightboxImg.src = '';
+  }
+  document.addEventListener('click', (e) => {
+    const img = e.target.closest('img[data-lightbox]');
+    // Só abre depois de carregado (tem src de verdade, não o placeholder
+    // sem atributo que existe antes do hydrateMedia terminar) — clicar
+    // numa imagem ainda em loading não abriria nada útil mesmo.
+    if (img && img.src) { openImageLightbox(img.src); return; }
+    if (e.target === imageLightbox || e.target === imageLightboxClose) closeImageLightbox();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && imageLightbox.classList.contains('open')) closeImageLightbox();
   });
 
   boot();
