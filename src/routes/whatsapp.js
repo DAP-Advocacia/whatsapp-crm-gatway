@@ -354,6 +354,59 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
+  // GET /instances/status  (2026-09-30)
+  // Mesma lista de GET /instances, mas SEM `ensureDefault` — não cria a
+  // "Principal" automaticamente. Usada só por instances.html no carregamento
+  // inicial, pra decidir entre "grid de instâncias" (owner já tem alguma) e
+  // "mostrar QR direto" (owner não tem nenhuma ainda — ver POST
+  // /instances/confirm-default, chamado só depois de confirmado o
+  // pareamento). Sem essa rota, o simples fato de abrir a tela já gravava
+  // uma linha "Principal" no Postgres mesmo que o usuário fechasse a aba
+  // sem escanear nada — causa raiz das dezenas de instâncias órfãs
+  // "ainda não pareado" vistas em produção (ROADMAP itens 5/13). Precisa
+  // vir ANTES da rota GET /instances (mesmo prefixo /instances) — Express
+  // casa rotas na ordem declarada, e /instances/:id em outro arquivo
+  // poderia capturar "/status" como :id se esta viesse depois.
+  // ---------------------------------------------------------------
+  router.get('/instances/status', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    try {
+      const list = await instancesStore.listByOwner(req.query.owner);
+      res.json({ hasInstance: list.length > 0 });
+    } catch (err) {
+      console.error('[instances:status] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /instances/confirm-default  { owner }  (2026-09-30)
+  // Persiste a instância "Principal" (mesmo id/convenção de
+  // instancesStore.ensureDefault: id === ownerId) SÓ quando o pareamento
+  // já foi confirmado de verdade — chamado pelo frontend (instances.html)
+  // assim que o polling de GET /qr?session=<owner> devolve status:'online'
+  // no fluxo de primeiro acesso (zero instâncias). Idempotente (mesmo
+  // "on conflict do nothing" de ensureDefault) — seguro chamar mais de uma
+  // vez. Não inicia sessão nenhuma (já está rodando desde que GET /qr foi
+  // chamado, ver SessionManager.get()) — só grava a linha no Postgres pra
+  // essa sessão já pareada passar a aparecer no grid normal a partir daqui.
+  // ---------------------------------------------------------------
+  router.post('/instances/confirm-default', requireOwnerMatch((req) => req.body?.owner), async (req, res) => {
+    const owner = req.body?.owner;
+    try {
+      const gateway = sessions.get(owner);
+      if (gateway.getStatus() !== 'online') {
+        return res.status(409).json({ error: 'sessão ainda não está conectada' });
+      }
+      await instancesStore.ensureDefault(owner);
+      actionLog.logAction(owner, 'instance_created', 'Principal');
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[instances:confirm-default] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
   // POST /instances  { owner, label }
   // Cria uma nova instância pro usuário e já dispara o início da sessão
   // (gera QR Code pra pareamento em GET /qr?session=<instanceId>).

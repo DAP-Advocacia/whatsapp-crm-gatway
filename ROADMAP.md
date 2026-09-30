@@ -884,3 +884,78 @@ Validação: sintaxe OK. Teste isolado em Playwright: (1) spinner some e
 o layout ajusta pra altura real da imagem ao "carregar"; (2) lightbox
 abre ao clicar na imagem, fecha com Escape, fecha com botão X, fecha
 ao clicar fora da imagem — 4/4 cenários corretos.
+
+## 17. Praticidade de primeiro uso — 3 pedidos do usuário (2026-09-30)
+
+Usuário pediu 3 melhorias de fluxo pra facilitar o primeiro uso de
+quem nunca viu a ferramenta (equipe do escritório abrindo o DapZap
+pela 1ª vez), com prints mostrando: tela "Selecione uma conversa"
+vazia sem nenhuma pista do que fazer; página de Conexões cheia de
+"Principal ainda não pareado — reconectando sozinha" (evidência visual
+do mesmo problema de sessões órfãs do item 5/13); e o seletor de
+instância "escondido" dentro do Chat.
+
+**(a) Aviso "conectar WhatsApp" no Chat vazio.** `renderEmptyView()`
+(chat.html) ganhou um parâmetro `noInstances` — quando
+`initInstances()` detecta zero instâncias (`!list.length`, mesmo
+caminho que já existia), mostra "Você ainda não conectou um WhatsApp"
++ botão "Conectar WhatsApp agora" linkando pra `/instances.html`, em
+vez do genérico "Selecione uma conversa".
+
+**(b) QR direto no primeiro acesso a Conexões, SEM criar instância
+órfã antes de parear.** Causa raiz do problema visto nos prints do
+usuário (várias "Principal" nunca pareadas): `GET /instances`
+(src/routes/whatsapp.js) sempre chama `instancesStore.ensureDefault()`
+incondicionalmente — o simples fato de abrir `instances.html` já
+gravava uma linha "Principal" no Postgres, mesmo que o usuário fechasse
+a aba sem escanear nada. Investigado com agente de exploração antes de
+mexer: confirmado que a checagem de autorização (`assertOwnsSession`,
+src/authz.js) já tem um atalho pra quando `id === ownerId` (exatamente
+o caso da "Principal") que DISPENSA a linha existir no banco — ou
+seja, gerar/consultar QR nunca dependeu tecnicamente da linha existir
+antes, só o fluxo de produto que sempre criava de qualquer jeito.
+
+Corrigido com dois endpoints novos, isolados (não mexe no
+comportamento de `GET /instances` usado por chat.html/index.html, que
+já tratam bem o caso de zero instâncias):
+- `GET /instances/status?owner=...` — mesma lista, SEM `ensureDefault`,
+  só responde `{hasInstance: bool}`.
+- `POST /instances/confirm-default {owner}` — grava a "Principal" (via
+  `ensureDefault`, idempotente) só quando `sessions.get(owner).getStatus()
+  === 'online'` de verdade (senão responde 409).
+
+`instances.html`: `boot()` novo, primeiro chama `GET /instances/status`;
+se `hasInstance:false`, substitui o `.panel` inteiro (grid + botão) por
+um QR inline (reaproveita o mesmo `GET /qr?session=<ownerId>` e a
+mesma animação de "foguete" carregando, com ids próprios pra não
+colidir com o modal). Ao detectar `status:'online'` no polling, chama
+`POST /instances/confirm-default`, restaura o `.panel` original
+(guardado antes de qualquer substituição) e chama `loadInstances()` —
+que agora encontra a instância já persistida. `newInstanceBtn` (e as
+demais refs de DOM do painel) precisaram virar `let` + uma função
+`rebindPanelRefs()`, já que a substituição de innerHTML destrói os nós
+originais.
+
+**(c) Atalho por instância na sidebar.** Antes só dava pra trocar de
+instância pelo `<select>` discreto dentro do Chat. `chat.html` ganhou
+`renderInstanceShortcuts(list)`, chamado dentro de `initInstances()` —
+um item por instância (só aparece com 2+, não duplica "Chat" quando só
+tem 1), visualmente um sub-item recuado logo abaixo de "Chat". Clicar
+navega pra `/chat.html?session=<id>`, que `initInstances()` usa pra
+pré-selecionar essa instância no `<select>` do filtro antes do
+`onFilterChange()` — mesmo padrão de deep link (`?session=&phone=`) já
+usado pelas notificações, só que sem o `phone` (pré-seleciona a
+instância inteira, não uma conversa específica).
+
+Validação: sintaxe OK (`node -c`/`vm.Script`) em todos os 4 arquivos
+tocados. Teste isolado em Playwright interceptando as chamadas de API:
+fluxo completo (zero instâncias → QR → confirma → restaura grid)
+confirmado via inspeção direta do DOM (elemento do QR removido,
+`.instances-grid` presente); `confirm-default` chamado na ordem certa
+(depois do 2º poll `online`, antes de `loadInstances()`); botão "+
+Conectar outro WhatsApp" religado corretamente após a restauração
+(clique disparado via `.click()` no DOM confirma o modal abrindo —
+Playwright `page.click()` real não foi usado nesse teste específico
+por um modal de atalhos genérico, pré-existente e sem relação com esta
+mudança, interceptando cliques na primeira visita da página em
+ambiente de teste limpo).

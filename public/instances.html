@@ -535,7 +535,7 @@
   }
   .modal input:focus{ border-color: var(--gold-dim); }
   .modal-actions{ display:flex; justify-content: center; gap: 8px; margin-top: 16px; }
-  #qrBox img{ border-radius: 12px; border: 1px solid var(--border); background: #fff; padding: 10px; width: 220px; height: 220px; }
+  #qrBox img, #firstAccessQrImageWrap img{ border-radius: 12px; border: 1px solid var(--border); background: #fff; padding: 10px; width: 220px; height: 220px; }
   #qrStatus{ color: var(--text-muted); font-size: 12.5px; margin-top: 10px; }
   #qrStatus.online{ color: var(--green); font-weight: 600; }
 
@@ -1350,11 +1350,15 @@
   // não tem nenhum feedback visual hoje — fica um QR parado na tela).
   let rocketTimer = null;
 
-  function startRocketAnimation() {
+  // IDs opcionais (2026-09-30) — reaproveitado pelo fluxo de QR de primeiro
+  // acesso (renderFirstAccessQr), que usa ids próprios (firstAccessRocket*)
+  // pra não colidir com os do modal (#rocketFill etc, que continuam
+  // existindo escondidos no DOM enquanto o painel mostra o QR inline).
+  function startRocketAnimation(fillId, iconId, percentId) {
     clearInterval(rocketTimer);
-    const fillEl = document.getElementById('rocketFill');
-    const iconEl = document.getElementById('rocketIcon');
-    const percentEl = document.getElementById('rocketPercent');
+    const fillEl = document.getElementById(fillId || 'rocketFill');
+    const iconEl = document.getElementById(iconId || 'rocketIcon');
+    const percentEl = document.getElementById(percentId || 'rocketPercent');
     let pct = 0;
     rocketTimer = setInterval(() => {
       pct = pct >= 100 ? 0 : pct + 2;
@@ -1369,9 +1373,12 @@
     rocketTimer = null;
   }
 
-  const instancesWrap = document.getElementById('instancesWrap');
-  const newInstanceBtn = document.getElementById('newInstanceBtn');
-  const instanceCountEl = document.getElementById('instanceCount');
+  // `let` (não `const`) — reatribuídos em rebindPanelRefs() depois que o
+  // fluxo de QR de primeiro acesso (renderFirstAccessQr) substitui e depois
+  // restaura o innerHTML do .panel, destruindo/recriando estes nós.
+  let instancesWrap = document.getElementById('instancesWrap');
+  let newInstanceBtn = document.getElementById('newInstanceBtn');
+  let instanceCountEl = document.getElementById('instanceCount');
   const qrModal = document.getElementById('qrModal');
   const qrModalTitle = document.getElementById('qrModalTitle');
   const qrBox = document.getElementById('qrBox');
@@ -1620,11 +1627,17 @@
   const newInstanceModal = document.getElementById('newInstanceModal');
   const newInstanceInput = document.getElementById('newInstanceInput');
 
-  newInstanceBtn.addEventListener('click', () => {
+  // Função nomeada (não arrow inline) pra poder ser religada em
+  // rebindPanelRefs() depois que o .panel é substituído/restaurado pelo
+  // fluxo de QR de primeiro acesso (renderFirstAccessQr) — o botão original
+  // é destruído junto do innerHTML antigo, um novo nó precisa do próprio
+  // listener.
+  function onNewInstanceClick() {
     newInstanceInput.value = '';
     newInstanceModal.classList.add('open');
     newInstanceInput.focus();
-  });
+  }
+  newInstanceBtn.addEventListener('click', onNewInstanceClick);
   document.getElementById('newInstanceCancel').addEventListener('click', () => newInstanceModal.classList.remove('open'));
   document.getElementById('newInstanceCreate').addEventListener('click', async () => {
     const label = newInstanceInput.value.trim();
@@ -2050,7 +2063,113 @@
     }
   }
 
-  loadInstances();
+  // ---------------- Primeiro acesso: QR direto, sem instância no banco ----------------
+  // Pedido do usuário (2026-09-30): quem nunca conectou nada não deveria ver
+  // um card "Principal" com um botão "Conectar WhatsApp" pra clicar — o QR
+  // já aparece direto na tela. A instância "Principal" só é persistida no
+  // Postgres DEPOIS de confirmado o pareamento (POST /instances/confirm-default),
+  // nunca antes — corrige a causa raiz das dezenas de instâncias órfãs
+  // "ainda não pareado" vistas em produção (mesmo owner abria a tela,
+  // ganhava uma linha no banco, fechava sem escanear — ROADMAP itens 5/13).
+  const panelEl = document.querySelector('.panel');
+  function renderFirstAccessQr() {
+    panelEl.innerHTML = `
+      <div id="firstAccessQrBox" style="margin:0 auto;max-width:360px;text-align:center;padding:30px 20px;">
+        <h2 style="margin-top:0;">Escaneie o QRCode abaixo para conectar seu WhatsApp</h2>
+        <div id="firstAccessQrImageWrap"></div>
+        <div class="loading-rocket">
+          <div class="rocket-track">
+            <div class="rocket-fill" id="firstAccessRocketFill"></div>
+            <span class="rocket-icon" id="firstAccessRocketIcon">🚀</span>
+          </div>
+          <p class="rocket-percent" id="firstAccessRocketPercent">0%</p>
+          <p class="rocket-caption" id="firstAccessRocketCaption">Gerando QR Code…</p>
+        </div>
+        <p id="firstAccessQrStatus" style="margin-top:10px;color:var(--text-faint);font-size:13px;"></p>
+      </div>
+    `;
+    startRocketAnimation('firstAccessRocketFill', 'firstAccessRocketIcon', 'firstAccessRocketPercent');
+
+    const qrImageWrap = document.getElementById('firstAccessQrImageWrap');
+    const rocketCaption = document.getElementById('firstAccessRocketCaption');
+    const qrStatusEl = document.getElementById('firstAccessQrStatus');
+
+    async function poll() {
+      try {
+        // ownerId como session: mesmo id que ensureDefault usaria pra
+        // "Principal" (ver src/instances.js) — assertOwnsSession já libera
+        // esse caso especial (id === ownerId) sem exigir linha em
+        // `instances`, então GET /qr funciona normalmente mesmo sem a
+        // instância existir ainda no banco.
+        const res = await apiFetch(`${API_BASE}/qr?session=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+        const data = await res.json();
+
+        if (data.status === 'online') {
+          clearInterval(firstAccessPollInterval);
+          // Persiste a "Principal" só agora que o pareamento está confirmado
+          // — se essa chamada falhar (rede, timeout), o próximo carregamento
+          // da página tenta de novo (GET /qr?session=owner já reconectaria
+          // à sessão em memória, que continua online).
+          try {
+            await apiFetch(`${API_BASE}/instances/confirm-default`, {
+              method: 'POST',
+              headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ owner: myOwnerId }),
+            });
+          } catch (err) {
+            console.error('[instances] falha ao confirmar instância padrão:', err.message);
+          }
+          if (window.showToast) window.showToast('WhatsApp conectado com sucesso!', 'success');
+          // Restaura o HTML original do painel (grid normal) e recarrega —
+          // agora GET /instances/status já vai achar a instância recém-criada.
+          panelEl.innerHTML = PANEL_ORIGINAL_HTML;
+          rebindPanelRefs();
+          loadInstances();
+          return;
+        }
+
+        if (data.qr) {
+          qrImageWrap.innerHTML = `<img src="${data.qr}" alt="QR Code" />`;
+          rocketCaption.textContent = 'Conectando… escaneie o QR Code ou aguarde a confirmação';
+        } else {
+          qrImageWrap.innerHTML = '';
+          rocketCaption.textContent = 'Gerando QR Code…';
+        }
+        qrStatusEl.textContent = 'Status: ' + data.status;
+      } catch (err) {
+        qrStatusEl.textContent = 'Erro ao carregar QR: ' + err.message;
+      }
+    }
+    poll();
+    const firstAccessPollInterval = setInterval(poll, 2500);
+  }
+
+  // HTML original do .panel, guardado ANTES de qualquer substituição — usado
+  // pra restaurar o grid normal depois que a Principal for confirmada, sem
+  // precisar duplicar a marcação em dois lugares.
+  const PANEL_ORIGINAL_HTML = panelEl.innerHTML;
+  function rebindPanelRefs() {
+    // instancesWrap/newInstanceBtn/instanceCountEl (consts no topo do
+    // script) apontavam pros nós antigos, destruídos pela substituição de
+    // innerHTML — precisa reobter e religar antes do próximo loadInstances().
+    instancesWrap = document.getElementById('instancesWrap');
+    newInstanceBtn = document.getElementById('newInstanceBtn');
+    instanceCountEl = document.getElementById('instanceCount');
+    newInstanceBtn.addEventListener('click', onNewInstanceClick);
+  }
+
+  async function boot() {
+    if (!myOwnerId) myOwnerId = await resolveSession();
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/status?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
+      const data = await res.json();
+      if (!data.hasInstance) { renderFirstAccessQr(); return; }
+    } catch (err) {
+      console.error('[instances] falha ao checar status inicial, seguindo com fluxo normal:', err.message);
+    }
+    loadInstances();
+  }
+  boot();
 })();
 </script>
 <script>

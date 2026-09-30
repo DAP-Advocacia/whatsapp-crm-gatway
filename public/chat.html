@@ -312,6 +312,13 @@
   html.sidebar-collapsed .nav-label{ display:none; }
   html.sidebar-collapsed .nav-item{ justify-content:center; padding:10px; }
 
+  /* Atalho por instância (2026-09-30) — visualmente um "sub-item" de Chat:
+     recuado, ícone/fonte um pouco menores, sem entrar na contagem visual
+     dos itens principais do Workspace. */
+  .nav-item-instance{ padding-left: 34px; font-size: 12px; }
+  .nav-item-instance .nav-icon{ width: 15px; height: 15px; }
+  html.sidebar-collapsed .nav-item-instance{ display: none; }
+
   /* Toggle de tema claro/escuro (2026-08-30) — mesmo formato de .nav-item
      dos demais itens de navegação (regra global: preferência pessoal só
      vira painel de config à parte quando não tem contexto visual óbvio;
@@ -1440,6 +1447,10 @@
       <span class="nav-label">Chat</span>
       <span class="nav-tip">Chat</span>
     </a>
+    <!-- Atalhos por instância (2 ou mais conectadas) — preenchido em
+         renderInstanceShortcuts(), vazio (sem afetar layout) com 0 ou 1
+         instância. Fica entre "Chat" e "Contatos". -->
+    <div id="instanceShortcuts"></div>
     <a href="/contacts.html" class="nav-item">
       <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
       <span class="nav-label">Contatos</span>
@@ -3204,7 +3215,7 @@
     if (!list.length) {
       instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Conexões do WhatsApp</option>';
       convList.innerHTML = '<p class="empty">Conecte uma instância em Conexões do WhatsApp.</p>';
-      renderEmptyView();
+      renderEmptyView(true);
       return;
     }
     const options = [];
@@ -3212,7 +3223,41 @@
     options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}${i.delegated ? ' (compartilhada)' : ''}</option>`));
     instanceSelect.innerHTML = options.join('');
     list.forEach((i) => { state.instanceStatus[i.id] = i.status; });
+    renderInstanceShortcuts(list);
+    // Deep link ?session=<id> sozinho (sem &phone=) — vindo de um clique
+    // num atalho da sidebar (ver renderInstanceShortcuts) — pré-seleciona
+    // essa instância no filtro antes do primeiro onFilterChange(), em vez
+    // de sempre abrir em "Todas as minhas instâncias". Precisa vir ANTES
+    // do onFilterChange() (que lê instanceSelect.value) pra ter efeito.
+    const dlSessionForFilter = new URLSearchParams(location.search).get('session');
+    if (dlSessionForFilter && !dlSessionForFilter.startsWith('dapinho::') && list.some((i) => i.id === dlSessionForFilter)) {
+      instanceSelect.value = dlSessionForFilter;
+    }
     await onFilterChange();
+  }
+
+  // Atalho direto por instância na sidebar (2026-09-30, pedido do usuário —
+  // antes só dava pra trocar de instância pelo <select> discreto dentro do
+  // Chat, "escondido" pra quem nunca usou). Um item por instância acessível
+  // (própria + delegada), logo abaixo de "Chat" na seção Workspace — clicar
+  // recarrega /chat.html?session=<id>, que initInstances() usa pra
+  // pré-selecionar essa instância no filtro (ver acima). Só 1 instância:
+  // não faz sentido mostrar atalho redundante com "Chat" (mesmo destino).
+  function renderInstanceShortcuts(list) {
+    const container = document.getElementById('instanceShortcuts');
+    if (!container) return;
+    if (list.length <= 1) { container.innerHTML = ''; return; }
+    const currentSession = new URLSearchParams(location.search).get('session');
+    container.innerHTML = list.map((i) => {
+      const label = i.label + (i.phone ? ' — ' + i.phone : '');
+      const isActive = currentSession === i.id;
+      return `
+        <a href="/chat.html?session=${encodeURIComponent(i.id)}" class="nav-item nav-item-instance${isActive ? ' active' : ''}" title="${escapeHtml(label)}">
+          <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/></svg></span>
+          <span class="nav-label">${escapeHtml(label)}</span>
+          <span class="nav-tip">${escapeHtml(label)}</span>
+        </a>`;
+    }).join('');
   }
 
   // Nome do usuário atual — usado só como rótulo ao "pegar" uma conversa
@@ -4157,8 +4202,20 @@
     if (banner) banner.hidden = state.connectionStatus !== 'offline';
   }
 
-  function renderEmptyView() {
-    convView.innerHTML = `
+  // `noInstances=true` é o caso de primeiro uso — usuário nunca conectou
+  // nenhum WhatsApp ainda (ver initInstances(), !list.length). Sem isso,
+  // via "Selecione uma conversa" com uma lista vazia do lado, sem nenhuma
+  // pista do que fazer — confuso pra quem nunca usou a ferramenta (pedido
+  // do usuário 2026-09-30, ver ROADMAP).
+  function renderEmptyView(noInstances) {
+    convView.innerHTML = noInstances ? `
+      <div class="state-screen">
+        <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v9a2.5 2.5 0 0 1-2.5 2.5H8l-5 4z"/></svg>
+        <h3>Você ainda não conectou um WhatsApp</h3>
+        <p>Conecte seu número para começar a atender pelo Chat.</p>
+        <a href="/instances.html" class="btn" style="text-decoration:none;">Conectar WhatsApp agora</a>
+      </div>
+    ` : `
       <div class="state-screen">
         <svg class="state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v9a2.5 2.5 0 0 1-2.5 2.5H8l-5 4z"/></svg>
         <h3>Selecione uma conversa</h3>
