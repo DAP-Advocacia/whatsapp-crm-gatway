@@ -1152,6 +1152,19 @@
     padding: 18px 14px; text-align: center; font-size: 12.5px; color: var(--text-muted);
     min-height: 90px;
   }
+  /* CAUSA RAIZ REAL do "Não foi possível carregar" persistente mesmo com
+     imagem certa e carregada (2026-09-30) — mesmo bug já corrigido em
+     .composer[hidden]/.export-menu[hidden]/etc logo abaixo, só que este
+     seletor específico nunca tinha recebido a correção. `display:flex`
+     acima tem a MESMA especificidade que a regra padrão do navegador
+     [hidden]{display:none} e VENCE por vir depois na cascata — o elemento
+     fica sempre visível mesmo com hidden=true setado corretamente pelo JS
+     (confirmado inspecionando o DOM real: <div class="media-error hidden">
+     com o atributo presente, ainda assim visível na tela). Todas as
+     hipóteses anteriores (fetch duplicado, proxy vs redirect, cache HTTP)
+     estavam tratando sintomas de OUTROS bugs reais que também existiam,
+     mas nenhuma delas era a causa deste em especial. */
+  .media-error[hidden]{ display: none; }
   .media-error .media-retry-btn{
     background: none; border: 1px solid var(--border); color: var(--text-muted);
     font-size: 12px; padding: 5px 12px; border-radius: 100px; cursor: pointer; font-family: inherit;

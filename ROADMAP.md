@@ -794,3 +794,60 @@ isolado em Node simulando 4 chamadas concorrentes pra mesma URL contra
 um "servidor" fake que conta requisições — confirmado 1 única chamada
 de rede real, todos os 4 callers recebendo o mesmo resultado, e uma
 5ª chamada posterior usando o cache sem nova rede.
+
+## 15. CAUSA RAIZ DE VERDADE, finalmente confirmada por evidência direta (2026-09-30)
+
+A correção do item 14 (dedupe de fetch) também não resolveu — usuário
+confirmou de novo com print, agora com DUAS imagens diferentes. Nesse
+ponto, decidido parar de corrigir por hipótese e investigar por
+evidência direta em cada camada, do servidor até o pixel na tela,
+nessa ordem:
+
+1. **Logs do servidor via SSH** (`docker logs`, container
+   `whatsapp-gateway_gateway...`): confirmado que TODA mídia buscada
+   (histórico inteiro + mensagem nova) retornava 200 com bytes
+   corretos — nenhuma falha real do backend em momento nenhum.
+2. **Console do DevTools filtrado por `chat.html`**: zero erros JS —
+   descartou qualquer exceção não tratada no fluxo de hidratação.
+3. **Inspecionar elemento (aba Elements)** na mensagem com erro:
+   revelou `<img src="blob:...">` com um blob VÁLIDO e
+   `<div class="media-error" hidden>` — ou seja, o HTML real já
+   estava no estado correto (imagem carregada, erro marcado como
+   escondido), mas a caixa de erro aparecia visualmente mesmo assim.
+4. **Aba Network → clique na requisição específica → Preview**:
+   confirmado que o arquivo baixado (PNG de 15-38KB) era exatamente
+   a imagem certa que o usuário enviou (confirmado por ele: "é a foto
+   que eu mandei mesmo", um logo de cliente) — abrindo o blob em nova
+   guia mostrou a imagem correta, sem nenhum CSS interferindo.
+
+**Conclusão**: nunca foi bug de rede, servidor, CORS, cache HTTP, fetch
+duplicado ou conteúdo errado — todas essas quatro hipóteses anteriores
+(itens 10, 11, 12, 14) descreviam problemas REAIS que existiam e
+foram corrigidos corretamente, mas nenhuma delas era a causa deste
+sintoma específico. A causa real, uma vez que o passo 3 provou que o
+próprio HTML já tinha `hidden` presente no elemento: **mesmo bug de
+especificidade CSS do item 9 (drawer de notas do mini-chat)**, desta
+vez em `.media-error` de `chat.html` — `.media-error{ display: flex;
+... }` tem a MESMA especificidade que a regra padrão do navegador
+`[hidden]{ display: none }`, e por vir depois na cascata, VENCE. A
+caixa de erro fica sempre visível mesmo com `hidden=true` corretamente
+setado pelo JS (`hideMediaError()` sempre funcionou — só que a
+mudança no atributo nunca tinha efeito visual nenhum).
+
+Curiosamente, `chat.html` já tinha essa exata correção aplicada em
+OUTROS cinco seletores (`.composer[hidden]`, `.export-menu[hidden]`,
+`.reply-preview-bar[hidden]`, `.composer-note-wrap[hidden]`,
+`.assignee-filter[hidden]`) — inclusive com comentário histórico
+"correção já feita... só faltou" em pelo menos um deles — mas
+`.media-error` nunca tinha recebido o mesmo tratamento.
+
+Corrigido adicionando `.media-error[hidden]{ display: none; }` logo
+abaixo da regra existente. Validado via Playwright que
+`getComputedStyle(...).display` vira `'none'` com o atributo presente.
+
+**Lição pra próxima vez que algo parecido acontecer**: quando uma
+correção lógica (JS) não resolve um sintoma visual, checar a
+ESPECIFICIDADE CSS do seletor envolvido com `[hidden]`/`[disabled]`
+ANTES de assumir que a lógica de negócio está errada — este mesmo
+padrão de bug já apareceu 2 vezes neste projeto (aqui e no item 9) e é
+completamente invisível olhando só o JavaScript.
