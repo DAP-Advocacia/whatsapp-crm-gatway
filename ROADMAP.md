@@ -1001,3 +1001,55 @@ esta correção, novas órfãs não voltam a ser criadas a cada reload do
 Chat.
 
 Validação: sintaxe OK (`node -c`/`vm.Script`) em todos os 3 arquivos.
+
+## 19. Filtro "WhatsApp: nunca conectou" no Admin + lembrete diário via IM do Bitrix (2026-09-30)
+
+Com a causa raiz das instâncias órfãs corrigida (itens 17/18), `u.instances
+=== []` em `GET /admin/users` passou a significar "de verdade nunca
+conectou" — usuário pediu pra identificar quem está nessa situação e
+programar lembretes.
+
+**Parte 1 — visualização/exportação (aba Usuários do Admin)**: novo
+filtro `usersFilterWhatsapp` ("WhatsApp: nunca conectou"), mesmo padrão
+dos filtros já existentes (Status, Atividade, etc) — não precisou de
+rota nova, `u.instances` já vinha pronto de `GET /admin/users`. CSV
+exportado (`exportUsersCsv`, já respeita `usersFiltered()`) ganhou
+colunas de Celular/Ramal — antes não tinha telefone, insuficiente pra
+mandar lembrete manual.
+
+**Parte 2 — automação (pedido explícito: "vai ser notificação im nativa
+do bitrix mesmo")**: novo `src/whatsappReminderPoller.js`, mesmo
+esqueleto de `src/instanceBanPoller.js` (`runOnce()` + `startPolling()`,
+registrado em `server.js`). Regras confirmadas com o usuário:
+- Carência de 1 dia desde `dateRegister` (criação da conta no Bitrix)
+  antes do primeiro lembrete — evita incomodar gente recém-contratada.
+- Repete 1x por dia até conectar (dedupe por dia civil em memória, reseta
+  a cada restart — mesmo raciocínio de `instanceBanPoller.js`: pior caso
+  manda 1 extra depois de deploy, nunca deixa de lembrar).
+- Para automaticamente assim que `instancesStore.listByOwner(ownerId)`
+  deixa de retornar vazio.
+
+**Decisão de canal, com achado técnico relevante**: cogitado reusar
+`alertDispatcher.notifyAttention` (4 canais: in-app, Web Push, WhatsApp de
+sistema, e-mail), mas descartado — `whatsappAlert.notifyOwner` só
+funciona se o dono já tiver OUTRA instância online (nunca é o caso de
+quem nunca conectou nada) e Web Push exige opt-in prévio que essa pessoa
+não teria motivo de ter dado. Usuário confirmou preferência por canal
+próprio: IM nativo do Bitrix (`im.message.add`), via o mesmo webhook já
+usado por `bitrixHierarchy.js` (`callBitrixHR`, exportado agora pra
+reaproveitar) — **exige o escopo "im" habilitado no webhook de entrada
+(`BITRIX_HR_WEBHOOK_URL`)**, usuário vai confirmar/configurar isso no
+painel do Bitrix separadamente; sem o escopo, a chamada falha e é
+logada (mesmo padrão de degradação graciosa do resto do módulo), não
+derruba nada.
+
+Validação: sintaxe OK (`node -c`) em `whatsappReminderPoller.js`,
+`bitrixHierarchy.js`, `server.js`. Teste isolado em Node com
+dependências mockadas (instâncias, `listEmployees`, `im.message.add`):
+3 cenários — usuário recém-criado (dentro da carência) não recebe,
+usuário já conectado não recebe, usuário elegível recebe exatamente 1x
+e não duplica numa segunda rodada no mesmo dia — 3/3 corretos.
+
+Validação de ponta a ponta (chamada real ao Bitrix) pendente — depende
+da confirmação do escopo "im" no webhook, fora do que dá pra testar
+localmente.

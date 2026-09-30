@@ -814,6 +814,17 @@
         <option value="">Atividade: todos</option>
         <option value="never">Nunca usou o app</option>
       </select>
+      <!-- WhatsApp: nunca conectou (2026-09-30, pedido do usuário — quer
+           programar lembretes pra quem ainda não conectou nenhum número).
+           u.instances já vem pronto de GET /admin/users ([] = nunca
+           conectou, ver src/routes/whatsapp.js) — depois da correção que
+           parou de criar a "Principal" automaticamente (ROADMAP itens
+           17/18), [] passou a significar "de verdade nunca conectou", sem
+           falso positivo de instância órfã nunca pareada. -->
+      <select id="usersFilterWhatsapp">
+        <option value="">WhatsApp: todos</option>
+        <option value="never">Nunca conectou</option>
+      </select>
       <button type="button" class="btn secondary" id="usersFiltersClear">Limpar filtros</button>
     </div>
     <div id="usersActiveFilters" style="display:none; margin-bottom:12px; font-size:12px; color:var(--text-muted);"></div>
@@ -1551,11 +1562,17 @@
       if (window.showToast) window.showToast('Nenhum usuário pra exportar.', 'error');
       return;
     }
-    const header = ['Nome', 'E-mail', 'Cargo', 'Owner ID', 'Online', 'Conexões WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
+    // Celular/ramal incluídos (2026-09-30, pedido do usuário — quer
+    // programar lembretes de "conecte seu WhatsApp" pra quem ainda não
+    // conectou nenhum número, ver filtro usersFilterWhatsapp acima; sem o
+    // telefone aqui o CSV exportado não seria suficiente pra isso).
+    const header = ['Nome', 'E-mail', 'Cargo', 'Celular', 'Ramal', 'Owner ID', 'Online', 'Conexões WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
     const lines = rows.map((u) => [
       u.name || '',
       u.email || '',
       u.workPosition || '',
+      u.mobile || '',
+      u.workPhone || '',
       u.ownerId || '',
       u.isOnline ? 'sim' : 'não',
       formatInstancesForCsv(u.instances),
@@ -1615,6 +1632,7 @@
     const roleFilter = document.getElementById('usersFilterRole').value;
     const analysisFilter = document.getElementById('usersFilterAnalysis').value;
     const activityFilter = document.getElementById('usersFilterActivity').value;
+    const whatsappFilter = document.getElementById('usersFilterWhatsapp').value;
 
     return usersRows.filter((u) => {
       if (term) {
@@ -1635,6 +1653,7 @@
       // (totalSecondsLast30d === 0 cobriria alguém ativo há 40 dias, que
       // não é a mesma coisa e seria confuso rotular como "nunca usou").
       if (activityFilter === 'never' && u.lastAccess) return false;
+      if (whatsappFilter === 'never' && u.instances && u.instances.length) return false;
       return true;
     });
   }
@@ -1662,6 +1681,7 @@
     const roleFilter = document.getElementById('usersFilterRole').value;
     const analysisFilter = document.getElementById('usersFilterAnalysis').value;
     const activityFilter = document.getElementById('usersFilterActivity').value;
+    const whatsappFilter = document.getElementById('usersFilterWhatsapp').value;
     const filtered = usersFiltered();
 
     // Resumo visível de "o que está filtrando agora" — some por padrão,
@@ -1676,6 +1696,7 @@
     if (roleFilter) activeFilterLabels.push(`cargo: ${roleFilter}`);
     if (analysisFilter) activeFilterLabels.push(`auditoria: ${analysisFilter === 'yes' ? 'com acesso' : 'sem acesso'}`);
     if (activityFilter === 'never') activeFilterLabels.push('nunca usou o app');
+    if (whatsappFilter === 'never') activeFilterLabels.push('WhatsApp: nunca conectou');
     const activeFiltersEl = document.getElementById('usersActiveFilters');
     if (activeFilterLabels.length) {
       activeFiltersEl.style.display = '';
@@ -1801,7 +1822,7 @@
 
   // Filtros adicionais da tabela de Usuários — mesmo padrão do listener de
   // busca acima (volta pra página 1, já que o total de linhas mudou).
-  ['usersFilterStatus', 'usersFilterPage', 'usersFilterRole', 'usersFilterAnalysis', 'usersFilterActivity'].forEach((id) => {
+  ['usersFilterStatus', 'usersFilterPage', 'usersFilterRole', 'usersFilterAnalysis', 'usersFilterActivity', 'usersFilterWhatsapp'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => { usersPage = 1; renderUsers(); });
   });
   document.getElementById('usersFiltersClear').addEventListener('click', () => {
@@ -1811,6 +1832,7 @@
     document.getElementById('usersFilterRole').value = '';
     document.getElementById('usersFilterAnalysis').value = '';
     document.getElementById('usersFilterActivity').value = '';
+    document.getElementById('usersFilterWhatsapp').value = '';
     usersPage = 1;
     renderUsers();
   });
