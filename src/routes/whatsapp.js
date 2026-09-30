@@ -1408,7 +1408,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
 
   // ---------------------------------------------------------------
   // GET /history?session=...&dealId=...&phone=...
-  // Histórico daquele telefone na sessão do usuário (ao abrir a aba)
+  // Histórico daquele telefone na sessão do usuário (ao abrir a aba) —
+  // só a página MAIS RECENTE (50 mensagens, ver store.getHistoryPage).
+  // Paginação de verdade adicionada 2026-09-30 (pedido do usuário —
+  // conversa longa carregava até 500 mensagens + tentava baixar toda a
+  // mídia de cara, mesmo fora da tela). Página seguinte (mais antiga) via
+  // GET /history/older, chamada pelo frontend ao rolar pro topo da lista.
   // ---------------------------------------------------------------
   router.get('/history', requireSession((req) => req.query.session), async (req, res) => {
     const { session, dealId, phone } = req.query;
@@ -1416,7 +1421,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
 
     try {
       const gateway = sessions.get(session);
-      const messages = await store.getHistory(session, phone);
+      const { messages, hasMore } = await store.getHistoryPage(session, phone, { limit: 50 });
 
       // guarda/atualiza o vínculo telefone -> negócio para esta sessão
       if (dealId) {
@@ -1430,17 +1435,40 @@ function createWhatsappRouter({ sessions, broadcast }) {
 
       // Resumo persistido (se já foi gerado alguma vez) — vem junto pra não
       // precisar de round-trip extra ao abrir a conversa. Ver
-      // POST /conversations/summary pra (re)gerar.
+      // POST /conversations/summary pra (re)gerar. Continua usando
+      // store.getHistory (não paginado) — o resumo por IA precisa do
+      // contexto completo da conversa, não só da última página.
       const { aiSummary, aiSummaryUpdatedAt } = await store.getConversationSummary(session, phone);
 
       res.json({
         messages,
+        hasMore,
         connectionStatus: gateway.getStatus(),
         aiSummary,
         aiSummaryUpdatedAt,
       });
     } catch (err) {
       console.error('[history] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /history/older?session=...&phone=...&before=<ISO date>
+  // Página anterior (mais antiga) do histórico — chamada ao rolar pro
+  // topo da lista de mensagens já aberta. `before` é o createdAt da
+  // mensagem mais antiga já carregada no cliente (ver store.getHistoryPage).
+  // ---------------------------------------------------------------
+  router.get('/history/older', requireSession((req) => req.query.session), async (req, res) => {
+    const { session, phone, before } = req.query;
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    if (!before) return res.status(400).json({ error: 'before é obrigatório' });
+
+    try {
+      const { messages, hasMore } = await store.getHistoryPage(session, phone, { before, limit: 50 });
+      res.json({ messages, hasMore });
+    } catch (err) {
+      console.error('[history:older] erro:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

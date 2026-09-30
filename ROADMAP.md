@@ -1105,3 +1105,52 @@ pra apontar pro link desse post
 (`https://bitrix.dapadvocacia.com.br/company/personal/user/5305/blog/15670/`)
 em vez de só instruir genericamente "vá em Conexões do WhatsApp" — dá
 o passo a passo completo pra quem clicar.
+
+## 20. Performance — lazy load de mídia + paginação de mensagens no Chat (2026-09-30)
+
+Usuário reportou, observando os próprios logs de produção (volume
+grande de "mídia histórica indisponível" ao abrir conversas): "quando
+abro um chat, tenta carregar tudo de uma vez só a conversa, não tem
+como paginar?". Confirmado: `GET /history` buscava até 500 mensagens
+de uma vez (`store.getHistory`), `renderMessages()` desenhava todas no
+DOM de uma vez, e `hydrateMedia()` disparava um fetch de mídia por
+elemento — TODOS de uma vez, mesmo fora da área visível da tela.
+
+**(a) Lazy load de mídia por viewport** — `hydrateMedia()` (chat.html e
+index.html/mini-chat) agora usa `IntersectionObserver` com
+`rootMargin: 600px` — só busca o blob de imagem/áudio/vídeo quando o
+elemento está perto de entrar na tela (carrega com antecipação, não
+exatamente no frame em que aparece). Documentos (`<a>`, sem bytes de
+mídia baixados adiante) e mídia já em `mediaBlobCache` continuam
+hidratados na hora, sem passar pelo observer. Toda a lógica de
+erro/retry/dedupe existente (itens anteriores do ROADMAP) preservada
+intacta — só mudou O MOMENTO em que `hydrateOneMedia` é chamado.
+
+**(b) Paginação real de mensagens** — nova `store.getHistoryPage(sessionId,
+phone, {before, limit})`, função SEPARADA de `store.getHistory`
+(mantida intacta — usada por agente de IA/resumo/insights/auditoria,
+que precisam do histórico COMPLETO pra contexto, nunca paginados).
+`GET /history` (1º carregamento da conversa) passou a devolver só 50
+mensagens mais recentes + `hasMore`; nova rota `GET /history/older`
+(com `before=<timestamp da mais antiga já carregada>`) busca a página
+seguinte, chamada pelo frontend ao rolar pro topo da lista
+(`bindMessagesScroll`, gatilho a 150px do topo, religado a cada troca
+de conversa).
+
+Preservação de posição de leitura: `renderMessages({preserveScrollFromBottom:
+true})` mede a distância até o fim da lista ANTES de inserir as
+mensagens antigas no topo e restaura essa MESMA distância depois — sem
+isso, cada página nova "puxaria o tapete" da leitura em andamento. Só
+usado no caminho de "carregar mais antigas"; o carregamento normal
+(1ª vez, mensagem nova chegando) continua rolando pro final como
+sempre.
+
+Validação: sintaxe OK (`node -c`/`vm.Script`) em store.js, whatsapp.js
+(rotas), chat.html e index.html. Testes isolados em Playwright: (1)
+lazy load — 0 fetches com elemento a 2000px de distância, 1 fetch
+exato ao rolar até 600px dele; (2) gatilho de scroll — não dispara
+longe do topo, dispara a 150px; (3) preservação de posição — distância
+até o fim idêntica antes/depois de inserir 150px de conteúdo no topo.
+Teste isolado em Node da lógica de `hasMore`/reversão cronológica de
+`getHistoryPage` — 3 cenários (página intermediária, última página,
+exatamente no limite) corretos.

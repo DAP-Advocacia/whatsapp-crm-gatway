@@ -137,6 +137,53 @@ async function getHistory(sessionId, phone) {
   return rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
 }
 
+// Paginação real do histórico pra tela de Chat (2026-09-30, pedido do
+// usuário — abrir uma conversa longa carregava até 500 mensagens de uma
+// vez, incluindo a mídia de todas, mesmo fora da tela). Diferente de
+// getHistory (usado por agente de IA/resumo/insights/auditoria, que
+// PRECISAM do histórico completo pra ter contexto — nunca paginado).
+//
+// `before` (ISO string, opcional) é o createdAt da mensagem mais ANTIGA já
+// carregada no cliente — busca a página seguinte, mais antiga que ela.
+// Sem `before`, devolve a página mais RECENTE (comportamento do 1º
+// carregamento da conversa). `hasMore` indica se existe mensagem mais
+// antiga que a mais velha desta página (o cliente busca 1 a mais que o
+// `limit` pedido só pra essa checagem, sem devolvê-la).
+async function getHistoryPage(sessionId, phone, { before, limit = 50 } = {}) {
+  const cappedLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const { rows } = await pool.query(
+    `select
+       m.wa_message_id as id,
+       m.direction,
+       m.type,
+       m.text,
+       m.media_url as "mediaUrl",
+       m.mimetype,
+       m.status,
+       m.reaction,
+       m.reaction_by as "reactionBy",
+       m.reply_to_id as "replyToId",
+       m.file_name as "fileName",
+       m.sent_by as "sentBy",
+       m.sent_by_name as "sentByName",
+       m.group_sender_phone as "groupSenderPhone",
+       m.group_sender_name as "groupSenderName",
+       m.created_at as "createdAt"
+     from messages m
+     join conversations c on c.id = m.conversation_id
+     where c.session_id = $1 and c.phone = $2
+       and ($3::timestamptz is null or m.created_at < $3::timestamptz)
+     order by m.created_at desc
+     limit $4`,
+    [sessionId, phone, before || null, cappedLimit + 1]
+  );
+  const hasMore = rows.length > cappedLimit;
+  const page = (hasMore ? rows.slice(0, cappedLimit) : rows)
+    .reverse() // volta pra ordem cronológica (mais antiga primeiro), mesmo formato de getHistory
+    .map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+  return { messages: page, hasMore };
+}
+
 async function updateMessageStatus(sessionId, phone, messageId, status) {
   await pool.query(
     `update messages m set status = $1
@@ -1096,6 +1143,7 @@ async function countConversations(sessionId) {
 module.exports = {
   addMessage,
   getHistory,
+  getHistoryPage,
   updateMessageStatus,
   updateMessageText,
   setMessageReaction,

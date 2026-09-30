@@ -1410,6 +1410,31 @@
     return promise;
   }
 
+  async function hydrateOneMedia(el, url) {
+    try {
+      const blobUrl = await fetchMediaBlobUrl(url);
+      setMediaSrc(el, blobUrl);
+    } catch (err) {
+      console.error('Erro ao carregar mídia:', url, err);
+    }
+  }
+
+  // Lazy load de mídia por viewport (2026-09-30, mesmo achado de
+  // chat.html) — só busca o blob quando o elemento se aproxima da área
+  // visível, não todos de uma vez ao abrir o mini-chat.
+  const mediaLazyObserver = 'IntersectionObserver' in window
+    ? new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          mediaLazyObserver.unobserve(entry.target);
+          const el = entry.target;
+          const url = el.dataset.lazyMediaUrl;
+          delete el.dataset.lazyMediaUrl;
+          hydrateOneMedia(el, url);
+        }
+      }, { rootMargin: '600px 0px' })
+    : null;
+
   async function hydrateMedia(container) {
     const els = container.querySelectorAll('[data-media-url]');
     for (const el of els) {
@@ -1421,12 +1446,12 @@
         continue;
       }
 
-      try {
-        const blobUrl = await fetchMediaBlobUrl(url);
-        setMediaSrc(el, blobUrl);
-      } catch (err) {
-        console.error('Erro ao carregar mídia:', url, err);
+      if (mediaBlobCache.has(url) || !mediaLazyObserver) {
+        await hydrateOneMedia(el, url);
+        continue;
       }
+      el.dataset.lazyMediaUrl = url;
+      mediaLazyObserver.observe(el);
     }
   }
 

@@ -4238,6 +4238,10 @@
     state.messages = [];
     state.internalNotes = [];
     state.insights = [];
+    // Paginação (2026-09-30) — resetados ao trocar de conversa, senão o
+    // "tem mais mensagens antigas?" da conversa ANTERIOR vazaria pra esta.
+    state.hasMoreHistory = false;
+    state.loadingOlderHistory = false;
     state.connectionStatus = 'unknown';
     state.peerPresence = null;
     state.replyingTo = null;
@@ -4648,6 +4652,7 @@
     renderMessages();
     bindComposer();
     bindMessagesInteractions();
+    bindMessagesScroll();
     renderReplyPreview();
 
     document.getElementById('refreshConvBtn').addEventListener('click', loadHistory);
@@ -4699,6 +4704,11 @@
       if (!res.ok) throw new Error('falha ao carregar histórico');
       const data = await res.json();
       state.messages = data.messages || [];
+      // Paginação (2026-09-30) — só a página mais recente vem aqui (ver
+      // GET /history no backend), mensagens mais antigas são buscadas sob
+      // demanda ao rolar pro topo (ver loadOlderMessages/bindMessagesScroll).
+      state.hasMoreHistory = !!data.hasMore;
+      state.loadingOlderHistory = false;
       state.connectionStatus = data.connectionStatus || 'unknown';
       aiSummary = data.aiSummary || null;
       aiSummaryUpdatedAt = data.aiSummaryUpdatedAt || null;
@@ -4709,6 +4719,9 @@
       // precisa clicar em nada pra ele aparecer. Só quando há mensagem de
       // verdade (senão a API responde erro "não há mensagens ainda" toda
       // vez que se abre uma conversa nova/vazia); silencioso (sem toast).
+      // Continua usando o histórico completo (getConversationSummary já
+      // veio pronto de GET /history — resumo persistido não depende da
+      // paginação de mensagens visíveis).
       if (!aiSummary && state.messages.length > 0) generateConversationSummary(true);
     } catch (err) {
       console.error('Erro ao carregar histórico:', err);
@@ -4716,10 +4729,64 @@
     }
   }
 
-  function renderMessages() {
+  // Busca a página anterior (mais antiga) ao rolar pro topo da lista —
+  // pedido do usuário 2026-09-30: antes o Chat carregava até 500
+  // mensagens de uma vez (e tentava baixar toda a mídia junto) mesmo sem
+  // o usuário nunca rolar até lá. `state.messages[0]` é sempre a mais
+  // antiga JÁ carregada (array em ordem cronológica) — usada como cursor
+  // `before` pra próxima página.
+  async function loadOlderMessages() {
+    if (state.loadingOlderHistory || !state.hasMoreHistory || !state.messages.length) return;
+    state.loadingOlderHistory = true;
+    const a = state.active;
+    const oldestCreatedAt = state.messages[0].createdAt;
+    try {
+      const url = `${API_BASE}/history/older?session=${encodeURIComponent(a.sessionId)}&phone=${encodeURIComponent(a.phone)}&before=${encodeURIComponent(oldestCreatedAt)}`;
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('falha ao carregar mensagens antigas');
+      const data = await res.json();
+      state.hasMoreHistory = !!data.hasMore;
+      const older = data.messages || [];
+      if (older.length) {
+        state.messages = [...older, ...state.messages];
+        renderMessages({ preserveScrollFromBottom: true });
+      }
+    } catch (err) {
+      console.error('Erro ao carregar mensagens antigas:', err);
+      // Best-effort — deixa hasMoreHistory como estava (tenta de novo na
+      // próxima rolagem) em vez de travar em false por causa de 1 falha de rede.
+    } finally {
+      state.loadingOlderHistory = false;
+    }
+  }
+
+  // Dispara loadOlderMessages() perto do topo da lista — religado a cada
+  // renderConversationView() (mesmo padrão de outros listeners desta
+  // tela, ver bindComposer), já que #messagesEl é recriado a cada troca
+  // de conversa. 150px de folga: busca a próxima página um pouco ANTES
+  // do usuário bater no topo de vez, pra já estar pronta.
+  function bindMessagesScroll() {
+    const el = document.getElementById('messagesEl');
+    if (!el) return;
+    el.addEventListener('scroll', () => {
+      if (el.scrollTop < 150) loadOlderMessages();
+    });
+  }
+
+  // `opts.preserveScrollFromBottom` (2026-09-30, paginação) — quando
+  // mensagens ANTIGAS são inseridas no topo (loadOlderMessages), rolar
+  // pro final (comportamento padrão, mensagem nova/1º carregamento)
+  // "puxaria o tapete" da leitura em andamento. Em vez disso, mede a
+  // distância do fim ANTES de recriar o DOM e restaura essa MESMA
+  // distância depois — o conteúdo novo entra acima sem mover o que já
+  // estava visível na tela.
+  function renderMessages(opts) {
     const el = document.getElementById('messagesEl');
     if (!el) return;
     const a = state.active;
+    const distanceFromBottom = opts && opts.preserveScrollFromBottom
+      ? el.scrollHeight - el.scrollTop
+      : null;
 
     // Guarda de "vazio" considera TAMBÉM notas internas — uma conversa
     // com só nota (sem nenhuma mensagem real ainda) não pode mostrar
@@ -4863,7 +4930,11 @@
     });
 
     el.innerHTML = compactHtml(html);
-    el.scrollTop = el.scrollHeight;
+    if (distanceFromBottom !== null) {
+      el.scrollTop = el.scrollHeight - distanceFromBottom;
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
     hydrateMedia(el);
     hydrateLinkPreviews(el);
   }
@@ -5451,23 +5522,57 @@
     }
   }
 
+  // Lazy load de mídia por viewport (2026-09-30, pedido do usuário —
+  // percebeu que abrir uma conversa longa tentava baixar TODAS as
+  // imagens/áudios/vídeos de uma vez, mesmo os que nunca chegavam a
+  // aparecer na tela sem rolar). Documentos (<a>, sempre metadado leve,
+  // sem bytes de mídia baixados adiante) continuam hidratados na hora —
+  // só img/video/audio entram no IntersectionObserver.
+  //
+  // rootMargin generoso (600px) carrega a mídia um pouco ANTES dela
+  // entrar na tela de verdade, pra já estar pronta quando o usuário
+  // rolar até lá, sem esperar o fetch começar só no frame em que aparece.
+  const mediaLazyObserver = 'IntersectionObserver' in window
+    ? new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          mediaLazyObserver.unobserve(entry.target);
+          const el = entry.target;
+          const url = el.dataset.lazyMediaUrl;
+          delete el.dataset.lazyMediaUrl;
+          hydrateOneMedia(el, url);
+        }
+      }, { rootMargin: '600px 0px' })
+    : null;
+
   async function hydrateMedia(container) {
     const els = container.querySelectorAll('[data-media-url]');
     for (const el of els) {
       const url = el.getAttribute('data-media-url');
       el.removeAttribute('data-media-url');
-      if (el.tagName !== 'A') {
-        el.addEventListener('error', () => showMediaError(el), { once: true });
-        const retryBtn = el.parentElement && el.parentElement.querySelector('.media-retry-btn');
-        if (retryBtn) {
-          retryBtn.addEventListener('click', () => {
-            hideMediaError(el);
-            mediaBlobCache.delete(url); // pode ter ficado um blob inválido em cache
-            hydrateOneMedia(el, url);
-          });
-        }
+      if (el.tagName === 'A') {
+        // Documento — leve, sem custo de rede adiantado, hidrata direto.
+        await hydrateOneMedia(el, url);
+        continue;
       }
-      await hydrateOneMedia(el, url);
+      el.addEventListener('error', () => showMediaError(el), { once: true });
+      const retryBtn = el.parentElement && el.parentElement.querySelector('.media-retry-btn');
+      if (retryBtn) {
+        retryBtn.addEventListener('click', () => {
+          hideMediaError(el);
+          mediaBlobCache.delete(url); // pode ter ficado um blob inválido em cache
+          hydrateOneMedia(el, url);
+        });
+      }
+      // Já em cache (ex: mídia recém-enviada por nós, ou re-render da
+      // mesma conversa) — hidrata na hora, sem custo de rede nem de
+      // esperar o IntersectionObserver disparar.
+      if (mediaBlobCache.has(url) || !url.startsWith('/') || !mediaLazyObserver) {
+        await hydrateOneMedia(el, url);
+        continue;
+      }
+      el.dataset.lazyMediaUrl = url;
+      mediaLazyObserver.observe(el);
     }
   }
 
