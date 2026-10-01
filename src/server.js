@@ -738,15 +738,6 @@ require('./dealStagePoller').startPolling();
 // /instances). Critério e canal confirmados com o usuário.
 require('./instanceBanPoller').startPolling(sessions);
 
-// Lembrete diário via IM nativo do Bitrix pra quem ainda não conectou
-// nenhum WhatsApp (ver src/whatsappReminderPoller.js) — checagem a cada
-// hora, dedupe por dia civil (no máximo 1 mensagem por pessoa por dia),
-// pausa automaticamente assim que a pessoa conecta o primeiro número.
-// Pedido do usuário 2026-09-30, depois de corrigir a causa raiz de
-// instâncias órfãs (ROADMAP itens 17/18) — só então "nunca conectou"
-// passou a ser um sinal confiável.
-require('./whatsappReminderPoller').startPolling();
-
 // Fecha sozinha page_sessions "órfãs" (aba fechada sem o beacon de saída
 // disparar — crash, queda de luz, ver HANDOFF Parte CO) — sem isto,
 // ficariam com ended_at null pra sempre. Intervalo de 60s (mais frequente

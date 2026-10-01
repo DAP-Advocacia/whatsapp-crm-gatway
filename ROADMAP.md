@@ -1154,3 +1154,77 @@ até o fim idêntica antes/depois de inserir 150px de conteúdo no topo.
 Teste isolado em Node da lógica de `hasMore`/reversão cronológica de
 `getHistoryPage` — 3 cenários (página intermediária, última página,
 exatamente no limite) corretos.
+
+## 21. Nova conversa com número não salvo + seletor de número do negócio (2026-10-01)
+
+Dois pedidos independentes vindos de questionamentos reais de uso.
+
+**(a) "Nova conversa" em chat.html** — botão (ícone de lápis) na barra de
+ações do painel de conversas, ao lado de "Grupos do WhatsApp". Abre um
+modal simples (`#newChatModal`): escolhe a instância (só aparece se
+houver mais de uma individual, mesmo `groupInstanceOptions()` já usado
+pelo modal de grupo) e digita o número (`normalizePhone`, mesma regra
+de index.html — DDI 55 somado automaticamente se vier só DDD+número).
+Reaproveita `openConversation()` já existente (genérica o bastante pra
+abrir uma conversa sem histórico, é o mesmo caminho de uma conversa
+nova chegando por mensagem recebida) — se já existir conversa com esse
+telefone na instância escolhida, reabre ela em vez de duplicar.
+Decisão confirmada com o usuário: conversa fica SOLTA, sem `dealId`,
+igual ao WhatsApp Web — sem vínculo automático a negócio/contato do
+Bitrix.
+
+**(b) Seletor de número no mini-chat (index.html)** — usuário reportou
+que o campo personalizado `[S] NUMERO CORRETO DO CLIENTE`
+(`UF_CRM_1752095090`), usado pela equipe pra marcar manualmente qual é
+o número de verdade do cliente num negócio com vários contatos
+anexados, era ignorado: `loadDealContact` só olhava
+`deal.CONTACT_ID` (contato "principal") e pegava `contact.PHONE[0]`
+sempre, sem opção de trocar.
+
+Nova `loadDealPhoneOptions(dealId)` substitui `loadDealContact`: busca
+o contato principal (`CONTACT_ID`) + demais contatos anexados via
+`crm.deal.contact.items.get` (API padrão do Bitrix pra "múltiplos
+contatos" de um deal — protegida por `try/catch`, se o recurso não
+estiver habilitado no CRM cai de volta só no `CONTACT_ID`, sem
+quebrar) + o valor do campo `UF_CRM_1752095090` se preenchido. Dedupe
+por telefone normalizado. Prioridade de seleção padrão confirmada com
+o usuário: campo "número correto" > contato principal > primeiro
+contato anexado.
+
+`state.phoneOptions` guarda a lista; seletor (`#phoneSelect`, mesmo
+estilo visual do `#instanceSelect` já existente) só aparece no
+cabeçalho do chat quando `entityType === 'deal'` e há mais de 1 opção.
+`boot()` foi reestruturado: a parte de "telefone conhecido →
+`loadInstances`/`pickBestInstance`/`ensureConnected`" virou
+`resolvePhoneAndConnect(phone, name)`, reaproveitada tanto no boot
+inicial quanto em `switchPhone(newPhone)` (troca de número no
+seletor — já que `hasHistory`/melhor instância dependem do telefone
+escolhido, não dá pra só trocar `state.phone` e re-renderizar).
+
+Validação: sintaxe OK (`vm.Script`/`new Function`) em chat.html e
+index.html. Pendente: confirmar em produção, num negócio real com mais
+de 1 contato anexado, que `crm.deal.contact.items.get` retorna os
+contatos adicionais esperados (depende do recurso "múltiplos contatos"
+estar habilitado no CRM do escritório).
+
+## 22. Lembrete automático de WhatsApp removido a pedido do usuário (2026-10-01)
+
+Usuário pediu explicitamente pra não disparar mais nenhuma mensagem/
+notificação automática pras pessoas, antes de subir as mudanças do
+item 21 pro Git. Removido por completo (não só desativado):
+
+- `require('./whatsappReminderPoller').startPolling()` tirado de
+  `src/server.js` (chamada no boot do processo).
+- `src/whatsappReminderPoller.js` apagado por inteiro (ver itens 19 e
+  a nota de troca de canal no HANDOFF — não é mais necessário manter
+  o arquivo morto no código).
+- `callBitrixHR` voltou a ser privado em `src/bitrixHierarchy.js` (só
+  tinha sido exportado pra esse uso específico).
+
+Filtro "WhatsApp: nunca conectou" no Admin (item 19) foi MANTIDO — é
+só uma visualização passiva (não dispara nada sozinho), usuário
+confirmou que pode ficar.
+
+Validação: `node -c` em server.js e bitrixHierarchy.js; grep confirma
+zero referência a `whatsappReminderPoller`/`im.notify.personal.add`/
+`im.message.add` restante em `src/`.

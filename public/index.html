@@ -826,6 +826,11 @@
     clientPhone: null,
     internalNotesOpen: false,
     internalNotes: [],
+    // Opções de número do negócio (contato principal + anexados + campo
+    // "[S] NUMERO CORRETO DO CLIENTE") — só populado quando entityType
+    // === 'deal' e há mais de 1 opção; alimenta o seletor no header do
+    // chat (ver renderChat). [] | [{ phone, name, source }].
+    phoneOptions: [],
   };
 
   // Emoji de reação com o picker aberto no momento (só um por vez).
@@ -966,6 +971,11 @@
           <button class="icon-btn${state.internalNotes.length ? ' has-notes' : ''}" id="notesBtn" title="Nota interna (não visível ao cliente)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
           </button>
+          ${state.entityType === 'deal' && state.phoneOptions.length > 1 ? `
+            <select class="instance-select" id="phoneSelect" title="Trocar número de WhatsApp deste negócio">
+              ${state.phoneOptions.map((o) => `<option value="${escapeHtml(o.phone)}" ${o.phone === state.phone ? 'selected' : ''}>${escapeHtml(o.name || o.phone)} (${escapeHtml(o.source)})</option>`).join('')}
+            </select>
+          ` : ''}
           ${state.instances.length > 1 ? `
             <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp">
               ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
@@ -1070,6 +1080,10 @@
     const instanceSelectEl = document.getElementById('instanceSelect');
     if (instanceSelectEl) {
       instanceSelectEl.addEventListener('change', (e) => switchInstance(e.target.value));
+    }
+    const phoneSelectEl = document.getElementById('phoneSelect');
+    if (phoneSelectEl) {
+      phoneSelectEl.addEventListener('change', (e) => switchPhone(e.target.value));
     }
 
     const createGroupBtn = document.getElementById('createGroupBtn');
@@ -1872,19 +1886,78 @@
     });
   }
 
-  async function loadDealContact(dealId) {
+  // Campo personalizado "[S] NUMERO CORRETO DO CLIENTE" (UF_CRM_1752095090)
+  // — a equipe marca manualmente ali qual é o número de verdade do
+  // cliente quando o negócio tem vários contatos anexados (comprador,
+  // financeiro, indicação, etc. todos no mesmo deal) e nem sempre o
+  // CONTACT_ID "principal" é o certo. Pedido do usuário 2026-10-01.
+  const CORRECT_PHONE_FIELD = 'UF_CRM_1752095090';
+
+  // Resolve TODAS as opções de número de um negócio — contato principal
+  // (CONTACT_ID) + demais contatos anexados (crm.deal.contact.items.get,
+  // API padrão do Bitrix pra pegar os contatos "adicionais" de um deal,
+  // que crm.deal.get não traz) + o campo personalizado acima, se
+  // preenchido. Dedupe por telefone normalizado — o mesmo número não
+  // aparece 2x no seletor mesmo que esteja em mais de um contato/campo.
+  // Retorna { options, defaultPhone, defaultName } — options é a lista
+  // pro seletor, default* é o que deve abrir já selecionado (prioridade
+  // confirmada com o usuário: campo "número correto" > contato principal
+  // > primeiro contato anexado).
+  async function loadDealPhoneOptions(dealId) {
     const deal = await callMethod('crm.deal.get', { id: dealId });
-    if (!deal.CONTACT_ID) {
-      throw { code: 'NO_CONTACT' };
+
+    let items = [];
+    try {
+      items = (await callMethod('crm.deal.contact.items.get', { id: dealId })) || [];
+    } catch (err) {
+      console.warn('crm.deal.contact.items.get falhou, seguindo só com CONTACT_ID:', err);
     }
-    const contact = await callMethod('crm.contact.get', { id: deal.CONTACT_ID });
-    const phoneEntry = (contact.PHONE || [])[0];
-    if (!phoneEntry) {
-      throw { code: 'NO_PHONE' };
+    const contactIds = [...new Set([
+      ...(deal.CONTACT_ID ? [String(deal.CONTACT_ID)] : []),
+      ...items.map((it) => String(it.CONTACT_ID)),
+    ])];
+
+    const options = [];
+    const seenPhones = new Set();
+    function addOption(phone, name, source) {
+      const normalized = normalizePhone(phone);
+      if (!normalized || seenPhones.has(normalized)) return;
+      seenPhones.add(normalized);
+      options.push({ phone: normalized, name: name || null, source });
     }
+
+    for (const contactId of contactIds) {
+      try {
+        const contact = await callMethod('crm.contact.get', { id: contactId });
+        const phoneEntry = (contact.PHONE || [])[0];
+        if (!phoneEntry) continue;
+        const name = [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ') || null;
+        addOption(phoneEntry.VALUE, name, contactId === String(deal.CONTACT_ID) ? 'Contato principal' : 'Contato anexado');
+      } catch (err) {
+        console.warn(`crm.contact.get falhou pro contato ${contactId}:`, err);
+      }
+    }
+
+    // Campo "número correto" entra por último na lista de opções (ordem
+    // visual não importa pro dedupe), mas manda no `default*` se tiver
+    // valor — é o critério que a equipe confia mais.
+    const correctPhoneRaw = deal[CORRECT_PHONE_FIELD];
+    if (correctPhoneRaw) {
+      addOption(correctPhoneRaw, 'Número correto do cliente', 'Número correto (campo)');
+    }
+
+    if (!options.length) {
+      throw { code: deal.CONTACT_ID || contactIds.length ? 'NO_PHONE' : 'NO_CONTACT' };
+    }
+
+    const correctNormalized = correctPhoneRaw ? normalizePhone(correctPhoneRaw) : null;
+    const defaultOption = (correctNormalized && options.find((o) => o.phone === correctNormalized))
+      || options[0];
+
     return {
-      phone: normalizePhone(phoneEntry.VALUE),
-      name: [contact.NAME, contact.LAST_NAME].filter(Boolean).join(' ') || deal.TITLE,
+      options,
+      defaultPhone: defaultOption.phone,
+      defaultName: defaultOption.name || deal.TITLE,
     };
   }
 
@@ -2466,6 +2539,60 @@
     ensureConnected();
   }
 
+  // Resolve instâncias + melhor sessão pra um telefone já conhecido, e
+  // conecta. Extraído de boot() (2026-10-01) pra ser reaproveitado por
+  // switchPhone() — trocar de número no seletor do deal precisa repetir
+  // exatamente essa parte (hasHistory/pickBestInstance dependem do
+  // telefone), sem repetir a resolução de entidade/owner.
+  async function resolvePhoneAndConnect(phone, name) {
+    state.phone = phone;
+    state.clientPhone = phone;
+    state.contactName = name;
+
+    state.instances = await loadInstances(state.ownerId, phone);
+    state.session = pickBestInstance(state.instances, instanceStorageKey(state.entityType, state.dealId || state.contactId));
+    if (!state.session) {
+      const err = new Error('nenhuma instância de WhatsApp disponível');
+      err.code = 'NO_INSTANCE';
+      throw err;
+    }
+
+    await ensureConnected();
+  }
+
+  // Troca pra outro número de telefone do mesmo negócio (seletor no
+  // header, ver renderChat) — pedido do usuário 2026-10-01: negócio pode
+  // ter vários contatos anexados, campo "[S] NUMERO CORRETO DO CLIENTE"
+  // nem sempre bate com o contato principal. Mesmo esqueleto de
+  // switchInstance(): para qualquer polling/socket da conversa anterior
+  // antes de trocar.
+  async function switchPhone(newPhone) {
+    if (!newPhone || newPhone === state.phone) return;
+    const option = state.phoneOptions.find((o) => o.phone === newPhone);
+    if (!option) return;
+
+    stopQrPolling();
+    if (state.socket) {
+      state.socket.onclose = null;
+      state.socket.close();
+      state.socket = null;
+    }
+    state.cardGroup = null;
+    state.viewMode = 'client';
+    state.internalNotes = [];
+
+    try {
+      await resolvePhoneAndConnect(option.phone, option.name);
+    } catch (err) {
+      console.error(err);
+      renderState('error', {
+        title: 'Não foi possível trocar de número',
+        desc: 'Houve um problema ao carregar a conversa deste número.',
+        retry: () => switchPhone(newPhone),
+      });
+    }
+  }
+
   async function boot() {
     try {
       // entityType 'deal' (aba de Negócio, sempre existiu) ou 'contact'
@@ -2485,21 +2612,18 @@
       // estivesse offline, aparecia QR Code por engano). Precisa saber o
       // telefone primeiro pra pedir `hasHistory` já resolvido em GET
       // /instances (ver rota, e getSessionsWithHistory em src/store.js).
-      const { phone, name } = entityType === 'deal' ? await loadDealContact(id) : await loadContactPhone(id);
-      state.phone = phone;
-      state.clientPhone = phone;
-      state.contactName = name;
+      let phone, name;
+      if (entityType === 'deal') {
+        const resolved = await loadDealPhoneOptions(id);
+        state.phoneOptions = resolved.options;
+        phone = resolved.defaultPhone;
+        name = resolved.defaultName;
+      } else {
+        ({ phone, name } = await loadContactPhone(id));
+      }
       fetchMyBitrixName(); // best-effort, só rótulo de autor em nota interna
 
-      state.instances = await loadInstances(state.ownerId, phone);
-      state.session = pickBestInstance(state.instances, instanceStorageKey(entityType, id));
-      if (!state.session) {
-        const err = new Error('nenhuma instância de WhatsApp disponível');
-        err.code = 'NO_INSTANCE';
-        throw err;
-      }
-
-      await ensureConnected();
+      await resolvePhoneAndConnect(phone, name);
     } catch (err) {
       console.error(err);
       if (err?.code === 'NO_PLACEMENT') {

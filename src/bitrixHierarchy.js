@@ -352,12 +352,4 @@ module.exports = {
   getEmployeePhone,
   getEmployeeInfo,
   normalizeBrazilPhone,
-  // Exportado a partir de 2026-09-30 (src/whatsappReminderPoller.js) —
-  // mesmo webhook/mecanismo de chamada já usado aqui pra user.get/
-  // department.get, reaproveitado pra im.message.add (lembrete de conectar
-  // WhatsApp). Precisa do escopo "im" habilitado no webhook de entrada
-  // (BITRIX_HR_WEBHOOK_URL) — sem isso, a chamada falha e é logada, não
-  // derruba nada (mesmo padrão de degradação graciosa do resto do
-  // arquivo).
-  callBitrixHR,
 };
