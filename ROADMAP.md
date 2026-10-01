@@ -1228,3 +1228,45 @@ confirmou que pode ficar.
 Validação: `node -c` em server.js e bitrixHierarchy.js; grep confirma
 zero referência a `whatsappReminderPoller`/`im.notify.personal.add`/
 `im.message.add` restante em `src/`.
+
+## 23. Barra de gravação de áudio com enviar/cancelar explícitos (2026-10-01)
+
+Usuário reportou que o fluxo de gravação de áudio não era intuitivo:
+era 1 botão só (microfone) alternando iniciar gravação / parar+enviar
+no mesmo clique, com o único indício visual sendo o próprio botão
+ficando vermelho (`#micBtn.recording`) — sem nenhuma forma de cancelar
+uma gravação feita por engano, só enviar ou enviar.
+
+Trocado por uma barra de gravação dedicada (`#recordingBar`, mesmo
+padrão visual do WhatsApp): ao clicar no microfone, o composer normal
+(`#composerReply`) é escondido e a barra aparece no lugar — bolinha
+vermelha pulsando + "Gravando áudio" + cronômetro (`0:00` crescente) +
+botão de lixeira (cancela, descarta o áudio sem enviar) + botão de
+seta (para a gravação e envia), lado a lado, nunca mais um clique só
+decidindo os dois.
+
+Implementação: `MediaRecorder` e o fluxo de captura (`getUserMedia`,
+chunks, blob) continuam os mesmos de antes — só o que mudou é *como* a
+gravação é finalizada. `stopRecording({discard})` virou o único ponto
+de parada: `discard:true` (lixeira) marca `recordingDiscarded` e não
+monta/envia o blob no handler `'stop'`; `discard:false` (seta) segue o
+caminho de sempre (`sendRecordedAudio`).
+
+Dois vazamentos de microfone corrigidos juntos (existiam mesmo antes
+desta mudança, ficaram mais visíveis ao reorganizar o fluxo):
+- Trocar pra aba "Nota interna" no meio de uma gravação agora CANCELA
+  ela automaticamente — antes a gravação continuava em segundo plano
+  (microfone captando áudio) mesmo com o composer de Resposta escondido.
+- Trocar de conversa (`openConversation`) ou fechar a conversa
+  (`closeConversation`) no meio de uma gravação agora também cancela —
+  antes o composer era recriado do zero por `bindComposer()` (chamado a
+  cada `renderConversationView`), a referência JS ao `MediaRecorder`
+  antigo se perdia, mas o stream do microfone (`getUserMedia`) ficava
+  preso aberto pra sempre (só é liberado dentro do handler `'stop'` do
+  próprio objeto). Nova variável de módulo `stopActiveRecording`
+  (reatribuída a cada `bindComposer()`) permite cancelar de fora.
+
+Validação: sintaxe OK (scripts inline, `vm.Script`/`new Function`).
+Teste isolado em Node simulando a máquina de estados (gravar→cancelar,
+gravar→enviar, trocar de aba no meio, `stop()` chamado sem gravação
+ativa) — 4 cenários corretos, nenhuma exceção.

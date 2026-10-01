@@ -1010,6 +1010,38 @@
   .icon-btn.active{ background: rgba(var(--gold-rgb),.14); border-color: var(--gold-dim); color: var(--gold); }
   @keyframes recPulse{ 0%,100%{ opacity: 1; } 50%{ opacity: .6; } }
 
+  /* Barra de gravação de áudio — substitui o composer normal enquanto
+     grava (2026-10-01, pedido do usuário: botão único alternando
+     gravar/enviar sem opção de cancelar não era intuitivo o bastante).
+     Mesma altura/padding do .composer pra não pular o layout ao trocar. */
+  .recording-bar{
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .recording-bar[hidden]{ display: none; }
+  .recording-dot{
+    width: 10px; height: 10px; border-radius: 50%; background: var(--red); flex-shrink: 0;
+    animation: recPulse 1.2s ease-in-out infinite;
+  }
+  .recording-label{ font-size: 13px; color: var(--text); white-space: nowrap; }
+  .recording-time{ font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .recording-hint{ flex: 1; font-size: 11.5px; color: var(--text-faint); text-align: center; }
+  .recording-cancel-btn{
+    width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .recording-cancel-btn:hover{ background: rgba(var(--red-rgb),.12); border-color: var(--red); color: var(--red); }
+  .recording-cancel-btn svg{ width: 17px; height: 17px; }
+  .recording-send-btn{
+    width: 34px; height: 34px; border-radius: 50%; border: none; background: var(--gold);
+    color: var(--on-accent); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;
+    transition: filter .15s;
+  }
+  .recording-send-btn:hover{ filter: brightness(1.08); }
+  .recording-send-btn svg{ width: 16px; height: 16px; }
+
   /* ---------- Mensagens ---------- */
   .messages{
     flex: 1; overflow-y: auto; padding: 18px 16px; display: flex; flex-direction: column; gap: 4px;
@@ -3185,6 +3217,16 @@
   let openReactionPickerId = null;
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 
+  // Gravação de áudio em andamento, se houver — referência de módulo
+  // (não local a bindComposer()) pra poder cancelar de fora, ao trocar
+  // de conversa (openConversation/closeConversation). Sem isso, trocar
+  // de conversa no meio de uma gravação recriava o composer do zero
+  // (bindComposer roda de novo) e a referência local ao MediaRecorder se
+  // perdia, mas o stream do microfone (getUserMedia) continuava ativo
+  // pra sempre em segundo plano — só é liberado dentro do handler 'stop'
+  // do próprio MediaRecorder.
+  let stopActiveRecording = null;
+
   // Id da nota interna em modo de edição no momento (só uma por vez) —
   // mesmo espírito de openReactionPickerId, controla o próprio re-render
   // sem precisar estar em `state`.
@@ -4301,6 +4343,11 @@
   }
 
   function openConversation(conv) {
+    // Cancela qualquer gravação de áudio em andamento na conversa anterior
+    // ANTES de trocar — o composer é recriado do zero por bindComposer()
+    // mais abaixo (chamada via renderConversationView), senão o stream do
+    // microfone ficava preso aberto em segundo plano pra sempre.
+    if (stopActiveRecording) stopActiveRecording();
     state.active = {
       sessionId: conv.sessionId,
       phone: conv.phone,
@@ -4365,6 +4412,7 @@
   }
 
   function closeConversation() {
+    if (stopActiveRecording) stopActiveRecording();
     state.active = null;
     contactInfo = null;
     commonGroups = null;
@@ -4700,6 +4748,19 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/><path d="M8 22h8"/></svg>
         </button>
         <button class="send-btn" id="sendBtn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+
+      <div class="recording-bar" id="recordingBar" hidden>
+        <button class="recording-cancel-btn" id="recordingCancelBtn" title="Cancelar gravação" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
+        </button>
+        <span class="recording-dot"></span>
+        <span class="recording-label">Gravando áudio</span>
+        <span class="recording-time" id="recordingTime">0:00</span>
+        <span class="recording-hint">Clique na lixeira para cancelar, ou na seta para enviar</span>
+        <button class="recording-send-btn" id="recordingSendBtn" title="Enviar áudio" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
         </button>
       </div>
@@ -5726,13 +5787,6 @@
     const attachBtn = document.getElementById('attachBtn');
     const mediaInput = document.getElementById('mediaInput');
     const micBtn = document.getElementById('micBtn');
-    // Só o texto da aba Responder (#composerHintReply) — gravação de
-    // áudio só existe ali (a aba Nota interna tem seu próprio hint fixo,
-    // #composerHintNote, nunca tocado por esta função). Usar o elemento
-    // pai (#composerHint) inteiro aqui destruiria os 2 <span> filhos ao
-    // reatribuir textContent.
-    const hint = document.getElementById('composerHintReply');
-    const defaultHint = hint.textContent;
 
     attachBtn.addEventListener('click', () => mediaInput.click());
     mediaInput.addEventListener('change', () => {
@@ -5743,18 +5797,39 @@
 
     document.getElementById('replyCancelBtn')?.addEventListener('click', cancelReply);
 
+    // Barra de gravação dedicada (2026-10-01) — antes era 1 botão só
+    // (microfone) alternando iniciar/parar+enviar no mesmo clique, com o
+    // único feedback visual sendo a cor vermelha do próprio botão (fácil
+    // de não perceber) e SEM opção de cancelar uma gravação indesejada.
+    // Usuário pediu algo mais intuitivo, com enviar/cancelar separados —
+    // mesmo padrão visual do WhatsApp (bolinha vermelha pulsando +
+    // cronômetro + lixeira cancela + seta envia).
+    const recordingBar = document.getElementById('recordingBar');
+    const composerReply = document.getElementById('composerReply');
+    const recordingTimeEl = document.getElementById('recordingTime');
+    const recordingCancelBtn = document.getElementById('recordingCancelBtn');
+    const recordingSendBtn = document.getElementById('recordingSendBtn');
+
     let mediaRecorder = null;
     let recordedChunks = [];
     let recordingTimer = null;
     let recordingSeconds = 0;
+    let recordingDiscarded = false; // true = stop() foi chamado pela lixeira, não envia o blob
 
-    micBtn.addEventListener('click', () => {
-      if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-      } else {
-        startRecording();
-      }
-    });
+    micBtn.addEventListener('click', startRecording);
+    recordingCancelBtn.addEventListener('click', () => stopRecording({ discard: true }));
+    recordingSendBtn.addEventListener('click', () => stopRecording({ discard: false }));
+
+    function stopRecording({ discard }) {
+      if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+      recordingDiscarded = discard;
+      mediaRecorder.stop();
+    }
+    // Permite cancelar de fora desta função (troca de conversa, ver
+    // openConversation/closeConversation) — reatribuída a cada
+    // bindComposer() (chamada a cada render do composer, ver
+    // renderConversationView), então sempre aponta pra gravação atual.
+    stopActiveRecording = () => stopRecording({ discard: true });
 
     async function startRecording() {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -5771,28 +5846,31 @@
       }
 
       recordedChunks = [];
+      recordingDiscarded = false;
       mediaRecorder = new MediaRecorder(stream);
       mediaRecorder.addEventListener('dataavailable', (e) => { if (e.data.size > 0) recordedChunks.push(e.data); });
       mediaRecorder.addEventListener('stop', () => {
         stream.getTracks().forEach((track) => track.stop());
         clearInterval(recordingTimer);
-        micBtn.classList.remove('recording');
-        hint.textContent = defaultHint;
+        composerReply.hidden = false;
+        recordingBar.hidden = true;
         sendPresence('paused');
+        if (recordingDiscarded) return;
         const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
         if (blob.size > 0) sendRecordedAudio(blob);
       });
 
       mediaRecorder.start();
-      micBtn.classList.add('recording');
+      composerReply.hidden = true;
+      recordingBar.hidden = false;
       sendPresence('recording');
       recordingSeconds = 0;
-      hint.textContent = 'Gravando… 0:00 (clique no microfone de novo para enviar)';
+      recordingTimeEl.textContent = '0:00';
       recordingTimer = setInterval(() => {
         recordingSeconds++;
         const m = String(Math.floor(recordingSeconds / 60)).padStart(1, '0');
         const s = String(recordingSeconds % 60).padStart(2, '0');
-        hint.textContent = `Gravando… ${m}:${s} (clique no microfone de novo para enviar)`;
+        recordingTimeEl.textContent = `${m}:${s}`;
       }, 1000);
     }
 
@@ -5971,8 +6049,8 @@
     }
 
     // ---------- Abas do composer (Responder / Nota interna) ----------
+    // composerReply já declarada mais acima (seção de gravação de áudio).
     const composerTabs = document.getElementById('composerTabs');
-    const composerReply = document.getElementById('composerReply');
     const composerNote = document.getElementById('composerNote');
     const composerHintReply = document.getElementById('composerHintReply');
     const composerHintNote = document.getElementById('composerHintNote');
@@ -5982,6 +6060,12 @@
     composerTabs.querySelectorAll('[data-composer-tab]').forEach((tabBtn) => {
       tabBtn.addEventListener('click', () => {
         const tab = tabBtn.dataset.composerTab;
+        // Gravação de áudio só existe na aba Responder — trocar de aba no
+        // meio de uma gravação cancela ela (sem isso, a barra de gravação
+        // ficava visível por cima da aba Nota interna, com o microfone
+        // ainda captando áudio em segundo plano). stopRecording definida
+        // mais acima, mesmo escopo de bindComposer().
+        if (tab !== 'reply') stopRecording({ discard: true });
         composerTabs.querySelectorAll('[data-composer-tab]').forEach((b) => b.classList.toggle('active', b === tabBtn));
         composerReply.hidden = tab !== 'reply';
         composerNote.hidden = tab !== 'note';
