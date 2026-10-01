@@ -1941,9 +1941,23 @@
     // Campo "número correto" entra por último na lista de opções (ordem
     // visual não importa pro dedupe), mas manda no `default*` se tiver
     // valor — é o critério que a equipe confia mais.
-    const correctPhoneRaw = deal[CORRECT_PHONE_FIELD];
+    // Campo UF_CRM_* pode vir como string simples, array (campo
+    // configurado como "múltiplos valores" no Bitrix) ou objeto
+    // {value,...} (campo tipo "telefone" de verdade) — normaliza pro
+    // valor cru antes de passar pra addOption/normalizePhone, que só
+    // aceitam string. Bug real reportado 2026-10-01: sem este tratamento,
+    // um array caía direto em normalizePhone() e quebrava .replace(),
+    // derrubando TODO o boot() com "Não foi possível abrir a conversa".
+    let correctPhoneRaw = deal[CORRECT_PHONE_FIELD];
+    if (Array.isArray(correctPhoneRaw)) correctPhoneRaw = correctPhoneRaw[0];
+    if (correctPhoneRaw && typeof correctPhoneRaw === 'object') correctPhoneRaw = correctPhoneRaw.value || correctPhoneRaw.VALUE || null;
     if (correctPhoneRaw) {
-      addOption(correctPhoneRaw, 'Número correto do cliente', 'Número correto (campo)');
+      try {
+        addOption(correctPhoneRaw, 'Número correto do cliente', 'Número correto (campo)');
+      } catch (err) {
+        console.warn('Campo "número correto" com formato inesperado, ignorando:', err);
+        correctPhoneRaw = null;
+      }
     }
 
     if (!options.length) {
@@ -1977,8 +1991,13 @@
   }
 
   function normalizePhone(raw) {
-    // remove tudo que não é dígito e garante DDI 55 na frente
-    let digits = (raw || '').replace(/\D/g, '');
+    // remove tudo que não é dígito e garante DDI 55 na frente.
+    // String(raw ?? '') em vez de (raw || '') — aceita number também
+    // (campo customizado do Bitrix às vezes vem como number cru), e não
+    // quebra com .replace se vier algo que não seja string/number (ver
+    // loadDealPhoneOptions, que já filtra array/objeto antes de chegar
+    // aqui, mas normalizePhone() continua defensiva por conta própria).
+    let digits = String(raw ?? '').replace(/\D/g, '');
     if (digits.length <= 11) digits = '55' + digits;
     return digits;
   }
