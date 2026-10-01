@@ -1270,3 +1270,60 @@ Validação: sintaxe OK (scripts inline, `vm.Script`/`new Function`).
 Teste isolado em Node simulando a máquina de estados (gravar→cancelar,
 gravar→enviar, trocar de aba no meio, `stop()` chamado sem gravação
 ativa) — 4 cenários corretos, nenhuma exceção.
+
+## 24. Acesso à Auditoria de Conversas + painel de controle de chips por setor (2026-10-01)
+
+Contexto do usuário: o DapZap vai passar a ser usado pra controlar os
+CHIPS físicos de WhatsApp do escritório (todo chip precisa estar
+conectado em algum usuário do sistema), não só canal de atendimento —
+por isso virou necessário saber, com granularidade, quem já conectou,
+quantos números cada um tem, quais são esses números, e como isso se
+distribui por setor (Vendas/Jurídico/Administrativo/etc). O destino
+final desses dados é um agente externo de disparo/leitura de resposta
+(motivo explícito de ter pedido pra desfazer o lembrete automático do
+item 22 — "consigo controlar melhor do que fazendo disparo em massa
+programado pelo app").
+
+**(a) Acesso à Auditoria de Conversas** — concedido manualmente via
+`conversationAnalysisGrants.grantAccess()` (rotas já existiam,
+`POST /conversation-analysis/admin/grants/:ownerId`, só sem UI) pros
+owner_ids do usuário (`..._5305`) e do Dr. Bruno (`..._1`), rodado
+via SSH/`node -e` direto no container.
+
+**(b) Macro-setor por colaborador** — a árvore de departamentos do
+Bitrix tem 216 nós (confirmado via `department.get` 2026-10-01), com
+um ramo próprio por gestor/vendedor individual dentro de Vendas (ex:
+"[GER] Diego Cordeiro | 725"). Agrupar pelo departamento-FOLHA
+(`UF_DEPARTMENT` direto) resultaria em dezenas de "setores" de 1
+pessoa só. Nova `buildTopLevelDepartmentMap(departments)` em
+`src/bitrixHierarchy.js` sobe a árvore de `PARENT` a partir de cada
+departamento até achar o nível logo abaixo da raiz (id `'1'`,
+"Presidência", confirmado com o usuário como o único nó sem `PARENT`)
+— esse nível É o macro-setor (ADMINISTRATIVO, FINANCEIRO, NEGOCIAÇÃO
+E ACORDOS, VENDAS, JURÍDICO, SEM DEPARTAMENTO). Cacheada em memória do
+processo (`topLevelDeptCache`, mesmo TTL de `HIERARCHY_CACHE_TTL_MS`)
+pra não repetir a chamada a `department.get` em toda listagem. Nova
+`listEmployeesWithDepartment()` (reaproveitada por `GET /admin/users`
+em vez de `listEmployees()`) devolve cada funcionário já com o campo
+`department` resolvido, e também `bitrixUserId` (ID numérico puro,
+sem o prefixo de `ownerId`) pro CSV exportável.
+
+**(c) UI em admin.html (aba Usuários)** — nova coluna "Setor" na
+tabela (e ID do Bitrix visível junto do cargo, embaixo do nome), novo
+filtro "Setor: todos/X" (mesmo padrão dos filtros já existentes),
+novo painel `#usersDeptSummary` logo acima da tabela: um card por
+macro-setor mostrando "N de T colaboradores conectou" + "M números de
+WhatsApp ao todo" — calculado sobre o universo TOTAL (`usersRows`),
+não o filtrado, pra sempre mostrar o panorama completo independente
+de busca/filtro ativo na tabela abaixo. CSV export ganhou as colunas
+Setor e ID Bitrix (`u.instances` com label+telefone por conexão já
+existia desde o item 19 — "quais números" já estava coberto).
+
+Validação: sintaxe OK (scripts inline + `node -c`). Teste isolado em
+Node da resolução de macro-setor com a árvore REAL de departamentos
+colada pelo usuário (13 cenários, incluindo nó órfão sem pai
+resolvível) — todos corretos após corrigir um bug de lógica na 1ª
+tentativa (comparava com "avô inexistente" em vez de com a raiz fixa,
+retornava o NOME DO PAI errado pra departamentos de 2º nível como
+ADMINISTRATIVO). Teste isolado da agregação por setor (contagem de
+conectados/total/números) — 7 cenários corretos.

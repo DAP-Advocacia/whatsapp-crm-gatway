@@ -383,6 +383,22 @@
   .users-filters select{ width:auto; min-width:170px; flex:1 1 170px; }
   .users-filters .btn{ flex:0 0 auto; }
 
+  /* Resumo agregado por macro-setor (2026-10-01) — controle de chips do
+     escritório: "quantos colaboradores de cada setor já conectaram
+     WhatsApp" precisa ser visível de cara, não só filtrável linha a linha.
+     Mesmo princípio visual de card já usado no resto do Admin (superfície
+     + borda), em grid responsivo. */
+  .users-dept-summary{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(190px,1fr)); gap:10px; margin-bottom:16px;
+  }
+  .dept-card{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:12px 14px;
+  }
+  .dept-card-name{ font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px; text-transform:uppercase; letter-spacing:.02em; }
+  .dept-card-stat{ font-size:13px; color:var(--text); }
+  .dept-card-stat b{ font-size:16px; }
+  .dept-card-stat-sub{ font-size:11px; color:var(--text-faint); margin-top:2px; }
+
   /* Busca + botão de ação lado a lado (ex: aba Conexões do WhatsApp) — mesmo
      princípio de quebra do .users-filters acima (sem flex-wrap, o botão
      fica espremido contra o input em tela estreita, já que
@@ -825,15 +841,26 @@
         <option value="">WhatsApp: todos</option>
         <option value="never">Nunca conectou</option>
       </select>
+      <!-- Setor/macro-setor (2026-10-01, pedido do usuário — controle de
+           chips do escritório por setor: Vendas/Jurídico/Administrativo/
+           etc). u.department já vem pronto de GET /admin/users (ver
+           listEmployeesWithDepartment, src/bitrixHierarchy.js) — resolvido
+           subindo a árvore de departamentos do Bitrix até o nível logo
+           abaixo da raiz, não o departamento-folha (que na prática tem um
+           ramo próprio por gestor/vendedor individual). -->
+      <select id="usersFilterDepartment">
+        <option value="">Setor: todos</option>
+      </select>
       <button type="button" class="btn secondary" id="usersFiltersClear">Limpar filtros</button>
     </div>
     <div id="usersActiveFilters" style="display:none; margin-bottom:12px; font-size:12px; color:var(--text-muted);"></div>
+    <div id="usersDeptSummary" class="users-dept-summary"></div>
     <table class="admin-table" id="usersTable">
       <thead>
-        <tr><th>Usuário</th><th>Conta</th><th>Conexões WhatsApp</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
+        <tr><th>Usuário</th><th>Setor</th><th>Conta</th><th>Conexões WhatsApp</th><th>Online</th><th>Último acesso</th><th>Tempo total (30d)</th><th>Página favorita</th><th></th></tr>
       </thead>
       <tbody id="usersBody">
-        <tr><td colspan="8" class="skeleton-row">Carregando…</td></tr>
+        <tr><td colspan="9" class="skeleton-row">Carregando…</td></tr>
       </tbody>
     </table>
     <div id="usersPager"></div>
@@ -1566,14 +1593,19 @@
     // programar lembretes de "conecte seu WhatsApp" pra quem ainda não
     // conectou nenhum número, ver filtro usersFilterWhatsapp acima; sem o
     // telefone aqui o CSV exportado não seria suficiente pra isso).
-    const header = ['Nome', 'E-mail', 'Cargo', 'Celular', 'Ramal', 'Owner ID', 'Online', 'Conexões WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
+    // Setor incluído (2026-10-01) — controle de chips por setor, pensado
+    // pra alimentar o agente externo de disparo/controle mencionado pelo
+    // usuário (ID do Bitrix + setor + números já conectados numa linha só).
+    const header = ['Nome', 'Setor', 'E-mail', 'Cargo', 'Celular', 'Ramal', 'Owner ID', 'ID Bitrix', 'Online', 'Conexões WhatsApp', 'Último acesso', 'Tempo total 30d (min)', 'Página favorita', 'Bloqueado'];
     const lines = rows.map((u) => [
       u.name || '',
+      u.department || 'Sem setor',
       u.email || '',
       u.workPosition || '',
       u.mobile || '',
       u.workPhone || '',
       u.ownerId || '',
+      u.bitrixUserId || '',
       u.isOnline ? 'sim' : 'não',
       formatInstancesForCsv(u.instances),
       u.lastAccess ? new Date(u.lastAccess).toLocaleString('pt-BR') : '',
@@ -1607,19 +1639,29 @@
   function populateUsersFilterOptions() {
     const pageSelect = document.getElementById('usersFilterPage');
     const roleSelect = document.getElementById('usersFilterRole');
+    const departmentSelect = document.getElementById('usersFilterDepartment');
     const currentPage = pageSelect.value;
     const currentRole = roleSelect.value;
+    const currentDepartment = departmentSelect.value;
 
     const pages = [...new Set(usersRows.map((u) => u.favoritePage).filter(Boolean))].sort();
     const roles = [...new Set(usersRows.map((u) => u.workPosition).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    // 'Sem setor' agrupa quem não resolveu pra nenhum macro-setor (sem
+    // departamento no Bitrix, ou falha ao consultar department.get) — ver
+    // mesmo fallback usado no filtro (usersFiltered) e no resumo
+    // (renderUsersDeptSummary).
+    const departments = [...new Set(usersRows.map((u) => u.department || 'Sem setor'))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
 
     pageSelect.innerHTML = '<option value="">Página favorita: todas</option>'
       + pages.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(formatPageName(p))}</option>`).join('');
     roleSelect.innerHTML = '<option value="">Cargo: todos</option>'
       + roles.map((r) => `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`).join('');
+    departmentSelect.innerHTML = '<option value="">Setor: todos</option>'
+      + departments.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
 
     if (pages.includes(currentPage)) pageSelect.value = currentPage;
     if (roles.includes(currentRole)) roleSelect.value = currentRole;
+    if (departments.includes(currentDepartment)) departmentSelect.value = currentDepartment;
   }
 
   // Extraído de renderUsers pra ser reaproveitado por exportUsersCsv —
@@ -1633,6 +1675,7 @@
     const analysisFilter = document.getElementById('usersFilterAnalysis').value;
     const activityFilter = document.getElementById('usersFilterActivity').value;
     const whatsappFilter = document.getElementById('usersFilterWhatsapp').value;
+    const departmentFilter = document.getElementById('usersFilterDepartment').value;
 
     return usersRows.filter((u) => {
       if (term) {
@@ -1646,6 +1689,7 @@
       if (statusFilter === 'blocked' && !u.isBlocked) return false;
       if (pageFilter && u.favoritePage !== pageFilter) return false;
       if (roleFilter && u.workPosition !== roleFilter) return false;
+      if (departmentFilter && (u.department || 'Sem setor') !== departmentFilter) return false;
       if (analysisFilter === 'yes' && !u.hasConversationAnalysisAccess) return false;
       if (analysisFilter === 'no' && u.hasConversationAnalysisAccess) return false;
       // "Nunca usou o app" — sem nenhum acesso registrado em page_sessions
@@ -1674,6 +1718,39 @@
     `).join('');
   }
 
+  // Resumo agregado por macro-setor — pedido do usuário 2026-10-01: vai
+  // usar o DapZap pra controlar os CHIPS do escritório (todo chip físico
+  // precisa estar conectado em algum usuário), então "quantos já
+  // conectaram, por setor" vira um indicador de controle de inventário,
+  // não só de adoção da ferramenta. Calculado sobre usersRows (universo
+  // TOTAL, não o filtrado) — sempre mostra o panorama completo, mesmo com
+  // um filtro de busca/status ativo na tabela abaixo.
+  function renderUsersDeptSummary() {
+    const el = document.getElementById('usersDeptSummary');
+    if (!usersRows.length) { el.innerHTML = ''; return; }
+
+    const bySector = new Map(); // nome -> { total, connected, numbers: [] }
+    for (const u of usersRows) {
+      const dept = u.department || 'Sem setor';
+      if (!bySector.has(dept)) bySector.set(dept, { total: 0, connected: 0, numbers: 0 });
+      const row = bySector.get(dept);
+      row.total++;
+      if (u.instances && u.instances.length) {
+        row.connected++;
+        row.numbers += u.instances.length;
+      }
+    }
+
+    const sorted = [...bySector.entries()].sort((a, b) => b[1].total - a[1].total);
+    el.innerHTML = sorted.map(([name, s]) => `
+      <div class="dept-card">
+        <div class="dept-card-name">${escapeHtml(name)}</div>
+        <div class="dept-card-stat"><b>${s.connected}</b> de ${s.total} colaborador${s.total === 1 ? '' : 'es'} conectou</div>
+        <div class="dept-card-stat-sub">${s.numbers} número${s.numbers === 1 ? '' : 's'} de WhatsApp ao todo</div>
+      </div>
+    `).join('');
+  }
+
   function renderUsers() {
     const term = usersSearchTerm();
     const statusFilter = document.getElementById('usersFilterStatus').value;
@@ -1682,7 +1759,9 @@
     const analysisFilter = document.getElementById('usersFilterAnalysis').value;
     const activityFilter = document.getElementById('usersFilterActivity').value;
     const whatsappFilter = document.getElementById('usersFilterWhatsapp').value;
+    const departmentFilter = document.getElementById('usersFilterDepartment').value;
     const filtered = usersFiltered();
+    renderUsersDeptSummary();
 
     // Resumo visível de "o que está filtrando agora" — some por padrão,
     // só aparece com pelo menos 1 filtro/busca ativo. Sem isso, é fácil
@@ -1697,6 +1776,7 @@
     if (analysisFilter) activeFilterLabels.push(`auditoria: ${analysisFilter === 'yes' ? 'com acesso' : 'sem acesso'}`);
     if (activityFilter === 'never') activeFilterLabels.push('nunca usou o app');
     if (whatsappFilter === 'never') activeFilterLabels.push('WhatsApp: nunca conectou');
+    if (departmentFilter) activeFilterLabels.push(`setor: ${departmentFilter}`);
     const activeFiltersEl = document.getElementById('usersActiveFilters');
     if (activeFilterLabels.length) {
       activeFiltersEl.style.display = '';
@@ -1721,7 +1801,7 @@
       : `${filtered.length} de ${usersRows.length}`;
 
     if (!filtered.length) {
-      body.innerHTML = `<tr><td colspan="8" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
+      body.innerHTML = `<tr><td colspan="9" class="empty-state">${usersRows.length ? 'Nenhum usuário encontrado pra essa busca/filtro.' : 'Nenhum usuário encontrado.'}</td></tr>`;
       pager.innerHTML = '';
       return;
     }
@@ -1763,10 +1843,11 @@
               ${photoCell}
               <div>
                 <div class="person-name">${escapeHtml(u.name || 'Sem nome')}${u.isBlocked ? ' <span class="status-badge offline" style="margin-left:4px;">Bloqueado</span>' : ''}</div>
-                <div class="person-sub">${escapeHtml(u.workPosition || '')}</div>
+                <div class="person-sub">${escapeHtml(u.workPosition || '')}${u.workPosition ? ' · ' : ''}ID ${escapeHtml(u.bitrixUserId || '—')}</div>
               </div>
             </div>
           </td>
+          <td>${escapeHtml(u.department || '—')}</td>
           <td>${escapeHtml(u.email || '—')}</td>
           <td class="instances-cell">${instancesCellHtml(u.instances)}</td>
           <td>${onlineCell}</td>
@@ -1822,7 +1903,7 @@
 
   // Filtros adicionais da tabela de Usuários — mesmo padrão do listener de
   // busca acima (volta pra página 1, já que o total de linhas mudou).
-  ['usersFilterStatus', 'usersFilterPage', 'usersFilterRole', 'usersFilterAnalysis', 'usersFilterActivity', 'usersFilterWhatsapp'].forEach((id) => {
+  ['usersFilterStatus', 'usersFilterPage', 'usersFilterRole', 'usersFilterAnalysis', 'usersFilterActivity', 'usersFilterWhatsapp', 'usersFilterDepartment'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => { usersPage = 1; renderUsers(); });
   });
   document.getElementById('usersFiltersClear').addEventListener('click', () => {
@@ -1833,6 +1914,7 @@
     document.getElementById('usersFilterAnalysis').value = '';
     document.getElementById('usersFilterActivity').value = '';
     document.getElementById('usersFilterWhatsapp').value = '';
+    document.getElementById('usersFilterDepartment').value = '';
     usersPage = 1;
     renderUsers();
   });

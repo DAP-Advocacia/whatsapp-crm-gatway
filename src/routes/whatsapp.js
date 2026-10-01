@@ -14,7 +14,7 @@ const instanceBanStore = require('../instanceBanStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
-const { getSubordinates, listEmployees } = require('../bitrixHierarchy');
+const { getSubordinates, listEmployees, listEmployeesWithDepartment } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 const presence = require('../presence');
 const pageSessions = require('../pageSessions');
@@ -1923,7 +1923,11 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ---------------------------------------------------------------
   router.get('/admin/users', requireSuperAdmin, async (req, res) => {
     try {
-      const employees = await listEmployees();
+      // listEmployeesWithDepartment() em vez de listEmployees() — adiciona
+      // o campo `department` (macro-setor: VENDAS/JURÍDICO/ADMINISTRATIVO/
+      // etc, ver src/bitrixHierarchy.js) pedido pelo usuário 2026-10-01
+      // pro controle de chips/conexões de WhatsApp por setor.
+      const employees = await listEmployeesWithDepartment();
       if (employees === null) {
         return res.json({ users: [], hrConfigured: false });
       }
@@ -1974,6 +1978,10 @@ function createWhatsappRouter({ sessions, broadcast }) {
         const usability = usabilityByOwner.get(ownerId);
         return {
           ownerId,
+          // ID numérico puro do Bitrix (sem o prefixo member_id de
+          // ownerId) — pedido do usuário 2026-10-01 pra alimentar o CSV
+          // exportado no agente externo de disparo/controle de chips.
+          bitrixUserId: e.id,
           name: e.name,
           email: e.email,
           photo: e.photo,
@@ -1989,6 +1997,11 @@ function createWhatsappRouter({ sessions, broadcast }) {
           lastLoginBitrix: e.lastLoginBitrix,
           employmentDate: e.employmentDate,
           departmentIds: e.departmentIds,
+          // Macro-setor (VENDAS/JURÍDICO/ADMINISTRATIVO/FINANCEIRO/
+          // NEGOCIAÇÃO E ACORDOS/SEM DEPARTAMENTO) — null se o funcionário
+          // não estiver em nenhum departamento resolvível (não deveria
+          // acontecer na prática, mas o Bitrix não impede).
+          department: e.department,
           isOnline,
           currentPage: presenceRow?.lastPage || null,
           lastAccess: lastAccessMap.get(ownerId) || null,

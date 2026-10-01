@@ -247,6 +247,87 @@ async function listEmployees() {
   }));
 }
 
+// Macro-setor de cada departamento — pedido do usuário 2026-10-01: controle
+// de chips/conexões agrupado por Vendas/Jurídico/Administrativo/etc, não
+// pelo departamento FOLHA onde a pessoa está lotada (a árvore real tem 200+
+// departamentos, com um ramo próprio por gestor/vendedor individual dentro
+// de Vendas — ex: "[GER] Diego Cordeiro | 725" não é um "setor").
+//
+// Sobe a árvore de PARENT a partir de cada departamento até achar o nível
+// logo abaixo da raiz (id da raiz confirmado com o usuário: "Presidência",
+// sem PARENT) — esse nível É o macro-setor (ADMINISTRATIVO, FINANCEIRO,
+// NEGOCIAÇÃO E ACORDOS, VENDAS, JURÍDICO, SEM DEPARTAMENTO). Memoizado por
+// deptId (um departamento nunca muda de pai no meio da resolução de uma
+// mesma leva de funcionários).
+// rootId fixo = '1' ("Presidência", confirmado com o usuário — é o único
+// departamento sem PARENT na árvore real, 216 departamentos verificados
+// 2026-10-01). Um departamento cujo PARENT É a raiz (ou que não tem PARENT
+// resolvível) já É o macro-setor; qualquer outro herda o macro-setor do
+// pai, subindo recursivamente.
+function buildTopLevelDepartmentMap(departments, rootId = '1') {
+  const byId = new Map(departments.map((d) => [String(d.ID), d]));
+  const topNameById = new Map();
+
+  function resolveTop(deptId, seen = new Set()) {
+    if (topNameById.has(deptId)) return topNameById.get(deptId);
+    if (seen.has(deptId)) return null; // ciclo defensivo — não deveria existir numa árvore real
+    seen.add(deptId);
+
+    const dept = byId.get(deptId);
+    if (!dept) return null;
+
+    const parentId = dept.PARENT ? String(dept.PARENT) : null;
+    if (!parentId || parentId === rootId || !byId.has(parentId)) {
+      topNameById.set(deptId, dept.NAME);
+      return dept.NAME;
+    }
+    const result = resolveTop(parentId, seen);
+    topNameById.set(deptId, result);
+    return result;
+  }
+
+  for (const dept of departments) resolveTop(String(dept.ID));
+  return topNameById;
+}
+
+// Cache do mapa deptId -> macro-setor — reusa o mesmo TTL/padrão de
+// isCacheExpired (HIERARCHY_CACHE_TTL_MS), mas em memória do processo (não
+// no Postgres como hierarchy_subordinates): é só um dicionário de nomes,
+// recalcular do zero a cada chamada seria 1 requisição HTTP a mais por
+// listagem de usuários à toa.
+let topLevelDeptCache = { map: null, fetchedAt: 0 };
+
+async function getTopLevelDepartmentMap() {
+  if (!BITRIX_HR_WEBHOOK_URL) return new Map();
+  if (topLevelDeptCache.map && Date.now() - topLevelDeptCache.fetchedAt < HIERARCHY_CACHE_TTL_MS) {
+    return topLevelDeptCache.map;
+  }
+  const departments = await callBitrixHRAll('department.get');
+  if (!departments) return topLevelDeptCache.map || new Map();
+  const map = buildTopLevelDepartmentMap(departments);
+  topLevelDeptCache = { map, fetchedAt: Date.now() };
+  return map;
+}
+
+// Mesmo retorno de listEmployees(), com o campo `department` (macro-setor,
+// ver buildTopLevelDepartmentMap) a mais em cada funcionário — pra telas
+// que precisam agrupar por Vendas/Jurídico/etc (painel de controle de
+// conexões de WhatsApp, ver GET /admin/users). Primeiro departmentId do
+// funcionário que resolve pra um macro-setor conhecido vence (na prática
+// raríssimo alguém estar em 2 macro-setores diferentes ao mesmo tempo).
+async function listEmployeesWithDepartment() {
+  const [employees, topLevelMap] = await Promise.all([listEmployees(), getTopLevelDepartmentMap()]);
+  if (!employees) return null;
+  return employees.map((e) => {
+    let department = null;
+    for (const deptId of e.departmentIds) {
+      const top = topLevelMap.get(deptId);
+      if (top) { department = top; break; }
+    }
+    return { ...e, department };
+  });
+}
+
 // Celular de UMA pessoa específica, por ID numérico do Bitrix — sem
 // paginar o universo inteiro de funcionários (listEmployees) só pra achar
 // uma. Usado pra mandar WhatsApp automático quando uma sugestão é lançada
@@ -349,6 +430,7 @@ module.exports = {
   ensureHierarchyCacheFresh,
   refreshHierarchyCache,
   listEmployees,
+  listEmployeesWithDepartment,
   getEmployeePhone,
   getEmployeeInfo,
   normalizeBrazilPhone,
