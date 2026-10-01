@@ -1327,3 +1327,51 @@ tentativa (comparava com "avô inexistente" em vez de com a raiz fixa,
 retornava o NOME DO PAI errado pra departamentos de 2º nível como
 ADMINISTRATIVO). Teste isolado da agregação por setor (contagem de
 conectados/total/números) — 7 cenários corretos.
+
+## 25. Delegação automática por hierarquia desativada (privacidade) + admin força compartilhamento manual (2026-10-01)
+
+Usuário levantou questão de privacidade: gestor enxergava automaticamente
+as conversas/instâncias de TODO subordinado dele na hierarquia do Bitrix
+(feature de `src/bitrixHierarchy.js`/`hierarchy_subordinates`, item mais
+antigo do projeto), sem ninguém ter pedido isso explicitamente. Pedido:
+desligar essa atribuição automática até uma regra própria ser definida,
+mas MANTER a delegação manual já existente ("Compartilhar acesso" em
+instances.html — o próprio dono escolhendo compartilhar).
+
+**(a) Desativação da hierarquia automática** — `src/instances.js`
+(`listAccessible`, usada por `GET /instances`/Chat/sidebar) perdeu o
+3º `union` da query (que juntava `hierarchy_subordinates`) e a chamada a
+`ensureHierarchyCacheFresh()`. `src/authz.js` (`assertOwnsSession`,
+portão central de toda rota com `requireSession`/`requireResourceOwner`)
+perdeu o passo de checar `getSubordinates(ownerId)` como último critério
+de acesso — agora só dono direto ou delegado manual (`instance_delegates`)
+passam. `getSubordinates`/`hierarchy_subordinates`/`refreshHierarchyCache`
+NÃO foram removidos (só deixaram de ser consultados nesses 2 pontos) —
+ficam prontos pra reativar (código comentado em `assertOwnsSession`)
+quando o usuário definir a regra nova. `GET /instances/eligible-delegates`
+(sugestão de quem é elegível a RECEBER uma delegação manual) continua
+usando `getSubordinates` normalmente — isso nunca foi a feature
+questionada, é só um filtro de sugestão pra quem já está compartilhando
+conscientemente.
+
+**(b) Admin força compartilhamento manual entre qualquer par de pessoas**
+— pedido complementar: "se der pra eu escolher qual usuário é o gestor
+na hora de compartilhar seria bom pq a hierarquia da empresa é meio
+errada as vezes". Novas `instancesStore.addDelegateAsAdmin`/
+`removeDelegateAsAdmin` (mesma tabela `instance_delegates`, sem exigir
+que o chamador seja o dono real — a autorização fica inteiramente na
+rota) e rotas `GET/POST/DELETE /admin/instances/:id/delegates`
+(`requireSuperAdmin`). Na aba Usuários do Admin, nova ação "Compartilhar
+instância" no menu de cada colaborador (só aparece se ele tiver pelo
+menos 1 instância) abre um modal: escolhe qual instância, busca o
+destinatário LOCALMENTE em `usersRows` (nome/e-mail, já carregado — sem
+BX24.callMethod nem filtro de hierarquia, de propósito irrestrito), lista
+quem já tem acesso com botão de remover. `instancesByOwner` em
+`GET /admin/users` ganhou o campo `id` de cada instância (antes só
+label/phone, suficiente pra exibição mas não pra identificar qual
+compartilhar).
+
+Validação: sintaxe OK (scripts inline + `node -c` em authz.js,
+instances.js, routes/whatsapp.js). Teste isolado em Node da lógica de
+filtro de destinatários (busca por nome/e-mail, excluindo o próprio
+dono) — 3 cenários corretos.

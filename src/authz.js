@@ -27,15 +27,20 @@ function isDapinhoSession(id) {
 
 // Cobre dono com uma instância só (id === ownerId, ver
 // instances.ensureDefault), dono com várias instâncias, e delegado (não é o
-// dono, mas está em instance_delegates pra essa instância) — nesses dois
-// últimos casos consulta o dono/delegados reais de cada id no banco.
+// dono, mas está em instance_delegates pra essa instância).
+//
+// Delegação AUTOMÁTICA por hierarquia (gestor acessa subordinado só por
+// estar acima na árvore do Bitrix, via getSubordinates) DESATIVADA a pedido
+// do usuário 2026-10-01 — questão de privacidade, até ele definir uma regra
+// explícita de quem pode ver conversa de quem. getSubordinates/
+// hierarchy_subordinates não foram removidos, só deixaram de ser
+// consultados aqui — fácil reativar (descomentar o bloco abaixo) quando a
+// regra nova estiver definida. Delegação MANUAL (instance_delegates)
+// continua valendo normalmente — é o dono da instância escolhendo
+// compartilhar, não algo concedido automaticamente pela hierarquia.
 async function assertOwnsSession(sessionIdOrCsv, ownerId) {
   const ids = normalizeSessionIds(sessionIdOrCsv);
   if (!ids.length || !ownerId) return false;
-  // resolvido no máximo uma vez por chamada (não por id), só quando algum
-  // id precisar cair no caminho de hierarquia — a maioria das chamadas
-  // (dono direto ou delegado manual) nem chega a consultar isso.
-  let subordinates = null;
   for (const id of ids) {
     if (id === ownerId) continue;
     if (isDapinhoSession(id)) {
@@ -47,8 +52,9 @@ async function assertOwnsSession(sessionIdOrCsv, ownerId) {
     if (inst.ownerId === ownerId) continue;
     const delegates = await instancesStore.listDelegates(id);
     if (delegates.some((d) => d.delegateOwnerId === ownerId)) continue;
-    if (subordinates === null) subordinates = await getSubordinates(ownerId);
-    if (!subordinates.includes(inst.ownerId)) return false;
+    // const subordinates = await getSubordinates(ownerId);
+    // if (subordinates.includes(inst.ownerId)) continue;
+    return false;
   }
   return true;
 }

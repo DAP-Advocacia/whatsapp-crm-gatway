@@ -1,5 +1,4 @@
 const { pool } = require('./db');
-const { getSubordinates, ensureHierarchyCacheFresh } = require('./bitrixHierarchy');
 
 /**
  * Registro de instâncias de WhatsApp por "dono" (owner_id = member_id + id
@@ -83,9 +82,40 @@ async function addDelegate(instanceId, ownerId, delegateOwnerId, delegateName) {
   );
 }
 
+// Variante pro super admin (ver POST /admin/instances/:id/delegates em
+// src/routes/whatsapp.js, atrás de requireSuperAdmin) forçar um
+// compartilhamento manual entre duas pessoas quaisquer, sem precisar ser o
+// dono da instância nem depender da hierarquia do Bitrix (pedido do usuário
+// 2026-10-01 — a árvore de departamentos às vezes está incorreta/
+// desatualizada, "se der pra eu escolher qual usuário é o gestor ... seria
+// bom"). Mesma tabela instance_delegates de addDelegate() acima — do ponto
+// de vista de assertOwnsSession não há diferença entre uma delegação criada
+// pelo próprio dono ou forçada pelo admin, ambas aparecem como delegação
+// manual de qualquer forma.
+async function addDelegateAsAdmin(instanceId, delegateOwnerId, delegateName) {
+  const inst = await get(instanceId);
+  if (!inst) throw new Error('instância não encontrada');
+  if (delegateOwnerId === inst.ownerId) throw new Error('não é possível delegar pro próprio dono');
+  await pool.query(
+    `insert into instance_delegates (instance_id, delegate_owner_id, delegate_name)
+     values ($1, $2, $3)
+     on conflict (instance_id, delegate_owner_id) do update set delegate_name = excluded.delegate_name`,
+    [instanceId, delegateOwnerId, delegateName || null]
+  );
+}
+
 async function removeDelegate(instanceId, ownerId, delegateOwnerId) {
   const inst = await get(instanceId);
   if (!inst || inst.ownerId !== ownerId) throw new Error('instância não encontrada');
+  await pool.query(
+    `delete from instance_delegates where instance_id = $1 and delegate_owner_id = $2`,
+    [instanceId, delegateOwnerId]
+  );
+}
+
+// Variante pro super admin (ver addDelegateAsAdmin acima) revogar um
+// compartilhamento sem precisar ser o dono.
+async function removeDelegateAsAdmin(instanceId, delegateOwnerId) {
   await pool.query(
     `delete from instance_delegates where instance_id = $1 and delegate_owner_id = $2`,
     [instanceId, delegateOwnerId]
@@ -97,13 +127,17 @@ async function removeDelegate(instanceId, ownerId, delegateOwnerId) {
 // listByOwner (usado só pra contar contra MAX_INSTANCES_PER_OWNER, esse
 // limite não vale pra instância delegada nem pra hierárquica).
 //
-// Terceira fonte (além de própria/delegada manual): hierarquia automática
-// via Bitrix (gestor de departamento vê instâncias de todo subordinado,
-// cascateando sub-departamentos — ver src/bitrixHierarchy.js). Lê do cache
-// já resolvido (rápido, sem chamar o Bitrix nesta request) e dispara um
-// refresh em segundo plano se estiver vencido, sem atrasar a resposta.
+// Delegação AUTOMÁTICA por hierarquia do Bitrix (gestor via subordinado só
+// por estar acima na árvore, ver hierarchy_subordinates/getSubordinates em
+// src/bitrixHierarchy.js) DESATIVADA a pedido do usuário 2026-10-01 — questão
+// de privacidade: gestor não deve ver conversa de subordinado sem uma regra
+// explícita, e a árvore de departamentos do Bitrix às vezes está incorreta/
+// desatualizada. ensureHierarchyCacheFresh()/hierarchy_subordinates NÃO
+// foram removidos — ficam calculando em segundo plano (custo baixo, já era
+// background) prontos pra quando o usuário definir a regra nova. Delegação
+// MANUAL (instance_delegates, "Compartilhar acesso") continua normalmente —
+// é decisão consciente de quem é dono da instância, não automática.
 async function listAccessible(ownerId) {
-  ensureHierarchyCacheFresh();
   const { rows } = await pool.query(
     `select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", false as delegated
      from instances i
@@ -113,11 +147,6 @@ async function listAccessible(ownerId) {
      from instances i
      join instance_delegates d on d.instance_id = i.id
      where d.delegate_owner_id = $1
-     union
-     select i.id, i.owner_id as "ownerId", i.label, i.created_at as "createdAt", true as delegated
-     from instances i
-     join hierarchy_subordinates h on h.subordinate_owner_id = i.owner_id
-     where h.manager_owner_id = $1
      order by "createdAt" asc`,
     [ownerId]
   );
@@ -186,7 +215,9 @@ module.exports = {
   ownerOf,
   listDelegates,
   addDelegate,
+  addDelegateAsAdmin,
   removeDelegate,
+  removeDelegateAsAdmin,
   listAccessible,
   listAll,
   listAllOwnerIds,

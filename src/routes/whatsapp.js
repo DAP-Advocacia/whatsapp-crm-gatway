@@ -564,6 +564,55 @@ function createWhatsappRouter({ sessions, broadcast }) {
   });
 
   // ---------------------------------------------------------------
+  // POST/DELETE /admin/instances/:id/delegates
+  // Super admin força um compartilhamento manual entre duas pessoas
+  // quaisquer, sem precisar ser o dono da instância nem depender da
+  // hierarquia automática do Bitrix — pedido do usuário 2026-10-01, logo
+  // depois de desativar a delegação automática por hierarquia (questão de
+  // privacidade: gestor não deve ver conversa de subordinado sem uma regra
+  // explícita) e observando que a árvore de departamentos do Bitrix às
+  // vezes está incorreta/desatualizada ("se der pra eu escolher qual
+  // usuário é o gestor... seria bom"). Usa a MESMA tabela
+  // instance_delegates de "Compartilhar acesso" (instances.html) — pro
+  // resto do sistema (assertOwnsSession, listAccessible) não há diferença
+  // entre uma delegação criada pelo próprio dono ou forçada pelo admin.
+  // ---------------------------------------------------------------
+  // Leitura dos delegados atuais, do ponto de vista do ADMIN (sem
+  // requireOwnerMatch, que exigiria o admin SER o dono da instância — não é
+  // o caso aqui, de propósito, ele está olhando a instância de outra
+  // pessoa).
+  router.get('/admin/instances/:id/delegates', requireSuperAdmin, async (req, res) => {
+    try {
+      res.json({ delegates: await instancesStore.listDelegates(req.params.id) });
+    } catch (err) {
+      console.error('[admin:instances:delegates] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  router.post('/admin/instances/:id/delegates', requireSuperAdmin, async (req, res) => {
+    const { delegateOwnerId, delegateName } = req.body || {};
+    if (!delegateOwnerId) return res.status(400).json({ error: 'delegateOwnerId é obrigatório' });
+    try {
+      await instancesStore.addDelegateAsAdmin(req.params.id, delegateOwnerId, delegateName);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin:instances:delegates] erro:', err.message);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.delete('/admin/instances/:id/delegates/:delegateOwnerId', requireSuperAdmin, async (req, res) => {
+    try {
+      await instancesStore.removeDelegateAsAdmin(req.params.id, req.params.delegateOwnerId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[admin:instances:delegates] erro:', err.message);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
   // GET /instances/:id/health?owner=
   // Alerta de instância caída — histórico de queda/retorno + série de
   // métricas diárias (ver src/instanceHealthStore.js). Diferente das
@@ -1962,11 +2011,14 @@ function createWhatsappRouter({ sessions, broadcast }) {
       const blockedByOwner = new Map(blocked.map((b) => [b.ownerId, b]));
       const analysisGrantByOwner = new Set(analysisGrants.map((g) => g.ownerId));
       const ownNumbers = getOwnNumbersBySession();
-      const instancesByOwner = new Map(); // ownerId -> [{ label, phone }]
+      const instancesByOwner = new Map(); // ownerId -> [{ id, label, phone }]
       for (const inst of allInstances) {
         if (inst.isOrphan || !inst.ownerId) continue;
         if (!instancesByOwner.has(inst.ownerId)) instancesByOwner.set(inst.ownerId, []);
-        instancesByOwner.get(inst.ownerId).push({ label: inst.label, phone: ownNumbers[inst.id] || null });
+        // `id` incluído (2026-10-01) — necessário pro admin escolher qual
+        // instância forçar compartilhamento (POST /admin/instances/:id/
+        // delegates), antes só label/phone bastavam pra exibição.
+        instancesByOwner.get(inst.ownerId).push({ id: inst.id, label: inst.label, phone: ownNumbers[inst.id] || null });
       }
 
       const users = employees.map((e) => {

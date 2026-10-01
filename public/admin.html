@@ -601,6 +601,25 @@
   .bitrix-detail-field .field-value{ color:var(--text); }
   @media (max-width: 560px){ .bitrix-detail-grid{ grid-template-columns:1fr; } }
 
+  /* Modal "Compartilhar instância" (2026-10-01) — mesmo padrão visual de
+     campo rotulado já usado no resto do Admin (.field-label acima), só
+     generalizado pra fora do grid de detalhe do Bitrix. */
+  #shareInstanceModal .field{ margin-bottom:14px; }
+  #shareInstanceModal .field-label{ display:block; color:var(--text-faint); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:5px; }
+  #shareInstanceModal select,
+  #shareInstanceModal input[type="text"]{
+    width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
+    color:var(--text); font-family:inherit; font-size:13px; padding:9px 11px; outline:none;
+  }
+  .delegate-search-results{ display:flex; flex-direction:column; gap:4px; margin-top:6px; max-height:160px; overflow-y:auto; }
+  .delegate-search-result{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; background:var(--surface-2); font-size:13px; color:var(--text); }
+  .delegate-search-result button{ background:none; border:1px solid var(--border); color:var(--text-muted); font-size:11.5px; padding:5px 10px; border-radius:7px; cursor:pointer; flex-shrink:0; }
+  .delegate-search-result button:hover{ color:var(--text); border-color:var(--text-faint); }
+  .delegates-current-list{ display:flex; flex-direction:column; gap:6px; margin-top:16px; }
+  .delegates-current-list-title{ font-size:12px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:6px; }
+  .delegate-row{ display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); font-size:13px; }
+  .delegate-row button{ background:none; border:none; color:var(--red); font-size:11.5px; cursor:pointer; padding:0; }
+
   /* ======================================================
      Kanban de Sugestões
      ====================================================== */
@@ -969,6 +988,32 @@
       <div class="modal-actions" style="justify-content:space-between; margin-top:16px;">
         <button class="btn" id="userDetailSendMsgBtn">Enviar mensagem no WhatsApp</button>
         <button class="action-link" id="userDetailCloseBtn">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compartilhar instância forçado pelo admin (2026-10-01) — diferente do
+       "Compartilhar acesso" em instances.html (dono escolhendo compartilhar
+       a PRÓPRIA instância com alguém elegível por hierarquia): aqui o super
+       admin escolhe livremente qual instância de QUALQUER colaborador
+       compartilhar com QUALQUER outro usuário, sem depender da hierarquia
+       do Bitrix (pedido do usuário — a árvore às vezes está incorreta).
+       Busca local em usersRows (já carregado), sem BX24.callMethod. -->
+  <div id="shareInstanceModal" class="overlay">
+    <div class="modal">
+      <h3>Compartilhar instância</h3>
+      <div class="field">
+        <label class="field-label">Instância de <b id="shareInstanceOwnerName"></b></label>
+        <select id="shareInstanceSelect"></select>
+      </div>
+      <div class="field">
+        <label class="field-label">Compartilhar com</label>
+        <input type="text" id="shareInstanceSearchInput" placeholder="Buscar colaborador pelo nome ou e-mail…">
+        <div id="shareInstanceSearchResults" class="delegate-search-results"></div>
+      </div>
+      <div id="shareInstanceCurrentList" class="delegates-current-list"></div>
+      <div class="modal-actions">
+        <button class="btn secondary" id="shareInstanceClose">Fechar</button>
       </div>
     </div>
   </div>
@@ -1864,6 +1909,7 @@
                 ${revokeAction}
                 ${analysisAction}
                 ${viewConversationsAction}
+                ${u.instances && u.instances.length ? `<button class="action-link" data-share-instance="${escapeHtml(u.ownerId)}">Compartilhar instância</button>` : ''}
               </div>
             </div>
           </td>
@@ -2221,7 +2267,125 @@
       } catch (err) {
         if (window.showToast) window.showToast(err.message, 'error');
       }
+      return;
     }
+
+    const shareInstanceBtn = e.target.closest('[data-share-instance]');
+    if (shareInstanceBtn) return openShareInstanceModal(shareInstanceBtn.dataset.shareInstance);
+  });
+
+  // =========================================================
+  // Compartilhar instância (admin força compartilhamento manual entre
+  // qualquer colaborador e qualquer destinatário, sem depender de
+  // hierarquia) — pedido do usuário 2026-10-01, ver POST/DELETE
+  // /admin/instances/:id/delegates em src/routes/whatsapp.js. Busca de
+  // destinatário é LOCAL (usersRows já carregado por loadUsers()), sem
+  // BX24.callMethod nem filtro de "eligible-delegates" (que só devolve
+  // subordinados) — aqui é de propósito irrestrito.
+  // =========================================================
+  const shareInstanceModal = document.getElementById('shareInstanceModal');
+  const shareInstanceOwnerNameEl = document.getElementById('shareInstanceOwnerName');
+  const shareInstanceSelect = document.getElementById('shareInstanceSelect');
+  const shareInstanceSearchInput = document.getElementById('shareInstanceSearchInput');
+  const shareInstanceSearchResults = document.getElementById('shareInstanceSearchResults');
+  const shareInstanceCurrentList = document.getElementById('shareInstanceCurrentList');
+  let shareInstanceOwnerId = null;
+
+  async function openShareInstanceModal(ownerId) {
+    const user = usersRows.find((u) => u.ownerId === ownerId);
+    if (!user || !user.instances || !user.instances.length) return;
+    shareInstanceOwnerId = ownerId;
+    shareInstanceOwnerNameEl.textContent = user.name || ownerId;
+    shareInstanceSelect.innerHTML = user.instances
+      .map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`)
+      .join('');
+    shareInstanceSearchInput.value = '';
+    shareInstanceSearchResults.innerHTML = '';
+    await renderShareInstanceCurrentList();
+    shareInstanceModal.classList.add('open');
+  }
+
+  async function renderShareInstanceCurrentList() {
+    const instanceId = shareInstanceSelect.value;
+    if (!instanceId) { shareInstanceCurrentList.innerHTML = ''; return; }
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/instances/${encodeURIComponent(instanceId)}/delegates`);
+      if (!res.ok) { shareInstanceCurrentList.innerHTML = ''; return; }
+      const data = await res.json();
+      const delegates = data.delegates || [];
+      if (!delegates.length) { shareInstanceCurrentList.innerHTML = ''; return; }
+      shareInstanceCurrentList.innerHTML = '<div class="delegates-current-list-title">Já compartilhada com</div>'
+        + delegates.map((d) => {
+            const delegateUser = usersRows.find((u) => u.ownerId === d.delegateOwnerId);
+            return `
+              <div class="delegate-row">
+                <span>${escapeHtml(d.delegateName || delegateUser?.name || d.delegateOwnerId)}</span>
+                <button type="button" data-remove-share="${escapeHtml(d.delegateOwnerId)}">Remover</button>
+              </div>
+            `;
+          }).join('');
+    } catch (err) {
+      shareInstanceCurrentList.innerHTML = '';
+    }
+  }
+
+  shareInstanceSelect.addEventListener('change', renderShareInstanceCurrentList);
+
+  shareInstanceSearchInput.addEventListener('input', () => {
+    const term = shareInstanceSearchInput.value.trim().toLowerCase();
+    if (!term) { shareInstanceSearchResults.innerHTML = ''; return; }
+    const matches = usersRows
+      .filter((u) => u.ownerId !== shareInstanceOwnerId)
+      .filter((u) => (u.name || '').toLowerCase().includes(term) || (u.email || '').toLowerCase().includes(term))
+      .slice(0, 8);
+    shareInstanceSearchResults.innerHTML = matches.map((u) => `
+      <div class="delegate-search-result">
+        <span>${escapeHtml(u.name || u.ownerId)}${u.email ? ' · ' + escapeHtml(u.email) : ''}</span>
+        <button type="button" data-pick-delegate="${escapeHtml(u.ownerId)}" data-pick-delegate-name="${escapeHtml(u.name || '')}">Compartilhar</button>
+      </div>
+    `).join('');
+  });
+
+  shareInstanceSearchResults.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-pick-delegate]');
+    if (!btn) return;
+    const instanceId = shareInstanceSelect.value;
+    if (!instanceId) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/instances/${encodeURIComponent(instanceId)}/delegates`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delegateOwnerId: btn.dataset.pickDelegate, delegateName: btn.dataset.pickDelegateName || null }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao compartilhar');
+      if (window.showToast) window.showToast('Instância compartilhada.', 'success');
+      shareInstanceSearchInput.value = '';
+      shareInstanceSearchResults.innerHTML = '';
+      renderShareInstanceCurrentList();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  shareInstanceCurrentList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-remove-share]');
+    if (!btn) return;
+    const instanceId = shareInstanceSelect.value;
+    if (!instanceId) return;
+    const confirmed = await window.confirmDialog('Remover o compartilhamento desta instância com esta pessoa?');
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/instances/${encodeURIComponent(instanceId)}/delegates/${encodeURIComponent(btn.dataset.removeShare)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao remover compartilhamento');
+      if (window.showToast) window.showToast('Compartilhamento removido.', 'success');
+      renderShareInstanceCurrentList();
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  });
+
+  document.getElementById('shareInstanceClose').addEventListener('click', () => {
+    shareInstanceModal.classList.remove('open');
   });
 
   // ---------------- Publicar no Feed do Bitrix ----------------
