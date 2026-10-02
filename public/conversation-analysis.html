@@ -32,45 +32,56 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg: #15120d;
-    --surface: #1d1812;
-    --surface-2: #241d15;
-    --border: #34291a;
-    --gold: #d8ab4f;
-    --gold-rgb: 216,171,79;
-    --gold-dim: #8a6b32;
-    --text: #f3ede2;
-    --text-muted: #a89a83;
-    --text-faint: #6e6353;
-    --green: #4caf6e;
-    --green-rgb: 76,175,110;
-    --red: #d9685f;
-    --red-rgb: 217,104,95;
-    --bubble-mine: #2a5f4a;
-    --bubble-mine-text: #f3ede2;
+    /* Paleta nova (Fase 3 do redesign, mesmos valores de chat.html/
+       admin.html, 2026-10-02) — --gold/--gold-dim viram apelido direto dos
+       valores novos de --accent, pra não reescrever as dezenas de
+       seletores desta página que ainda usam --gold/--green/--red (cosmético,
+       ver Fase 6 do plano de redesign). */
+    --bg: #17171a;
+    --surface: #1f1f23;
+    --surface-2: #2a2a2f;
+    --border: #38383e;
+    --gold: #3d8073;
+    --gold-rgb: 61,128,115;
+    --gold-dim: #4a9686;
+    /* Texto sobre fundo --gold — ver mesmo --on-gold de admin.html. */
+    --on-gold: #ffffff;
+    --text: #e9edef;
+    --text-muted: #8696a0;
+    --text-faint: #667781;
+    --green: #3fb950;
+    --green-rgb: 63,185,80;
+    --red: #f15c6d;
+    --red-rgb: 241,92,109;
+    --bubble-mine: #24443e;
+    --bubble-mine-text: #e9edef;
     --bubble-theirs: var(--surface-2);
     --radius: 14px;
     --footer-h: 46px;
     --header-h: 90px;
   }
-  /* Tema claro (2026-08-30) — [data-theme="light"] no <html>, escrito
-     ANTES do primeiro paint (ver script no <head>). Só
-     FUNDO/SUPERFÍCIE/TEXTO mudam entre os dois temas — a cor de DESTAQUE
-     (--gold/--gold-dim/--green/--red, incl. presets de Configurações)
-     continua IGUAL nos dois, por decisão de produto. Mesmo bloco-base já
-     validado em public/chat.html (HANDOFF Parte FL/FM).
-     ATENÇÃO se --gold for usado como cor de TEXTO nesta página (não só
-     decoração/ícone): considerar --gold-on-light (ver chat.html) se o
-     contraste ficar insuficiente no tema claro — não replicado
-     automaticamente aqui, avaliar por página. */
+  /* Tema claro (2026-08-30, repintado 2026-10-02 com a mesma paleta nova de
+     chat.html/admin.html) — [data-theme="light"] no <html>, escrito ANTES
+     do primeiro paint (ver script no <head>). --gold/--gold-dim TAMBÉM
+     mudam entre os temas agora (mesmo critério de --accent em chat.html). */
   html[data-theme="light"]{
-    --bg: #f7f4ee;
+    --bg: #f0f2f5;
     --surface: #ffffff;
-    --surface-2: #eee8db;
-    --border: #ddd4c0;
-    --text: #2a2318;
-    --text-muted: #6b6152;
-    --text-faint: #9a8f7a;
+    --surface-2: #f5f6f6;
+    --border: #e9edef;
+    --gold: #3d7566;
+    --gold-rgb: 61,117,102;
+    --gold-dim: #2f5c50;
+    --text: #111b21;
+    --text-muted: #54656f;
+    --text-faint: #8696a0;
+    --green: #1a7f37;
+    --green-rgb: 26,127,55;
+    --red: #d32f2f;
+    --red-rgb: 211,47,47;
+    --bubble-mine: #e3f0ec;
+    --bubble-mine-text: #111b21;
+    --bubble-theirs: #ffffff;
   }
   /* Ícones sol/lua do switch de tema (ver botão #themeToggleBtn na
      sidebar e o JS de toggle mais abaixo) — mesmo padrão de
@@ -188,7 +199,7 @@
   .sidebar-toggle{
     position:absolute; top:20px; right:-14px;
     width:28px; height:28px; border-radius:50%;
-    background:var(--gold); border:2px solid var(--bg); color:#1a1408;
+    background:var(--gold); border:2px solid var(--bg); color:var(--on-gold);
     display:flex; align-items:center; justify-content:center; cursor:pointer; z-index:5;
     box-shadow: 0 2px 8px rgba(0,0,0,.4);
     transition: transform .15s ease, filter .15s ease;
@@ -327,7 +338,7 @@
   .btn{ font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; padding:8px 16px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); cursor:pointer; transition: background .15s, border-color .15s; }
   .btn:hover{ border-color: var(--gold-dim); }
   .btn:disabled{ opacity:.5; cursor:not-allowed; }
-  .btn.primary{ background: var(--gold); color:#1a1408; border-color: var(--gold); }
+  .btn.primary{ background: var(--gold); color:var(--on-gold); border-color: var(--gold); }
   .btn.primary:hover{ filter: brightness(1.06); }
   .btn.secondary{ background: transparent; }
 

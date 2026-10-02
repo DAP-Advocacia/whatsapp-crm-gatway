@@ -1419,3 +1419,25 @@ Validação: sintaxe OK (scripts inline). Grep confirmando que nenhum hex
 fixo da paleta antiga sobrou fora de comentário/documentação.
 `conversation-analysis.html` ainda pendente de redesign (mesmo caso de
 admin.html antes desta correção) — fora desta entrega.
+
+## 27. Redesign visual de conversation-analysis.html (2026-10-02)
+
+Mesma correção do item 26, usuário reportou na sequência: "auditoria de
+conversa também não mudou". Mesmo diagnóstico (Fase 0 já aplicada, link
+sem efeito porque o `<style>` inline continuava com a paleta antiga) e
+mesma correção — valores de `:root`/`html[data-theme="light"]` trocados
+pelos mesmos de chat.html/admin.html, `--on-gold` adicionada, 2
+ocorrências de `#1a1408` trocadas por `var(--on-gold)`.
+
+Diferença desta página: tem `--bubble-mine`/`--bubble-mine-text`/
+`--bubble-theirs` próprios (bolhas de mensagem exibidas na visualização
+de conversa auditada) que `admin.html` não tem. Usados os valores REAIS
+de chat.html (conferido via grep, não reproduzidos de memória/do plano
+de redesign original — primeira tentativa usou um valor de tema claro
+que não batia com o que está de fato em produção, corrigido antes de
+commitar): escuro `--bubble-mine: #24443e`, claro `--bubble-mine:
+#e3f0ec` / `--bubble-theirs: #ffffff`.
+
+Validação: sintaxe OK (scripts inline). Grep confirmando que nenhum
+hex fixo da paleta antiga (nem valor incorreto de bubble-mine) sobrou
+no arquivo.
