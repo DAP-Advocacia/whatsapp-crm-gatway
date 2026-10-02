@@ -1473,3 +1473,64 @@ usado só nesse modo) também preservado intacto nas duas páginas — não
 depende da estrutura do logo.
 
 Validação: sintaxe OK (scripts inline) nas duas páginas.
+
+## 29. Mitigação de risco de ban no 1º pareamento — bloqueia sync FULL de histórico (2026-10-02)
+
+Usuário pediu investigação de banimentos ("pessoas falando sobre
+conectar e banir"). Levantamento via `instance_connection_events`
+(últimos 30 dias, reason='forbidden'): 121 janelas, 32 instâncias
+distintas afetadas, 4 "banidas agora" pelo critério de
+`instanceBanStore` (≥20h em forbidden nas últimas 24h) — duas antigas
+(Thays Evres desde 15/09, uma instância sem dono resolvível no Bitrix
+desde 08/09) e duas recentes (Lucas Puzanovsky, Aghata Cristhie Camilo
+de Melo, ambas banidas na tarde/noite de 01/10).
+
+Usuário confirmou que quem reclamou de verdade foi Natasha Teixeira
+(instanceId `..._45066`) — caso não capturado pelo critério de 20h
+ainda (só ~4h de banimento no momento da investigação), mas com print
+real do WhatsApp mostrando "Conta restrita" minutos após conectar.
+Histórico completo da instância dela (só 4 eventos, TODOS do mesmo dia)
+confirmou: a INSTÂNCIA no DapZap era nova (criada às 12:14 do dia), mas
+o NÚMERO de WhatsApp em si já tinha uso real (2169 contatos, usuária
+confirmou "tenho um tempo já" e "não chamei ninguém" — descarta tanto
+"número novo sem aquecimento" quanto disparo em masso como causa).
+Conclusão: o fator de risco real aqui foi especificamente o MOMENTO da
+1ª conexão de um número já estabelecido a uma ferramenta não-oficial
+(Baileys) — não uma falha do app, mas um comportamento que sistemas de
+detecção de automação do WhatsApp monitoram.
+
+Importante (comunicado ao usuário): não existe mudança de código que
+ELIMINE esse risco — Baileys simula o protocolo do WhatsApp Web sem
+autorização oficial, o WhatsApp pode banir por qualquer critério a
+qualquer momento, isso é inerente à abordagem, não um bug deste
+projeto. O que dá pra fazer é MITIGAR fatores reais sob nosso controle.
+
+Mudança aplicada em `src/whatsapp.js` (`makeWASocket`):
+`shouldSyncHistoryMessage` antes aceitava TODOS os `syncType` (incluindo
+`FULL` — o Baileys por padrão descarta `FULL` silenciosamente, então
+isso já tinha sido sobrescrito antes pra garantir que histórico
+"completo" de fato chegasse, ver comentário anterior no código).
+`FULL` é especificamente o sync PROFUNDO (todo o histórico guardado no
+celular, enviado de uma vez no pareamento) — pra uma conta com milhares
+de contatos/conversas como a da Natasha, isso gera um pico de tráfego
+logo nos primeiros minutos, exatamente o tipo de padrão que sistemas
+anti-automação monitoram. Agora `shouldSyncHistoryMessage` bloqueia só
+`FULL` (`msg.syncType !== proto.HistorySync.HistorySyncType.FULL`),
+liberando `RECENT`/`INITIAL_BOOTSTRAP`/`PUSH_NAME`/`ON_DEMAND`/
+`NON_BLOCKING_DATA`/`INITIAL_STATUS_V3` normalmente — `RECENT` já traz
+conversas em andamento recentes, suficiente pro uso diário; só
+histórico MUITO antigo (meses/anos) deixa de sincronizar
+automaticamente no pareamento.
+
+Validação: sintaxe OK (`node -c`). Teste isolado em Node confirmando
+`proto.HistorySync.HistorySyncType` real do pacote instalado (`FULL=2`,
+os outros 6 valores) e que a função bloqueia exatamente `FULL`,
+liberando os outros 6 tipos — 7 cenários corretos.
+
+Pendente (fora de escopo de código, orientação de processo pro
+usuário): o próprio risco de ban na 1ª conexão não é eliminável por
+código — vale considerar orientar colaboradores a NÃO conectarem
+números com uso comercial muito intenso (muitos contatos/grupos) sem
+avisar o TI antes, e evitar reconectar repetidamente em sequência
+rápida se a 1ª tentativa falhar (cada nova tentativa é mais um sinal de
+automação pro WhatsApp).

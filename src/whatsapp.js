@@ -8,6 +8,7 @@ const {
   downloadMediaMessage,
   isJidBroadcast,
   isJidNewsletter,
+  proto,
 } = require('@whiskeysockets/baileys');
 const QRCode = require('qrcode');
 const pino = require('pino');
@@ -130,16 +131,27 @@ class WhatsAppGateway extends EventEmitter {
       printQRInTerminal: false,
       // syncFullHistory já é o default (true) — só PEDE o histórico completo
       // ao celular. Quem de fato decide o que chega no evento
-      // messaging-history.set é shouldSyncHistoryMessage, cujo default da
-      // lib descarta silenciosamente o syncType FULL (histórico profundo,
-      // enviado uma vez no pareamento) — sobrava só RECENT/INITIAL_BOOTSTRAP
-      // (janela curta e recente), nunca o histórico de verdade. Sem
-      // sobrescrever isto, "histórico completo" nunca chegava de fato, só
-      // parecia (o comentário antigo no evento abaixo estava errado nesse
-      // ponto). Aceita todos os syncType — o dedupe por
-      // (conversation_id, wa_message_id) em store.addMessage já cobre
-      // qualquer mensagem que chegue mais de uma vez por sync duplicado.
-      shouldSyncHistoryMessage: () => true,
+      // messaging-history.set é shouldSyncHistoryMessage.
+      //
+      // REVERTIDO (2026-10-02) — mitigação de risco de ban no 1º pareamento.
+      // Caso real reportado: Natasha Teixeira conectou um número com 2169
+      // contatos/histórico grande e levou `forbidden` do WhatsApp em menos
+      // de 20min (ver instance_connection_events, instanceId ..._45066).
+      // syncType FULL é exatamente o sync PROFUNDO (todo o histórico
+      // guardado no celular, não só recente) — pra uma conta com muito
+      // histórico, isso gera um pico grande de tráfego logo nos primeiros
+      // minutos de conexão, um padrão que sistemas de detecção de
+      // automação do WhatsApp monitoram. Não dá pra eliminar o risco de
+      // ban (Baileys é uma API não-oficial, o WhatsApp pode banir por
+      // qualquer motivo a qualquer momento — isso não é um bug deste app),
+      // mas bloquear o sync mais pesado reduz um fator real sob nosso
+      // controle. RECENT/INITIAL_BOOTSTRAP continuam liberados (trazem
+      // conversas em andamento recentes, é o que a maioria dos usuários
+      // precisa no dia a dia) — só o FULL (histórico muito antigo) deixa
+      // de chegar automaticamente no pareamento. Dedupe por
+      // (conversation_id, wa_message_id) em store.addMessage continua
+      // cobrindo qualquer mensagem que chegue mais de uma vez.
+      shouldSyncHistoryMessage: (msg) => msg.syncType !== proto.HistorySync.HistorySyncType.FULL,
     });
 
     this.sock.ev.on('creds.update', saveCreds);
