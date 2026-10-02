@@ -1375,3 +1375,47 @@ Validação: sintaxe OK (scripts inline + `node -c` em authz.js,
 instances.js, routes/whatsapp.js). Teste isolado em Node da lógica de
 filtro de destinatários (busca por nome/e-mail, excluindo o próprio
 dono) — 3 cenários corretos.
+
+## 26. Item "Admin" não aparecia pro usuário + redesign visual de admin.html (2026-10-02)
+
+Dois achados do próprio usuário testando as entregas anteriores.
+
+**(a) `SUPER_ADMIN_OWNER_IDS` desatualizada** — a seção "Admin" da
+sidebar do Chat (item 24/25) não aparecia pro usuário mesmo sendo o
+mantenedor do projeto. Causa: a variável de ambiente
+`SUPER_ADMIN_OWNER_IDS` (lida direto do `.env`, nunca do banco — ver
+`src/adminAuth.js`) ainda apontava só pro owner_id do colaborador
+anterior (`..._183168`), nunca incluiu o owner_id do usuário atual
+(`..._5305`). Não é um bug de código — corrigido direto na configuração
+de ambiente do EasyPanel (painel do serviço whatsapp-gateway →
+Environment), sem precisar de deploy.
+
+**(b) `admin.html` ainda no visual antigo** — usuário notou que, mesmo
+com a Fase 0 do redesign já aplicada (links pra `/assets/theme.css` etc
+já no `<head>`, sem efeito — mesma técnica documentada no topo do
+arquivo), o `<style>` inline continuava com a paleta ANTIGA (dourado
+`#d8ab4f`, bg marrom `#15120d`), nunca migrada nas fases seguintes do
+plano de redesign (igual `conversation-analysis.html`, também pendente).
+Corrigido substituindo só os VALORES das variáveis de cor no `:root`/
+`html[data-theme="light"]` inline pelos mesmos já usados em chat.html/
+index.html (verde-petróleo dessaturado, cinza-chumbo neutro) — `--gold`/
+`--green`/`--red` continuam como NOMES de variável (centenas de usos no
+arquivo, fora de escopo renomear agora, mesmo raciocínio do `--gold:
+var(--accent)` já documentado em chat.html), só os valores mudaram.
+Nova `--on-gold: #ffffff` adicionada (texto sobre fundo `--gold` em
+botões/badges — o dourado antigo era claro e usava texto quase-preto
+`#1a1408`, o verde-petróleo novo é escuro e precisa de texto claro,
+mesmo critério de `--on-accent` em chat.html). 3 cores hex fixas que
+escaparam do `:root` (`#1a1408` em 2 lugares, `#c0392b`/`#27ae60` no
+status do histórico do Feed, `#e88b83` no hover de ação perigosa)
+trocadas por `var(--on-gold)`/`var(--red)`/`var(--green)`/
+`filter:brightness()`. Fraunces NÃO foi removida (uso em h1/h2/valores
+em destaque) — conferido que chat.html, já redesenhado, também mantém
+Fraunces amplamente; a intenção original do plano ("remove Fraunces")
+mudou durante a execução, admin.html só precisava ficar consistente com
+o que já está em produção, não com o plano inicial desatualizado.
+
+Validação: sintaxe OK (scripts inline). Grep confirmando que nenhum hex
+fixo da paleta antiga sobrou fora de comentário/documentação.
+`conversation-analysis.html` ainda pendente de redesign (mesmo caso de
+admin.html antes desta correção) — fora desta entrega.
