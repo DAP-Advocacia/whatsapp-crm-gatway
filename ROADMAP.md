@@ -1441,3 +1441,35 @@ commitar): escuro `--bubble-mine: #24443e`, claro `--bubble-mine:
 Validação: sintaxe OK (scripts inline). Grep confirmando que nenhum
 hex fixo da paleta antiga (nem valor incorreto de bubble-mine) sobrou
 no arquivo.
+
+## 28. Logo genérico trocado pela logo real do escritório (admin.html + conversation-analysis.html) (2026-10-02)
+
+Usuário notou, depois da repintura dos itens 26/27: "a logo dessas duas
+páginas que fizemos agora tá aquele ícone antigo feio ainda". As duas
+páginas nunca tinham recebido a troca de logo que `chat.html` já tem
+desde a Fase 3 do redesign (commit `68deefa`, "troca logo por imagem,
+nome DapZap") — continuavam com um `<svg>` genérico desenhado à mão
+(retângulos/arcos formando um "prédio" estilizado) em vez da logo real
+do escritório.
+
+Trocado pelo mesmo padrão de `chat.html` nas duas páginas: `<img
+class="logo-mark" src="/assets/logo-icon.png">` (arquivo já existente e
+commitado desde a Fase 3, só não estava sendo usado aqui) + texto
+simplificado pra `<span class="firm-name">DapZap</span>` (sem
+`firm-sub` no HTML estático). CSS de `.logo-mark` trocado de
+`width/height:32px + color` (estilização de SVG via `currentColor`)
+pra `width/height:44px + object-fit:contain` (estilização de `<img>`),
+mesmo tamanho de chat.html; `.firm-name` trocada de Fraunces/cor-gold
+pra Inter/cor-text, mesmo valor de chat.html.
+
+Confirmado antes de remover `firm-sub` do HTML: ambas as páginas têm um
+script `fetch('/api/brand')` que sobrescreve `.firm-name`/`.firm-sub`
+dinamicamente com o nome/subtítulo configurados no servidor — como
+`querySelectorAll('.firm-sub')` sobre um seletor sem elemento
+correspondente simplesmente não encontra nada (sem erro), remover o
+`<span class="firm-sub">` do HTML é seguro, mesmo comportamento de
+chat.html. Bloco de modo demo (`Andrade & Camargo`, nome fictício
+usado só nesse modo) também preservado intacto nas duas páginas — não
+depende da estrutura do logo.
+
+Validação: sintaxe OK (scripts inline) nas duas páginas.
