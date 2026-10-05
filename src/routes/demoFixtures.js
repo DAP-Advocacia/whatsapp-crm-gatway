@@ -30,7 +30,28 @@ function createDemoFixturesRouter() {
   router.get('/api/whatsapp/metrics', only((req, res) => res.json(demoData.dashboardMetrics)));
   router.get('/api/whatsapp/insights', only((req, res) => res.json(demoData.dashboardInsights)));
   router.get('/api/whatsapp/instances', only((req, res) => res.json(demoData.whatsappInstances)));
+  router.get('/api/whatsapp/instances/status', only((req, res) => res.json({ hasInstance: true })));
   router.get('/api/whatsapp/instances/:id/delegates', only((req, res) => res.json(demoData.instanceDelegates)));
+  // Simula "+ Conectar outro WhatsApp" — devolve um instanceId novo (não
+  // persiste nada de verdade, só pra abrir o modal de QR em seguida e
+  // testar o fluxo de pareamento/fila localmente, ver qrStatusFor).
+  router.post('/api/whatsapp/instances', only((req, res) => {
+    const instanceId = 'demo_new_' + Date.now();
+    res.json({ instanceId });
+  }));
+  // Simula o pareamento (fila -> gerando QR -> aguardando scan -> online)
+  // com o tempo real decorrido desde a 1ª chamada por essa `session` — ver
+  // demoData.qrStatusFor. `?queued=1` simula ter esperado vaga na fila
+  // (ver MAX_CONCURRENT_PAIRINGS em sessions.js); as instâncias fixas do
+  // demo (INSTANCE_1/INSTANCE_2) sempre respondem 'online' direto, só uma
+  // sessão NOVA (criada via o POST acima) passa pela simulação completa.
+  router.get('/api/whatsapp/qr', only((req, res) => {
+    const session = req.query.session;
+    if (session === demoData.INSTANCE_1 || session === demoData.INSTANCE_2 || session === demoData.OWNER_ID) {
+      return res.json({ status: 'online', qr: null });
+    }
+    res.json(demoData.qrStatusFor(session, { queued: req.query.queued === '1' }));
+  }));
   router.get('/api/whatsapp/groups', only((req, res) => res.json(demoData.whatsappGroups)));
   router.get('/api/whatsapp/contacts/groups', only((req, res) => res.json({ groups: [] })));
   router.get('/api/whatsapp/campaigns/metrics', only((req, res) => res.json(demoData.campaignMetrics)));

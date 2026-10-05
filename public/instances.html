@@ -1364,10 +1364,16 @@
   //   generating  -> status 'connecting' mas ainda sem QR (gerando)
   //   waiting_scan-> status 'connecting' com QR pronto (aguardando o celular escanear)
   //   online      -> conectado
+  // pct deliberadamente baixo em 'waiting_scan' — é a fase mais LONGA (a
+  // pessoa precisa pegar o celular e escanear, pode levar segundos ou
+  // minutos), então começar essa fase já em 65% passava a impressão falsa
+  // de "quase terminando" assim que o QR aparecia (usuário reportou,
+  // 2026-10-05). 30% deixa espaço real pra barra crescer enquanto a pessoa
+  // ainda está com o QR na tela, chegando a 100% só quando de fato conecta.
   const PAIRING_PHASES = [
-    { key: 'queued', pct: 10, label: 'Na fila', caption: 'Muita gente conectando agora — sua vez está chegando…' },
-    { key: 'generating', pct: 35, label: 'Gerando QR', caption: 'Gerando QR Code…' },
-    { key: 'waiting_scan', pct: 65, label: 'Escaneie', caption: 'Escaneie o QR Code com o WhatsApp do celular' },
+    { key: 'queued', pct: 8, label: 'Na fila', caption: 'Muita gente conectando agora — sua vez está chegando…' },
+    { key: 'generating', pct: 18, label: 'Gerando QR', caption: 'Gerando QR Code…' },
+    { key: 'waiting_scan', pct: 30, label: 'Escaneie', caption: 'Escaneie o QR Code com o WhatsApp do celular' },
     { key: 'online', pct: 100, label: 'Conectado', caption: 'Conectado ✓' },
   ];
   function phaseIndex(key) {
@@ -1381,10 +1387,14 @@
     if (hasQr) return 'waiting_scan';
     return 'generating';
   }
-  // IDs opcionais (2026-09-30) — reaproveitado pelo fluxo de QR de primeiro
-  // acesso (renderFirstAccessQr), que usa ids próprios (firstAccess*) pra
-  // não colidir com os do modal, que continuam existindo escondidos no DOM
-  // enquanto o painel mostra o QR inline.
+  // Enquanto a pessoa está parada em 'waiting_scan' (fase mais longa — pode
+  // levar segundos ou minutos até pegar o celular e escanear), a barra
+  // cresce bem devagar a cada poll (2.5s) em vez de ficar travada no pct
+  // fixo da fase — teto em 92% (nunca encosta nos 100%, reservado pra
+  // quando o backend confirma 'online' de verdade) pra não prometer um
+  // progresso que ainda não aconteceu. Reseta sempre que a fase muda.
+  let waitingScanBonus = 0;
+  let lastPhaseKey = null;
   function renderPairingPhase(phaseKey, ids) {
     const { fillId, stepsId, captionId } = ids || {};
     const fillEl = document.getElementById(fillId || 'pairingFill');
@@ -1393,7 +1403,13 @@
     const idx = phaseIndex(phaseKey);
     if (idx === -1) return;
     const phase = PAIRING_PHASES[idx];
-    if (fillEl) fillEl.style.width = phase.pct + '%';
+    if (phaseKey !== lastPhaseKey) { waitingScanBonus = 0; lastPhaseKey = phaseKey; }
+    let pct = phase.pct;
+    if (phaseKey === 'waiting_scan') {
+      waitingScanBonus = Math.min(waitingScanBonus + 4, 62); // 30% + até 62% = teto 92%
+      pct = phase.pct + waitingScanBonus;
+    }
+    if (fillEl) fillEl.style.width = pct + '%';
     if (captionEl) captionEl.textContent = phase.caption;
     if (stepsEl) {
       stepsEl.innerHTML = PAIRING_PHASES.map((p, i) => {

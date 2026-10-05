@@ -177,6 +177,52 @@ const whatsappInstances = {
 const instanceDelegates = { delegates: [] };
 
 // ---------------------------------------------------------------
+// 4b. Simulação de pareamento (GET /qr) — pra testar localmente o fluxo de
+// fila/progresso (ver sessions.js MAX_CONCURRENT_PAIRINGS e PAIRING_PHASES
+// em public/instances.html) sem depender de WhatsApp real nem do Bitrix.
+// Cada `session` (id de instância "nova", nunca visto antes) ganha um
+// cronômetro próprio na primeira chamada; o status avança sozinho com o
+// tempo real decorrido, imitando as 4 fases reais: queued -> generating ->
+// waiting_scan -> online. "queued" só aparece se ?queued=1 for passado na
+// URL do QR (simula estar esperando vaga) — por padrão pula direto pra
+// generating, já que no demo não faz sentido simular concorrência de
+// verdade.
+// ---------------------------------------------------------------
+const qrTimers = new Map(); // session -> { startedAt, queued }
+
+function qrStatusFor(session, { queued } = {}) {
+  if (!qrTimers.has(session)) qrTimers.set(session, { startedAt: now(), queued: !!queued });
+  const timer = qrTimers.get(session);
+  const elapsed = now() - timer.startedAt;
+
+  // Fases e durações fictícias, só pra dar tempo de ver cada uma na tela:
+  // queued por 3s (se aplicável) -> generating por 2s -> waiting_scan até
+  // completar 10s desde o início -> online.
+  const QUEUED_MS = 3000;
+  const GENERATING_MS = 2000;
+  const ONLINE_AFTER_MS = 10000;
+
+  if (timer.queued && elapsed < QUEUED_MS) {
+    return { status: 'queued', qr: null };
+  }
+  const sinceActiveStart = elapsed - (timer.queued ? QUEUED_MS : 0);
+  if (sinceActiveStart < GENERATING_MS) {
+    return { status: 'connecting', qr: null };
+  }
+  if (elapsed < ONLINE_AFTER_MS) {
+    // QR Code fictício (1x1 transparente) só pra ter uma <img> renderizando
+    // de verdade na tela — não é um QR escaneável, é só visual pra testar o
+    // layout/progresso.
+    return { status: 'connecting', qr: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' };
+  }
+  return { status: 'online', qr: null };
+}
+
+function qrReset(session) {
+  qrTimers.delete(session);
+}
+
+// ---------------------------------------------------------------
 // 5. Métricas de campanha
 // ---------------------------------------------------------------
 const campaignMetrics = {
@@ -311,6 +357,8 @@ module.exports = {
   templates,
   whatsappInstances,
   instanceDelegates,
+  qrStatusFor,
+  qrReset,
   campaignMetrics,
   leadFormsMetrics,
   suggestionsList,
