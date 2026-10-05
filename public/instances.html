@@ -539,25 +539,40 @@
   #qrStatus{ color: var(--text-muted); font-size: 12.5px; margin-top: 10px; }
   #qrStatus.online{ color: var(--green); font-weight: 600; }
 
-  /* ---------------- Loading "foguete" (conectando) ---------------- */
-  .loading-rocket{ display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 4px 4px; }
-  .rocket-track{
-    position: relative; width: 100%; max-width: 220px; height: 8px; border-radius: 100px;
-    background: var(--surface-2); border: 1px solid var(--border); overflow: visible;
+  /* ---------------- Barra de progresso de pareamento ----------------
+     Substitui o antigo "foguete" (2026-10-05) — aquele era um loop falso
+     (0% a 100% e recomeça, sem relação com o estado real), confuso: parecia
+     reiniciar o processo toda vez que voltava a 0%. Esta versão tem 4
+     fases REAIS e discretas (mapeadas direto do status do backend, ver
+     PAIRING_PHASES no JS) que só andam pra frente — 'queued' (sessão
+     aguardando vaga na fila de pareamento, ver sessions.js) é a fase nova;
+     sem ela, dezenas de pessoas conectando juntas (ex: depois de um aviso
+     em massa pra conectar o WhatsApp) seguravam a resposta do backend sem
+     nenhum feedback, parecendo erro/travamento. */
+  .pairing-progress{ display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 18px 4px 4px; width: 100%; max-width: 260px; margin: 0 auto; }
+  .pairing-track{
+    position: relative; width: 100%; height: 6px; border-radius: 100px;
+    background: var(--surface-2); border: 1px solid var(--border); overflow: hidden;
   }
-  .rocket-fill{
+  .pairing-fill{
     position: absolute; top: 0; left: 0; bottom: 0; width: 0%; border-radius: 100px;
     background: linear-gradient(90deg, var(--gold-dim), var(--gold));
-    transition: width .05s linear;
+    transition: width .4s ease;
   }
-  .rocket-icon{
-    position: absolute; top: 50%; left: 0%; font-size: 20px; line-height: 1;
-    transform: translate(-50%, -50%) rotate(90deg);
-    transition: left .05s linear;
-    filter: drop-shadow(0 0 4px rgba(var(--gold-rgb),.5));
+  /* Brilho sutil atravessando a barra enquanto uma fase está "em aberto"
+     (ainda não existe próximo marco pra avançar) — único indicador de
+     "algo está acontecendo", sem o looping/reinício visual do foguete. */
+  .pairing-fill::after{
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+    width: 40%; animation: pairing-shimmer 1.6s ease-in-out infinite;
   }
-  .rocket-percent{ font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; margin: 0; }
-  .rocket-caption{ font-size: 12.5px; color: var(--text-muted); margin: 0; }
+  @keyframes pairing-shimmer{ 0%{ transform: translateX(-100%); } 100%{ transform: translateX(250%); } }
+  .pairing-steps{ display: flex; justify-content: space-between; width: 100%; }
+  .pairing-step{ font-size: 10px; color: var(--text-faint); text-align: center; flex: 1; }
+  .pairing-step.active{ color: var(--gold); font-weight: 600; }
+  .pairing-step.done{ color: var(--text-muted); }
+  .pairing-caption{ font-size: 12.5px; color: var(--text-muted); margin: 0; text-align: center; }
 
   .credit-row{
     position: fixed; left: var(--sidebar-w); right: 0; bottom: 0; z-index: 30;
@@ -1342,35 +1357,59 @@
     return div.innerHTML;
   }
 
-  // ---------------- Loading "foguete" (visual de "conectando…") ----------------
-  // Não é um progresso real (não temos como medir quanto falta) — é um
-  // indicador em loop (0% a 100%, e recomeça) pra deixar claro que algo está
-  // acontecendo enquanto esperamos o QR ser gerado ou o celular confirmar o
-  // pareamento (esse último trecho, entre escanear e o status virar "online",
-  // não tem nenhum feedback visual hoje — fica um QR parado na tela).
-  let rocketTimer = null;
-
-  // IDs opcionais (2026-09-30) — reaproveitado pelo fluxo de QR de primeiro
-  // acesso (renderFirstAccessQr), que usa ids próprios (firstAccessRocket*)
-  // pra não colidir com os do modal (#rocketFill etc, que continuam
-  // existindo escondidos no DOM enquanto o painel mostra o QR inline).
-  function startRocketAnimation(fillId, iconId, percentId) {
-    clearInterval(rocketTimer);
-    const fillEl = document.getElementById(fillId || 'rocketFill');
-    const iconEl = document.getElementById(iconId || 'rocketIcon');
-    const percentEl = document.getElementById(percentId || 'rocketPercent');
-    let pct = 0;
-    rocketTimer = setInterval(() => {
-      pct = pct >= 100 ? 0 : pct + 2;
-      if (fillEl) fillEl.style.width = pct + '%';
-      if (iconEl) iconEl.style.left = pct + '%';
-      if (percentEl) percentEl.textContent = pct + '%';
-    }, 45);
+  // ---------------- Progresso de pareamento (fases reais) ----------------
+  // 4 fases mapeadas do status real do backend (ver sessions.js/whatsapp.js)
+  // — sempre andam pra frente, nunca reinicia sozinho:
+  //   queued      -> aguardando vaga na fila de pareamento (ver MAX_CONCURRENT_PAIRINGS)
+  //   generating  -> status 'connecting' mas ainda sem QR (gerando)
+  //   waiting_scan-> status 'connecting' com QR pronto (aguardando o celular escanear)
+  //   online      -> conectado
+  const PAIRING_PHASES = [
+    { key: 'queued', pct: 10, label: 'Na fila', caption: 'Muita gente conectando agora — sua vez está chegando…' },
+    { key: 'generating', pct: 35, label: 'Gerando QR', caption: 'Gerando QR Code…' },
+    { key: 'waiting_scan', pct: 65, label: 'Escaneie', caption: 'Escaneie o QR Code com o WhatsApp do celular' },
+    { key: 'online', pct: 100, label: 'Conectado', caption: 'Conectado ✓' },
+  ];
+  function phaseIndex(key) {
+    return PAIRING_PHASES.findIndex((p) => p.key === key);
   }
-
-  function stopRocketAnimation() {
-    clearInterval(rocketTimer);
-    rocketTimer = null;
+  // Deriva a fase a partir de (status, hasQr) — único lugar que traduz o
+  // status cru do backend pra uma das 4 fases acima.
+  function derivePhaseKey(status, hasQr) {
+    if (status === 'online') return 'online';
+    if (status === 'queued') return 'queued';
+    if (hasQr) return 'waiting_scan';
+    return 'generating';
+  }
+  // IDs opcionais (2026-09-30) — reaproveitado pelo fluxo de QR de primeiro
+  // acesso (renderFirstAccessQr), que usa ids próprios (firstAccess*) pra
+  // não colidir com os do modal, que continuam existindo escondidos no DOM
+  // enquanto o painel mostra o QR inline.
+  function renderPairingPhase(phaseKey, ids) {
+    const { fillId, stepsId, captionId } = ids || {};
+    const fillEl = document.getElementById(fillId || 'pairingFill');
+    const stepsEl = document.getElementById(stepsId || 'pairingSteps');
+    const captionEl = document.getElementById(captionId || 'pairingCaption');
+    const idx = phaseIndex(phaseKey);
+    if (idx === -1) return;
+    const phase = PAIRING_PHASES[idx];
+    if (fillEl) fillEl.style.width = phase.pct + '%';
+    if (captionEl) captionEl.textContent = phase.caption;
+    if (stepsEl) {
+      stepsEl.innerHTML = PAIRING_PHASES.map((p, i) => {
+        const cls = i === idx ? 'active' : i < idx ? 'done' : '';
+        return `<span class="pairing-step ${cls}">${escapeHtml(p.label)}</span>`;
+      }).join('');
+    }
+  }
+  function pairingProgressHtml(fillId, stepsId, captionId) {
+    return `
+      <div class="pairing-progress">
+        <div class="pairing-track"><div class="pairing-fill" id="${fillId}"></div></div>
+        <div class="pairing-steps" id="${stepsId}"></div>
+        <p class="pairing-caption" id="${captionId}">Gerando QR Code…</p>
+      </div>
+    `;
   }
 
   // `let` (não `const`) — reatribuídos em rebindPanelRefs() depois que o
@@ -1662,26 +1701,15 @@
     qrModalTitle.textContent = 'Conectar instância';
     qrStatus.textContent = '';
     qrStatus.className = '';
-    // Estrutura fixa: o QR (quando disponível) fica em cima do foguete de
-    // carregamento, que anima continuamente do início ao fim do pareamento —
-    // inclusive depois de escanear, enquanto o WhatsApp confirma a conexão
-    // (fase que antes ficava sem nenhum feedback visual).
-    qrBox.innerHTML = `
-      <div id="qrImageWrap"></div>
-      <div class="loading-rocket">
-        <div class="rocket-track">
-          <div class="rocket-fill" id="rocketFill"></div>
-          <span class="rocket-icon" id="rocketIcon">🚀</span>
-        </div>
-        <p class="rocket-percent" id="rocketPercent">0%</p>
-        <p class="rocket-caption" id="rocketCaption">Gerando QR Code…</p>
-      </div>
-    `;
-    startRocketAnimation();
+    // Estrutura fixa: o QR (quando disponível) fica em cima da barra de
+    // progresso, que reflete a fase REAL do pareamento (ver PAIRING_PHASES)
+    // — inclusive 'queued' (sessão aguardando vaga, ver MAX_CONCURRENT_PAIRINGS
+    // em sessions.js) e o trecho entre escanear e o status virar 'online'
+    // (antes ficava sem nenhum feedback visual).
+    qrBox.innerHTML = `<div id="qrImageWrap"></div>${pairingProgressHtml('pairingFill', 'pairingSteps', 'pairingCaption')}`;
     qrModal.classList.add('open');
 
     const qrImageWrap = document.getElementById('qrImageWrap');
-    const rocketCaption = document.getElementById('rocketCaption');
 
     if (qrPollInterval) clearInterval(qrPollInterval);
     async function poll() {
@@ -1690,8 +1718,8 @@
         const data = await res.json();
 
         if (data.status === 'online') {
-          stopRocketAnimation();
-          qrBox.innerHTML = '<p>Conectado! Você já pode fechar esta janela.</p>';
+          renderPairingPhase('online');
+          qrImageWrap.innerHTML = '';
           qrStatus.textContent = 'Conectado ✓';
           qrStatus.className = 'online';
           clearInterval(qrPollInterval);
@@ -1702,11 +1730,10 @@
 
         if (data.qr) {
           qrImageWrap.innerHTML = `<img src="${data.qr}" alt="QR Code" />`;
-          rocketCaption.textContent = 'Conectando… escaneie o QR Code ou aguarde a confirmação';
         } else {
           qrImageWrap.innerHTML = '';
-          rocketCaption.textContent = 'Gerando QR Code…';
         }
+        renderPairingPhase(derivePhaseKey(data.status, !!data.qr));
         qrStatus.textContent = 'Status: ' + data.status;
       } catch (err) {
         qrStatus.textContent = 'Erro ao carregar QR: ' + err.message;
@@ -1719,7 +1746,6 @@
   document.getElementById('qrModalClose').addEventListener('click', () => {
     qrModal.classList.remove('open');
     if (qrPollInterval) clearInterval(qrPollInterval);
-    stopRocketAnimation();
   });
 
   // ---------------- Renomear ----------------
@@ -2077,21 +2103,12 @@
       <div id="firstAccessQrBox" style="margin:0 auto;max-width:360px;text-align:center;padding:30px 20px;">
         <h2 style="margin-top:0;">Escaneie o QRCode abaixo para conectar seu WhatsApp</h2>
         <div id="firstAccessQrImageWrap"></div>
-        <div class="loading-rocket">
-          <div class="rocket-track">
-            <div class="rocket-fill" id="firstAccessRocketFill"></div>
-            <span class="rocket-icon" id="firstAccessRocketIcon">🚀</span>
-          </div>
-          <p class="rocket-percent" id="firstAccessRocketPercent">0%</p>
-          <p class="rocket-caption" id="firstAccessRocketCaption">Gerando QR Code…</p>
-        </div>
+        ${pairingProgressHtml('firstAccessPairingFill', 'firstAccessPairingSteps', 'firstAccessPairingCaption')}
         <p id="firstAccessQrStatus" style="margin-top:10px;color:var(--text-faint);font-size:13px;"></p>
       </div>
     `;
-    startRocketAnimation('firstAccessRocketFill', 'firstAccessRocketIcon', 'firstAccessRocketPercent');
 
     const qrImageWrap = document.getElementById('firstAccessQrImageWrap');
-    const rocketCaption = document.getElementById('firstAccessRocketCaption');
     const qrStatusEl = document.getElementById('firstAccessQrStatus');
 
     async function poll() {
@@ -2106,6 +2123,7 @@
 
         if (data.status === 'online') {
           clearInterval(firstAccessPollInterval);
+          renderPairingPhase('online', { fillId: 'firstAccessPairingFill', stepsId: 'firstAccessPairingSteps', captionId: 'firstAccessPairingCaption' });
           // Persiste a "Principal" só agora que o pareamento está confirmado
           // — se essa chamada falhar (rede, timeout), o próximo carregamento
           // da página tenta de novo (GET /qr?session=owner já reconectaria
@@ -2130,11 +2148,10 @@
 
         if (data.qr) {
           qrImageWrap.innerHTML = `<img src="${data.qr}" alt="QR Code" />`;
-          rocketCaption.textContent = 'Conectando… escaneie o QR Code ou aguarde a confirmação';
         } else {
           qrImageWrap.innerHTML = '';
-          rocketCaption.textContent = 'Gerando QR Code…';
         }
+        renderPairingPhase(derivePhaseKey(data.status, !!data.qr), { fillId: 'firstAccessPairingFill', stepsId: 'firstAccessPairingSteps', captionId: 'firstAccessPairingCaption' });
         qrStatusEl.textContent = 'Status: ' + data.status;
       } catch (err) {
         qrStatusEl.textContent = 'Erro ao carregar QR: ' + err.message;

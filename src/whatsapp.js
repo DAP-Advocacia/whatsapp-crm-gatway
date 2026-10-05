@@ -29,7 +29,12 @@ const MAX_CONSECUTIVE_FAILURES = Number(process.env.MAX_RECONNECT_ATTEMPTS || 20
  * Encapsula UMA sessão de WhatsApp pessoal (um número).
  * Emite eventos que o resto da aplicação escuta:
  *   'qr'      -> novo QR Code disponível (data URL base64) para exibir na tela de login
- *   'status'  -> 'connecting' | 'online' | 'offline'
+ *   'status'  -> 'queued' | 'connecting' | 'online' | 'offline'
+ *     ('queued' é setado de fora, por SessionManager._enqueuePairing — ver
+ *     sessions.js — quando start() ainda não foi chamado, esperando vaga na
+ *     fila de pareamento. Nunca emitido via this.emit('status', ...) daqui
+ *     de dentro, só lido via getStatus(); o polling do frontend trata
+ *     'queued' como "aguarde, sua vez está chegando", não como erro.)
  *   'message' -> nova mensagem (recebida), já normalizada
  *
  * AVISO: isto usa o protocolo não-oficial do WhatsApp Web (engenharia reversa via Baileys).

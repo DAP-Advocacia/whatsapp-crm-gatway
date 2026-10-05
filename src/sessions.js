@@ -34,6 +34,48 @@ class SessionManager {
     // de sempre. Opcional — WhatsAppGateway já tem um default seguro.
     this.isCardGroup = isCardGroup;
     this.sessions = new Map(); // sessionId -> WhatsAppGateway
+
+    // Fila de pareamento (2026-10-05) — mesma motivação do STAGGER_MS em
+    // startAllExisting() (incidente de 31/07/2026: várias conexões abrindo
+    // no mesmo instante parecem login em massa pro WhatsApp, que reage
+    // deslogando sessões), mas cobrindo o OUTRO caminho que dispara
+    // start(): alguém abrindo a tela de Conexões pela primeira vez (GET
+    // /qr -> este get()). Sem fila aqui, uma campanha avisando "conecte
+    // seu WhatsApp" fazia dezenas de pessoas chegarem nesta rota ao mesmo
+    // tempo, cada uma disparando um handshake Noise + sync de histórico
+    // simultâneo — saturava o único core do event loop e deixava até telas
+    // sem relação nenhuma (Chat de quem já estava conectado) lentas.
+    //
+    // `get()` continua SÍNCRONO e retornando o gateway na hora — o
+    // polling do frontend (GET /qr a cada 2.5s) depende de já existir um
+    // objeto com getStatus()/getLastQr() desde a primeira chamada. O que
+    // fica na fila é só a CHAMADA de start() (o trabalho pesado de
+    // verdade); enquanto espera vaga, gateway.getStatus() devolve
+    // 'queued' (ver WhatsAppGateway, novo status só pra isso).
+    this.pairingQueue = [];
+    this.activePairings = 0;
+    this.maxConcurrentPairings = Number(process.env.MAX_CONCURRENT_PAIRINGS || 4);
+  }
+
+  _runPairingQueue() {
+    while (this.activePairings < this.maxConcurrentPairings && this.pairingQueue.length) {
+      const gateway = this.pairingQueue.shift();
+      this.activePairings++;
+      gateway.status = 'connecting'; // sai de 'queued' assim que o start() real começa
+      gateway
+        .start()
+        .catch((err) => console.error(`[whatsapp:${gateway.sessionId}] falha ao iniciar sessão:`, err.message))
+        .finally(() => {
+          this.activePairings--;
+          this._runPairingQueue();
+        });
+    }
+  }
+
+  _enqueuePairing(gateway) {
+    gateway.status = 'queued';
+    this.pairingQueue.push(gateway);
+    this._runPairingQueue();
   }
 
   /**
@@ -67,9 +109,7 @@ class SessionManager {
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
     gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));
-    gateway.start().catch((err) =>
-      console.error(`[whatsapp:${id}] falha ao iniciar sessão:`, err.message)
-    );
+    this._enqueuePairing(gateway);
 
     this.sessions.set(id, gateway);
     return gateway;
