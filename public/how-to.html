@@ -624,6 +624,24 @@
     display: block; width: 100%; max-width: 720px; border-radius: 10px;
     border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0,0,0,.28);
   }
+  .howto-shot-placeholder{
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; max-width: 720px; min-height: 140px; border-radius: 10px;
+    border: 1.5px dashed var(--border); background: var(--surface-2);
+    color: var(--text-faint); font-size: 12px; text-align: center; padding: 16px;
+  }
+  .howto-tour-cta{
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap; background: rgba(var(--gold-rgb),.08); border: 1px solid rgba(var(--gold-rgb),.3);
+    border-radius: var(--radius); padding: 16px 20px; margin: 0 0 22px;
+  }
+  .howto-tour-cta-text h3{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 14.5px; margin: 0 0 4px; color: var(--text); }
+  .howto-tour-cta-text p{ font-size: 12.5px; color: var(--text-muted); margin: 0; max-width: 480px; line-height: 1.5; }
+  .howto-section-group-title{
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-faint); margin: 26px 0 2px; padding-top: 4px;
+  }
+  .howto-section-group-title:first-of-type{ margin-top: 0; }
 </style>
 </head>
 <body>
@@ -740,7 +758,17 @@
 
 <div id="app">
   <h1>Como usar</h1>
-  <p class="subtitle">Um passo a passo rápido pra quem está começando agora — o essencial pra conectar seu WhatsApp e usar o dia a dia.</p>
+  <p class="subtitle">Um passo a passo rápido pra quem está começando agora — o essencial pra conectar seu WhatsApp e usar o dia a dia, com mais detalhe sobre cada recurso logo abaixo.</p>
+
+  <div class="howto-tour-cta">
+    <div class="howto-tour-cta-text">
+      <h3>Prefere aprender clicando?</h3>
+      <p>O tour guiado abre o Chat e vai te mostrando cada parte da tela, uma de cada vez, com um botão "Próximo" — sem precisar ler tudo aqui antes.</p>
+    </div>
+    <a href="/chat.html?tour=1" class="btn">Iniciar tour guiado no Chat</a>
+  </div>
+
+  <div class="howto-section-group-title">Primeiros passos</div>
 
   <div class="howto-section">
     <div class="howto-step-num">1</div>
@@ -786,6 +814,45 @@
       <h2>Acompanhe os números em Análises</h2>
       <p>A tela <strong>Análises</strong> mostra quantas conversas estão ativas, mensagens enviadas/recebidas, taxa de resposta e o andamento do dia — inclusive um resumo gerado por IA destacando o que merece atenção.</p>
       <img class="howto-shot" src="/assets/tutorial/03-analises.png" alt="Tela de Análises, com KPIs e gráfico de atividade de mensagens">
+    </div>
+  </div>
+
+  <div class="howto-section-group-title">Recursos do Chat em detalhe</div>
+
+  <div class="howto-section">
+    <div class="howto-step-num">6</div>
+    <div class="howto-step-body">
+      <h2>Comece uma conversa com um número novo</h2>
+      <p>Clique no ícone de <strong>lápis ("Nova conversa")</strong> no topo da lista de conversas, escolha a conexão de WhatsApp e digite o número do telefone — funciona mesmo que esse número nunca tenha conversado com você antes, ou não esteja salvo em nenhum contato/negócio do Bitrix. É o mesmo comportamento do "Nova conversa" do WhatsApp Web.</p>
+      <p class="howto-hint">Conversas iniciadas assim não ficam automaticamente vinculadas a nenhum negócio ou contato do Bitrix — é só uma conversa solta, como no WhatsApp Web.</p>
+      <div class="howto-shot-placeholder" data-howto-pending="06-nova-conversa">Print pendente — botão "Nova conversa" e o modal de novo número</div>
+    </div>
+  </div>
+
+  <div class="howto-section">
+    <div class="howto-step-num">7</div>
+    <div class="howto-step-body">
+      <h2>Grave e envie áudio</h2>
+      <p>Clique no ícone de microfone no campo de mensagem pra começar a gravar — uma barra de gravação aparece mostrando que está gravando, com a duração em tempo real. Você escolhe entre <strong>enviar</strong> (ícone de seta) ou <strong>cancelar</strong> (ícone de lixeira) antes de mandar, nada é enviado sem essa confirmação.</p>
+      <div class="howto-shot-placeholder" data-howto-pending="07-gravacao-audio">Print pendente — barra de gravação de áudio com os botões de enviar/cancelar</div>
+    </div>
+  </div>
+
+  <div class="howto-section">
+    <div class="howto-step-num">8</div>
+    <div class="howto-step-body">
+      <h2>Responda e reaja a mensagens</h2>
+      <p>Passe o mouse sobre qualquer mensagem pra ver as opções de <strong>responder</strong> (cita a mensagem original, como no WhatsApp) e <strong>reagir</strong> com emoji. Dá pra enviar foto, vídeo e documento clicando no clipe ao lado do campo de mensagem.</p>
+      <div class="howto-shot-placeholder" data-howto-pending="08-resposta-reacao">Print pendente — mensagem com resposta citada e reação de emoji</div>
+    </div>
+  </div>
+
+  <div class="howto-section">
+    <div class="howto-step-num">9</div>
+    <div class="howto-step-body">
+      <h2>Organize com tags e grupos</h2>
+      <p>Use o filtro de <strong>tags</strong> no topo da lista pra marcar e separar conversas por assunto/status. O botão de <strong>Grupos do WhatsApp</strong> mostra todos os grupos daquela conexão, e dá pra criar um grupo novo direto por ali.</p>
+      <div class="howto-shot-placeholder" data-howto-pending="09-tags-grupos">Print pendente — filtro de tags e modal de Grupos do WhatsApp</div>
     </div>
   </div>
 

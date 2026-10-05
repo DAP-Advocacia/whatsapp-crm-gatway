@@ -592,6 +592,43 @@
      .nav-item/.theme-toggle-item já existentes (mesmo visual do botão
      de tema logo acima) — sem classe própria nova. */
 
+  /* ---------- Tour guiado do Chat (2026-10-05) ----------
+     Só manual (nunca auto-abre) — iniciado pelo botão "Iniciar tour
+     guiado" na sidebar OU por /chat.html?tour=1 (link vindo da página
+     "Como usar?"). TOUR_STEPS (JS mais abaixo) define a sequência; cada
+     passo recorta um "buraco" de luz (spotlight) no overlay escuro sobre
+     o elemento-alvo via box-shadow gigante (técnica clássica sem precisar
+     de canvas/SVG), e posiciona o tooltip ao lado. Overlay translúcido
+     (não bloqueia clique) — navegação é só "Próximo"/"Anterior"/"Sair",
+     nunca precisa clicar no elemento de verdade por baixo. */
+  .tour-overlay{
+    position: fixed; inset: 0; z-index: 200; display: none;
+    background: rgba(0,0,0,.001); /* captura cliques fora do tooltip sem escurecer a tela inteira (o spotlight já cuida do contraste) */
+  }
+  .tour-overlay.open{ display: block; }
+  .tour-spotlight{
+    position: fixed; border-radius: 12px; pointer-events: none;
+    box-shadow: 0 0 0 9999px rgba(10,10,12,.62);
+    transition: top .25s ease, left .25s ease, width .25s ease, height .25s ease;
+    z-index: 201;
+  }
+  .tour-tooltip{
+    position: fixed; z-index: 202; width: 290px; max-width: calc(100vw - 32px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px; box-shadow: 0 14px 36px rgba(0,0,0,.4);
+    transition: top .25s ease, left .25s ease;
+  }
+  .tour-tooltip-step{ font-size: 11px; font-weight: 600; color: var(--gold); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
+  .tour-tooltip-title{ font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin: 0 0 6px; color: var(--text); }
+  .tour-tooltip-desc{ font-size: 12.5px; line-height: 1.55; color: var(--text-muted); margin: 0 0 14px; }
+  .tour-tooltip-actions{ display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .tour-tooltip-dots{ display: flex; gap: 5px; }
+  .tour-tooltip-dots span{ width: 6px; height: 6px; border-radius: 50%; background: var(--border); }
+  .tour-tooltip-dots span.active{ background: var(--gold); }
+  .tour-tooltip-nav{ display: flex; gap: 6px; }
+  .tour-tooltip-skip{ font-size: 11.5px; color: var(--text-faint); background: none; border: none; cursor: pointer; padding: 4px; }
+  .tour-tooltip-skip:hover{ color: var(--text-muted); }
+
   .conv-list{ flex:1; overflow-y:auto; min-height:0; }
   .conv-list::-webkit-scrollbar{ width: 8px; }
   .conv-list::-webkit-scrollbar-thumb{ background: var(--border); border-radius: 4px; }
@@ -1550,6 +1587,12 @@
     <span class="nav-tip">Atalhos e recursos</span>
   </button>
 
+  <button type="button" id="tourStartBtn" class="nav-item theme-toggle-item">
+    <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M4 20h2"/><path d="M4 16h4"/><path d="M4 12h2"/><circle cx="14" cy="8" r="4"/></svg></span>
+    <span class="nav-label">Iniciar tour guiado</span>
+    <span class="nav-tip">Iniciar tour guiado</span>
+  </button>
+
   <a href="/how-to.html" class="nav-item theme-toggle-item">
     <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10 8.5v7l6-3.5-6-3.5Z" fill="currentColor" stroke="none"/></svg></span>
     <span class="nav-label">Como usar?</span>
@@ -1632,6 +1675,23 @@
 <div class="image-lightbox" id="imageLightbox">
   <button type="button" class="image-lightbox-close" id="imageLightboxClose">&times;</button>
   <img id="imageLightboxImg" alt="imagem em tamanho grande" />
+</div>
+
+<div class="tour-overlay" id="tourOverlay">
+  <div class="tour-spotlight" id="tourSpotlight"></div>
+  <div class="tour-tooltip" id="tourTooltip">
+    <div class="tour-tooltip-step" id="tourStepLabel"></div>
+    <h4 class="tour-tooltip-title" id="tourStepTitle"></h4>
+    <p class="tour-tooltip-desc" id="tourStepDesc"></p>
+    <div class="tour-tooltip-actions">
+      <div class="tour-tooltip-dots" id="tourDots"></div>
+      <div class="tour-tooltip-nav">
+        <button type="button" class="btn secondary" id="tourPrevBtn">Anterior</button>
+        <button type="button" class="btn" id="tourNextBtn">Próximo</button>
+      </div>
+    </div>
+    <button type="button" class="tour-tooltip-skip" id="tourSkipBtn">Sair do tour</button>
+  </div>
 </div>
 
 <div class="overlay shortcuts-modal" id="shortcutsModal">
@@ -1925,6 +1985,190 @@
     }
   }
   bindShortcutsModal();
+
+  // Tour guiado do Chat (2026-10-05, pedido do usuário — pessoal leigo em
+  // tecnologia, quer um passo-a-passo "ao vivo" apontando pra cada parte
+  // da tela em vez de só texto estático na página "Como usar"). Só manual:
+  // nunca abre sozinho. Dois gatilhos: botão "Iniciar tour guiado" na
+  // sidebar (#tourStartBtn) e ?tour=1 na URL (link vindo de how-to.html).
+  // Cada passo aponta um seletor CSS real da tela — se o elemento não
+  // existir no momento (ex: tela muito estreita escondeu a sidebar, ou
+  // ainda carregando instâncias), o passo é pulado silenciosamente em vez
+  // de travar o tour num spotlight vazio.
+  (function bindGuidedTour() {
+    var TOUR_STEPS = [
+      {
+        selector: '#instanceSelect',
+        title: 'Escolha o número de WhatsApp',
+        desc: 'Se você tiver mais de um número conectado, escolha aqui qual conversa quer ver. Com só um número conectado, ele já vem selecionado sozinho.',
+      },
+      {
+        selector: '#convSearch',
+        title: 'Busque uma conversa',
+        desc: 'Digite o nome ou telefone do contato pra encontrar a conversa rapidamente, sem precisar rolar a lista toda.',
+      },
+      {
+        selector: '.archive-filter',
+        title: 'Ativas e Arquivadas',
+        desc: '"Ativas" mostra as conversas do dia a dia. Quando um atendimento termina, você pode arquivar — ele some daqui, mas fica guardado em "Arquivadas" pra consultar depois.',
+      },
+      {
+        selector: '#pendingFilterBtn',
+        title: 'Veja só o que falta responder',
+        desc: 'Este filtro mostra só as conversas com mensagem nova que ainda não foi lida — útil pra não deixar ninguém esperando.',
+      },
+      {
+        selector: '#newChatBtn',
+        title: 'Inicie uma conversa nova',
+        desc: 'Clique aqui pra começar uma conversa com um número de telefone, mesmo que ele ainda não tenha conversado com você antes — igual no WhatsApp Web.',
+      },
+      {
+        selector: '.conv-item, .conv-list',
+        title: 'Abra uma conversa',
+        desc: 'Clique em qualquer conversa da lista pra abri-la aqui do lado e ver o histórico completo de mensagens.',
+      },
+      {
+        selector: '#composerReply',
+        title: 'Responda o cliente',
+        desc: 'Digite sua mensagem aqui embaixo e envie. Dá pra mandar texto, áudio, foto, documento e até reagir às mensagens com emoji.',
+        before: openFirstConversationIfNone,
+      },
+      {
+        selector: '#composerTabs, .composer-tabs',
+        title: 'Nota interna',
+        desc: 'Use a aba "Nota interna" pra deixar um recado só pra equipe sobre aquele atendimento — o cliente nunca vê essa mensagem.',
+        before: openFirstConversationIfNone,
+      },
+    ];
+
+    // Os passos do composer (#composerReply, #composerTabs) só existem no
+    // DOM depois que uma conversa é aberta (ver renderConvView) — na
+    // primeira visita ao Chat nenhuma conversa está aberta ainda, então
+    // esses elementos nem existem e o tour "sumia" sem avisar (parava
+    // sempre no passo 6, antes deles). Abre a 1ª conversa da lista sozinho
+    // pra garantir que o composer exista quando o tour chegar lá.
+    function openFirstConversationIfNone() {
+      if (document.getElementById('composerReply')) return;
+      var firstConv = document.querySelector('.conv-item:not(.conv-item--dapinho)') || document.querySelector('.conv-item');
+      if (firstConv) firstConv.click();
+    }
+
+    var overlay = document.getElementById('tourOverlay');
+    var spotlight = document.getElementById('tourSpotlight');
+    var tooltip = document.getElementById('tourTooltip');
+    var stepLabel = document.getElementById('tourStepLabel');
+    var stepTitle = document.getElementById('tourStepTitle');
+    var stepDesc = document.getElementById('tourStepDesc');
+    var dotsEl = document.getElementById('tourDots');
+    var prevBtn = document.getElementById('tourPrevBtn');
+    var nextBtn = document.getElementById('tourNextBtn');
+    var skipBtn = document.getElementById('tourSkipBtn');
+    var startBtn = document.getElementById('tourStartBtn');
+    if (!overlay || !spotlight || !tooltip) return;
+
+    var current = -1;
+    var resizeHandler = null;
+
+    function findStepEl(step) {
+      var selectors = step.selector.split(',');
+      for (var i = 0; i < selectors.length; i++) {
+        var el = document.querySelector(selectors[i].trim());
+        if (el && el.offsetParent !== null) return el;
+      }
+      return null;
+    }
+
+    function renderDots() {
+      dotsEl.innerHTML = TOUR_STEPS.map(function (_, i) {
+        return '<span class="' + (i === current ? 'active' : '') + '"></span>';
+      }).join('');
+    }
+
+    function positionFor(el) {
+      var rect = el.getBoundingClientRect();
+      var pad = 6;
+      spotlight.style.top = (rect.top - pad) + 'px';
+      spotlight.style.left = (rect.left - pad) + 'px';
+      spotlight.style.width = (rect.width + pad * 2) + 'px';
+      spotlight.style.height = (rect.height + pad * 2) + 'px';
+
+      var tw = 290, th = tooltip.offsetHeight || 170;
+      var spaceRight = window.innerWidth - rect.right;
+      var left;
+      if (spaceRight > tw + 24) left = rect.right + 14;
+      else if (rect.left > tw + 24) left = rect.left - tw - 14;
+      else left = Math.max(16, Math.min(window.innerWidth - tw - 16, rect.left));
+      var top = Math.max(16, Math.min(window.innerHeight - th - 16, rect.top));
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+    }
+
+    function showStep(index, dir) {
+      dir = dir || (index >= current ? 1 : -1);
+      if (index < 0) { endTour(); return; }
+      if (index >= TOUR_STEPS.length) { endTour(); return; }
+      var step = TOUR_STEPS[index];
+      if (step.before) step.before();
+      // O "before" pode abrir uma conversa (clique assíncrono que dispara
+      // render) — espera um instante pro DOM do composer aparecer antes de
+      // procurar o elemento-alvo, senão cairia sempre no "pula" abaixo.
+      setTimeout(function () {
+        var el = findStepEl(step);
+        if (!el) {
+          // Elemento não disponível agora (ex: tela estreita escondeu a
+          // sidebar, ou não há nenhuma conversa pra abrir) — pula na mesma
+          // direção em vez de travar o tour.
+          showStep(index + dir, dir);
+          return;
+        }
+        current = index;
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        stepLabel.textContent = 'Passo ' + (index + 1) + ' de ' + TOUR_STEPS.length;
+        stepTitle.textContent = step.title;
+        stepDesc.textContent = step.desc;
+        renderDots();
+        prevBtn.style.visibility = index === 0 ? 'hidden' : 'visible';
+        nextBtn.textContent = index === TOUR_STEPS.length - 1 ? 'Concluir' : 'Próximo';
+        requestAnimationFrame(function () { positionFor(el); });
+      }, step.before ? 350 : 0);
+    }
+
+    function startTour() {
+      overlay.classList.add('open');
+      current = -1;
+      showStep(0);
+      resizeHandler = function () {
+        if (current < 0) return;
+        var el = findStepEl(TOUR_STEPS[current]);
+        if (el) positionFor(el);
+      };
+      window.addEventListener('resize', resizeHandler);
+      window.addEventListener('scroll', resizeHandler, true);
+    }
+
+    function endTour() {
+      overlay.classList.remove('open');
+      current = -1;
+      if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler);
+        window.removeEventListener('scroll', resizeHandler, true);
+        resizeHandler = null;
+      }
+    }
+
+    if (startBtn) startBtn.addEventListener('click', startTour);
+    if (nextBtn) nextBtn.addEventListener('click', function () { showStep(current + 1); });
+    if (prevBtn) prevBtn.addEventListener('click', function () { showStep(current - 1); });
+    if (skipBtn) skipBtn.addEventListener('click', endTour);
+
+    // Gatilho por URL (?tour=1), vindo do botão em how-to.html — espera um
+    // instante pro resto da tela (instâncias, conversas) terminar de
+    // carregar antes de abrir, senão vários passos cairiam no "pula
+    // silenciosamente" por o elemento ainda não existir.
+    if (new URLSearchParams(window.location.search).get('tour') === '1') {
+      setTimeout(startTour, 900);
+    }
+  })();
 
   // Tooltip customizado compartilhado (ver .app-tooltip no CSS) — 1º
   // elemento criado sob demanda, reaproveitado pra qualquer
