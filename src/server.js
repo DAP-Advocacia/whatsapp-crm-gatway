@@ -55,6 +55,7 @@ const { assertOwnsSession, isDapinhoSession } = require('./authz');
 const instancesStore = require('./instances');
 const instanceHealthStore = require('./instanceHealthStore');
 const agentDispatch = require('./agentDispatch');
+const campaignTrafficTrigger = require('./campaignTrafficTrigger');
 const agentRetryWorker = require('./agentRetryWorker');
 const insightGenerator = require('./insightGenerator');
 const dapinho = require('./dapinho');
@@ -618,6 +619,12 @@ const sessions = new SessionManager({
             mimetype: message.mimetype || null,
             waMessageId: message.id,
           }).catch((err) => console.error('[agent] falha ao processar lead novo:', err.message));
+
+          // Campanha de tráfego pago do Dr. Adriano — uma única instância
+          // (ver src/campaignTrafficTrigger.js), independente do Agente de
+          // IA acima. Já é fire-and-forget por dentro (não retorna
+          // promise), por isso sem .catch aqui.
+          campaignTrafficTrigger.handleNewAdrianoLead({ sessionId, phone, pushName });
         }
 
         // Copiloto Comercial — insights de IA em tempo real, só em

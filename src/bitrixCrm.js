@@ -62,11 +62,16 @@ async function ensureBitrixContact({ name, phone }) {
   return created ? Number(created) : null;
 }
 
-async function createDealForLead({ categoryId, contactId, assignedById, title, sourceDescription }) {
+// `extraFields` (opcional) mescla campos extras direto no fields do
+// crm.deal.add — usado hoje só por createDealForAdrianoCampaign, pra
+// preencher o campo de origem (UF_CRM_*) sem duplicar toda a função só
+// por causa de 1 campo a mais.
+async function createDealForLead({ categoryId, contactId, assignedById, title, sourceDescription, extraFields = {} }) {
   const fields = {
     TITLE: title,
     SOURCE_ID: 'WEB',
     SOURCE_DESCRIPTION: sourceDescription,
+    ...extraFields,
   };
   if (categoryId != null) fields.CATEGORY_ID = categoryId;
   if (contactId) fields.CONTACT_ID = contactId;
@@ -128,6 +133,46 @@ async function createDealForNewLead({ ownerId, phone, pushName, origin }) {
         sourceDescription,
       })
     : null;
+
+  return { contactId, dealId };
+}
+
+// Negócio automático pra campanha de tráfego pago do Dr. Adriano — UMA
+// única instância de WhatsApp (ver ADRIANO_CAMPAIGN_SESSION_ID em
+// src/campaignTrafficTrigger.js, que decide QUANDO chamar isto), pipeline
+// e campo de origem próprios. Diferente de createDealForNewLead acima,
+// NÃO depende de agent_config.active — dispara pra toda conversa nova
+// nessa instância, com ou sem Agente de IA ligado (pedido explícito do
+// usuário, 2026-10-09).
+//
+// categoryId 536 = "[CAMPANHAS] BLINDAGEM FINANCEIRA (LP + WhatsApp)".
+// Campo "[MKT] FUNIL DE ORIGEM" (enumeração) — item "WHATSAPP ADRIANO",
+// IDs confirmados via crm.crm.fields (MCP Bitrix) em 2026-10-09. Se o
+// campo ou o item da lista forem recriados no Bitrix (não só renomeados —
+// renomear mantém o ID), estes valores precisam ser atualizados aqui;
+// não dá pra resolver pelo nome em runtime sem um round-trip extra a
+// cada negócio criado.
+const ADRIANO_CAMPAIGN_CATEGORY_ID = 536;
+const ADRIANO_CAMPAIGN_ORIGIN_FIELD = 'UF_CRM_1779394786511';
+const ADRIANO_CAMPAIGN_ORIGIN_VALUE = 9445;
+
+async function createDealForAdrianoCampaign({ ownerId, phone, pushName }) {
+  const assignedById = (ownerId || '').split('_').pop() || null;
+  // "- WHATSAPP ADRIANO" como sufixo (confirmado com o usuário) — nome do
+  // contato primeiro, cai de volta pro telefone se o WhatsApp não mandou
+  // pushName (mesmo fallback de ensureBitrixContact logo abaixo).
+  const title = `${pushName || phone} - WHATSAPP ADRIANO`;
+
+  const contactId = await ensureBitrixContact({ name: pushName, phone });
+
+  const dealId = await createDealForLead({
+    categoryId: ADRIANO_CAMPAIGN_CATEGORY_ID,
+    contactId,
+    assignedById,
+    title,
+    sourceDescription: 'Campanha de tráfego pago — WhatsApp Dr. Adriano',
+    extraFields: { [ADRIANO_CAMPAIGN_ORIGIN_FIELD]: ADRIANO_CAMPAIGN_ORIGIN_VALUE },
+  });
 
   return { contactId, dealId };
 }
@@ -243,6 +288,7 @@ module.exports = {
   createDealForLead,
   createBitrixArtifactsForLead,
   createDealForNewLead,
+  createDealForAdrianoCampaign,
   getStageDistribution,
   listDealStages,
   getWonStageId,
