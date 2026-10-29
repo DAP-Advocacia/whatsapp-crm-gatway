@@ -424,7 +424,41 @@ function normalizeBrazilPhone(raw) {
   return digits.length <= 11 ? `55${digits}` : digits;
 }
 
+// Lista plana de departamentos (id, nome, pai) — alimenta o seletor de
+// "Compartilhar por departamento" no Admin. null se o webhook de RH não
+// estiver configurado/falhar (mesmo contrato de listEmployees).
+async function listDepartments() {
+  const departments = await callBitrixHRAll('department.get');
+  if (!departments) return null;
+  return departments.map((d) => ({
+    id: String(d.ID),
+    name: d.NAME || `Departamento ${d.ID}`,
+    parent: d.PARENT ? String(d.PARENT) : null,
+  }));
+}
+
+// Funcionários ativos lotados em `departmentId` e, se `includeSubdepartments`,
+// em qualquer sub-departamento dele (cascata, mesma collectDeptSubtree da
+// hierarquia). Consulta o Bitrix na hora (ação manual e rara do admin, sem
+// cache). null se o Bitrix não respondeu.
+async function listEmployeesInDepartment(departmentId, includeSubdepartments) {
+  const [departments, employees] = await Promise.all([
+    callBitrixHRAll('department.get'),
+    listEmployees(),
+  ]);
+  if (!departments || !employees) return null;
+  const { childrenByDept } = buildDepartmentMaps(departments);
+  const deptId = String(departmentId);
+  const deptIds = includeSubdepartments ? collectDeptSubtree(deptId, childrenByDept) : new Set([deptId]);
+  return {
+    departmentIds: [...deptIds],
+    employees: employees.filter((e) => e.departmentIds.some((id) => deptIds.has(id))),
+  };
+}
+
 module.exports = {
+  listDepartments,
+  listEmployeesInDepartment,
   getSubordinates,
   getResponsibleChain,
   ensureHierarchyCacheFresh,

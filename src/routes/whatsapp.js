@@ -14,7 +14,7 @@ const instanceBanStore = require('../instanceBanStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
-const { getSubordinates, listEmployees, listEmployeesWithDepartment } = require('../bitrixHierarchy');
+const { getSubordinates, listEmployees, listEmployeesWithDepartment, listDepartments, listEmployeesInDepartment } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 const presence = require('../presence');
 const pageSessions = require('../pageSessions');
@@ -609,6 +609,82 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[admin:instances:delegates] erro:', err.message);
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Compartilhar por departamento (admin) — em vez de compartilhar instância
+  // por instância, concede a UMA pessoa (ex: gestora) acesso às instâncias
+  // de todos os colaboradores de um departamento, opcionalmente com os
+  // sub-departamentos em cascata. NÃO é automático: é uma ação manual do
+  // super admin que grava em instance_delegates (mesma tabela do
+  // compartilhamento individual, removível um a um) e vale como um retrato
+  // do momento — quem entrar no departamento depois não é incluído até o
+  // admin rodar de novo (idempotente). `dryRun` só conta, não grava.
+  // ---------------------------------------------------------------
+  router.get('/admin/departments', requireSuperAdmin, async (req, res) => {
+    try {
+      const departments = await listDepartments();
+      if (departments === null) return res.json({ departments: [], hrConfigured: false });
+      res.json({ departments, hrConfigured: true });
+    } catch (err) {
+      console.error('[admin:departments] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  async function resolveDepartmentTargets(body) {
+    const { delegateOwnerId, departmentId, includeSubdepartments } = body || {};
+    if (!delegateOwnerId || !departmentId) {
+      const e = new Error('delegateOwnerId e departmentId são obrigatórios');
+      e.status = 400;
+      throw e;
+    }
+    const found = await listEmployeesInDepartment(departmentId, !!includeSubdepartments);
+    if (!found) {
+      const e = new Error('não foi possível consultar os departamentos no Bitrix');
+      e.status = 502;
+      throw e;
+    }
+    const ownerIds = found.employees.map((emp) => ownerIdFor(emp.id)).filter((id) => id !== delegateOwnerId);
+    const instances = await instancesStore.listByOwners(ownerIds);
+    return {
+      delegateOwnerId,
+      departmentCount: found.departmentIds.length,
+      peopleCount: found.employees.length,
+      ownersWithInstances: new Set(instances.map((i) => i.ownerId)).size,
+      instanceIds: instances.map((i) => i.id),
+    };
+  }
+
+  router.post('/admin/department-grants', requireSuperAdmin, async (req, res) => {
+    try {
+      const t = await resolveDepartmentTargets(req.body);
+      const summary = {
+        departmentCount: t.departmentCount,
+        peopleCount: t.peopleCount,
+        ownersWithInstances: t.ownersWithInstances,
+        instanceCount: t.instanceIds.length,
+      };
+      if (req.body.dryRun) return res.json({ dryRun: true, ...summary });
+      await instancesStore.addDelegatesBulkAsAdmin(t.instanceIds, t.delegateOwnerId, req.body.delegateName);
+      console.log(`[admin:department-grants] ${req.ownerId} concedeu ${t.instanceIds.length} instância(s) do depto ${req.body.departmentId} a ${t.delegateOwnerId}`);
+      res.json({ ok: true, ...summary });
+    } catch (err) {
+      console.error('[admin:department-grants] erro:', err.message);
+      res.status(err.status || 400).json({ error: err.message });
+    }
+  });
+
+  router.post('/admin/department-grants/revoke', requireSuperAdmin, async (req, res) => {
+    try {
+      const t = await resolveDepartmentTargets(req.body);
+      const removed = await instancesStore.removeDelegatesBulkAsAdmin(t.instanceIds, t.delegateOwnerId);
+      console.log(`[admin:department-grants] ${req.ownerId} revogou ${removed} compartilhamento(s) do depto ${req.body.departmentId} de ${t.delegateOwnerId}`);
+      res.json({ ok: true, removed });
+    } catch (err) {
+      console.error('[admin:department-grants] erro:', err.message);
+      res.status(err.status || 400).json({ error: err.message });
     }
   });
 

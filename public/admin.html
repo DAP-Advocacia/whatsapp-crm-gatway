@@ -622,8 +622,12 @@
   /* Modal "Compartilhar instância" (2026-10-01) — mesmo padrão visual de
      campo rotulado já usado no resto do Admin (.field-label acima), só
      generalizado pra fora do grid de detalhe do Bitrix. */
+  #shareDeptModal .field,
   #shareInstanceModal .field{ margin-bottom:14px; }
+  #shareDeptModal .field-label,
   #shareInstanceModal .field-label{ display:block; color:var(--text-faint); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:5px; }
+  #shareDeptModal select,
+  #shareDeptModal input[type="text"],
   #shareInstanceModal select,
   #shareInstanceModal input[type="text"]{
     width:100%; background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
@@ -797,11 +801,11 @@
     <button type="button" data-admin-tab="dapinho">Dapinho</button>
     <button type="button" data-admin-tab="sugestoes">Sugestões</button>
     <button type="button" data-admin-tab="satisfacao">Pesquisa de Satisfação</button>
+    <button type="button" data-admin-tab="api">API</button>
   </div>
 
   <div id="adminTab-visao-geral" class="admin-tab-content">
     <div class="metric-cards">
-    <button type="button" data-admin-tab="api">API</button>
       <div class="metric-card">
         <div class="metric-label">Online agora</div>
         <div class="metric-value online-dot" id="metricOnlineNow">—</div>
@@ -838,7 +842,8 @@
   <div class="panel">
     <h2>Usuários <span class="panel-count" id="usersCount">—</span></h2>
     <p class="panel-hint">Cadastro do Bitrix cruzado com uso real do app — inclusive quem nunca abriu nada ainda. "Revogar" bloqueia o acesso ao app inteiro, verificado na hora (não precisa esperar o token expirar).</p>
-    <input type="search" id="usersSearch" placeholder="Buscar por nome, e-mail ou cargo…" style="margin-bottom:12px">
+    <div style="margin-bottom:12px"><button class="btn secondary" id="shareDeptOpenBtn" type="button">Compartilhar por departamento</button></div>
+    <input type="search" id="usersSearch"placeholder="Buscar por nome, e-mail ou cargo…" style="margin-bottom:12px">
     <div class="users-filters">
       <select id="usersFilterStatus">
         <option value="">Status: todos</option>
@@ -1011,6 +1016,35 @@
        compartilhar com QUALQUER outro usuário, sem depender da hierarquia
        do Bitrix (pedido do usuário — a árvore às vezes está incorreta).
        Busca local em usersRows (já carregado), sem BX24.callMethod. -->
+  <div id="shareDeptModal" class="overlay">
+    <div class="modal">
+      <h3>Compartilhar por departamento</h3>
+      <p class="panel-hint">Dá a uma pessoa acesso às instâncias de WhatsApp de todos os colaboradores de um departamento. É uma ação manual e vale para quem está no departamento agora — quem entrar depois só é incluído se você repetir. Cada compartilhamento pode ser removido depois em "Compartilhar instância".</p>
+      <div class="field">
+        <label class="field-label">Quem vai ganhar acesso</label>
+        <input type="text" id="shareDeptPersonInput" placeholder="Buscar colaborador pelo nome ou e-mail…">
+        <div id="shareDeptPersonResults" class="delegate-search-results"></div>
+        <div id="shareDeptPersonPicked" style="margin-top:6px;font-size:13px;color:var(--text)"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">Departamento</label>
+        <input type="text" id="shareDeptFilterInput" placeholder="Filtrar departamentos (ex: precatório)…">
+        <select id="shareDeptSelect" size="6" style="margin-top:6px"></select>
+      </div>
+      <div class="field">
+        <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text)">
+          <input type="checkbox" id="shareDeptCascade" checked> Incluir subdepartamentos (em cascata)
+        </label>
+      </div>
+      <div id="shareDeptPreview" class="panel-hint" style="min-height:20px"></div>
+      <div class="modal-actions">
+        <button class="btn secondary" id="shareDeptClose" type="button">Fechar</button>
+        <button class="btn secondary" id="shareDeptRevoke" type="button" disabled>Remover acesso</button>
+        <button class="btn" id="shareDeptApply" type="button" disabled>Compartilhar</button>
+      </div>
+    </div>
+  </div>
+
   <div id="shareInstanceModal" class="overlay">
     <div class="modal">
       <h3>Compartilhar instância</h3>
@@ -1028,6 +1062,25 @@
         <button class="btn secondary" id="shareInstanceClose">Fechar</button>
       </div>
     </div>
+  </div>
+
+  <div id="adminTab-api" class="admin-tab-content" style="display:none">
+  <div class="panel">
+    <h2>API</h2>
+    <p class="panel-hint">Gere um token de API (válido por 90 dias) pra puxar dados por fora do navegador — scripts, Power Query ou outra aplicação. Ele herda as permissões de super admin desta conta, então guarde como segredo. Gerar um novo não invalida os anteriores. Visível só pra você.</p>
+    <p class="panel-hint">Exemplo — lista de números conectados por colaborador: <code>GET /api/whatsapp/admin/instances</code> com o header <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" id="genTokenBtn">Gerar novo token</button>
+      <a href="/api-docs" target="_blank" rel="noopener" class="btn secondary">Ver documentação da API</a>
+    </div>
+    <div id="tokenResult" style="display:none;margin-top:16px;">
+      <label class="field-label">Token gerado — copie agora, não é possível ver de novo depois (válido até <span id="tokenExpiry"></span>)</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="tokenValue" readonly style="font-family:monospace;font-size:12px;flex:1;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+        <button class="btn secondary" id="copyTokenBtn" type="button">Copiar</button>
+      </div>
+    </div>
+  </div>
   </div>
 
   <div class="credit-row">
@@ -1064,25 +1117,6 @@
   syncThemeToggleUI();
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener('click', function () {
-  <div id="adminTab-api" class="admin-tab-content" style="display:none">
-  <div class="panel">
-    <h2>API</h2>
-    <p class="panel-hint">Gere um token de API (válido por 90 dias) pra puxar dados por fora do navegador — scripts, Power Query ou outra aplicação. Ele herda as permissões de super admin desta conta, então guarde como segredo. Gerar um novo não invalida os anteriores. Visível só pra você.</p>
-    <p class="panel-hint">Exemplo — lista de números conectados por colaborador: <code>GET /api/whatsapp/admin/instances</code> com o header <code>Authorization: Bearer &lt;token&gt;</code>.</p>
-    <div style="display:flex; gap:8px; flex-wrap:wrap;">
-      <button class="btn" id="genTokenBtn">Gerar novo token</button>
-      <a href="/api-docs" target="_blank" rel="noopener" class="btn secondary">Ver documentação da API</a>
-    </div>
-    <div id="tokenResult" style="display:none;margin-top:16px;">
-      <label class="field-label">Token gerado — copie agora, não é possível ver de novo depois (válido até <span id="tokenExpiry"></span>)</label>
-      <div style="display:flex; gap:8px;">
-        <input type="text" id="tokenValue" readonly style="font-family:monospace;font-size:12px;flex:1;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
-        <button class="btn secondary" id="copyTokenBtn" type="button">Copiar</button>
-      </div>
-    </div>
-  </div>
-  </div>
-
       var isLight = document.documentElement.getAttribute('data-theme') === 'light';
       if (isLight) {
         document.documentElement.removeAttribute('data-theme');
@@ -2419,6 +2453,151 @@
     shareInstanceModal.classList.remove('open');
   });
 
+  // =========================================================
+  // Compartilhar por departamento — ver POST /admin/department-grants em
+  // src/routes/whatsapp.js. Escolhe a pessoa (busca local em usersRows) e o
+  // departamento (GET /admin/departments, com sub-departamentos opcionais),
+  // mostra uma prévia (dryRun) e só grava ao confirmar.
+  // =========================================================
+  const shareDeptModal = document.getElementById('shareDeptModal');
+  const shareDeptPersonInput = document.getElementById('shareDeptPersonInput');
+  const shareDeptPersonResults = document.getElementById('shareDeptPersonResults');
+  const shareDeptPersonPicked = document.getElementById('shareDeptPersonPicked');
+  const shareDeptFilterInput = document.getElementById('shareDeptFilterInput');
+  const shareDeptSelect = document.getElementById('shareDeptSelect');
+  const shareDeptCascade = document.getElementById('shareDeptCascade');
+  const shareDeptPreview = document.getElementById('shareDeptPreview');
+  const shareDeptApply = document.getElementById('shareDeptApply');
+  const shareDeptRevoke = document.getElementById('shareDeptRevoke');
+  let shareDeptPerson = null;
+  let shareDeptList = null;
+
+  function renderShareDeptOptions() {
+    const term = shareDeptFilterInput.value.trim().toLowerCase();
+    const byId = new Map(shareDeptList.map((d) => [d.id, d]));
+    const pathOf = (d) => {
+      const parts = [d.name];
+      let p = d.parent && byId.get(d.parent);
+      let n = 0;
+      while (p && n++ < 6) { parts.unshift(p.name); p = p.parent && byId.get(p.parent); }
+      return parts.join(' › ');
+    };
+    const opts = shareDeptList
+      .map((d) => ({ id: d.id, label: pathOf(d) }))
+      .filter((o) => !term || o.label.toLowerCase().includes(term))
+      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
+      .slice(0, 200);
+    shareDeptSelect.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join('');
+    refreshShareDeptState();
+  }
+
+  function refreshShareDeptState() {
+    const ready = !!shareDeptPerson && !!shareDeptSelect.value;
+    shareDeptApply.disabled = !ready;
+    shareDeptRevoke.disabled = !ready;
+    shareDeptPreview.textContent = '';
+    if (ready) loadShareDeptPreview();
+  }
+
+  let shareDeptPreviewSeq = 0;
+  async function loadShareDeptPreview() {
+    const seq = ++shareDeptPreviewSeq;
+    shareDeptPreview.textContent = 'Calculando…';
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/department-grants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true, delegateOwnerId: shareDeptPerson.ownerId, departmentId: shareDeptSelect.value, includeSubdepartments: shareDeptCascade.checked }),
+      });
+      const data = await res.json();
+      if (seq !== shareDeptPreviewSeq) return;
+      if (!res.ok) throw new Error(data.error || 'falha ao calcular');
+      shareDeptPreview.textContent = `${data.peopleCount} pessoa(s) em ${data.departmentCount} departamento(s); ${data.ownersWithInstances} com WhatsApp conectado, somando ${data.instanceCount} instância(s).`;
+    } catch (err) {
+      if (seq === shareDeptPreviewSeq) shareDeptPreview.textContent = err.message;
+    }
+  }
+
+  document.getElementById('shareDeptOpenBtn').addEventListener('click', async () => {
+    shareDeptPerson = null;
+    shareDeptPersonInput.value = '';
+    shareDeptPersonResults.innerHTML = '';
+    shareDeptPersonPicked.textContent = '';
+    shareDeptFilterInput.value = '';
+    shareDeptPreview.textContent = '';
+    shareDeptApply.disabled = true;
+    shareDeptRevoke.disabled = true;
+    shareDeptModal.classList.add('open');
+    if (!shareDeptList) {
+      shareDeptSelect.innerHTML = '<option>Carregando…</option>';
+      try {
+        const res = await apiFetch(`${API_BASE}/admin/departments`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'falha ao carregar departamentos');
+        if (data.hrConfigured === false) throw new Error('Integração com o cadastro do Bitrix não configurada');
+        shareDeptList = data.departments;
+      } catch (err) {
+        shareDeptSelect.innerHTML = '';
+        shareDeptPreview.textContent = err.message;
+        return;
+      }
+    }
+    renderShareDeptOptions();
+  });
+
+  shareDeptPersonInput.addEventListener('input', () => {
+    const term = shareDeptPersonInput.value.trim().toLowerCase();
+    if (!term) { shareDeptPersonResults.innerHTML = ''; return; }
+    shareDeptPersonResults.innerHTML = usersRows
+      .filter((u) => (u.name || '').toLowerCase().includes(term) || (u.email || '').toLowerCase().includes(term))
+      .slice(0, 8)
+      .map((u) => `
+        <div class="delegate-search-result">
+          <span>${escapeHtml(u.name || u.ownerId)}${u.email ? ' · ' + escapeHtml(u.email) : ''}</span>
+          <button type="button" data-dept-pick="${escapeHtml(u.ownerId)}">Escolher</button>
+        </div>`).join('');
+  });
+
+  shareDeptPersonResults.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-dept-pick]');
+    if (!btn) return;
+    shareDeptPerson = usersRows.find((u) => u.ownerId === btn.dataset.deptPick) || null;
+    shareDeptPersonPicked.textContent = shareDeptPerson ? `Selecionado: ${shareDeptPerson.name || shareDeptPerson.ownerId}` : '';
+    shareDeptPersonInput.value = '';
+    shareDeptPersonResults.innerHTML = '';
+    if (shareDeptList) refreshShareDeptState();
+  });
+
+  shareDeptFilterInput.addEventListener('input', () => { if (shareDeptList) renderShareDeptOptions(); });
+  shareDeptSelect.addEventListener('change', refreshShareDeptState);
+  shareDeptCascade.addEventListener('change', refreshShareDeptState);
+
+  async function submitShareDept(revoke) {
+    const deptLabel = shareDeptSelect.options[shareDeptSelect.selectedIndex]?.textContent || '';
+    const verb = revoke ? 'REMOVER o acesso de' : 'COMPARTILHAR com';
+    const confirmed = await window.confirmDialog(`${verb} ${shareDeptPerson.name || shareDeptPerson.ownerId} as instâncias de "${deptLabel}"${shareDeptCascade.checked ? ' e subdepartamentos' : ''}? ${shareDeptPreview.textContent}`);
+    if (!confirmed) return;
+    shareDeptApply.disabled = true;
+    shareDeptRevoke.disabled = true;
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/department-grants${revoke ? '/revoke' : ''}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ delegateOwnerId: shareDeptPerson.ownerId, delegateName: shareDeptPerson.name || null, departmentId: shareDeptSelect.value, includeSubdepartments: shareDeptCascade.checked }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha na operação');
+      if (window.showToast) window.showToast(revoke ? `${data.removed} compartilhamento(s) removido(s).` : `${data.instanceCount} instância(s) compartilhada(s).`, 'success');
+      shareDeptModal.classList.remove('open');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+      refreshShareDeptState();
+    }
+  }
+  shareDeptApply.addEventListener('click', () => submitShareDept(false));
+  shareDeptRevoke.addEventListener('click', () => submitShareDept(true));
+  document.getElementById('shareDeptClose').addEventListener('click', () => shareDeptModal.classList.remove('open'));
+
   // ---------------- Publicar no Feed do Bitrix ----------------
 
   function feedPostHistoryItemHtml(p) {
@@ -2692,6 +2871,36 @@
   // .active no botão clicado, alterna display:block/none nos
   // .admin-tab-content correspondentes (nunca remove do DOM).
   // ---------------------------------------------------------------
+  // Aba "API": gera o token de API (POST /api/settings/api-token, mesma rota
+  // de /settings.html) — a página inteira já é restrita a super admin.
+  const genTokenBtn = document.getElementById('genTokenBtn');
+  const tokenValue = document.getElementById('tokenValue');
+  genTokenBtn.addEventListener('click', async () => {
+    genTokenBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/settings/api-token`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar token');
+      tokenValue.value = data.token;
+      document.getElementById('tokenExpiry').textContent = new Date(data.expiresAt).toLocaleDateString('pt-BR');
+      document.getElementById('tokenResult').style.display = '';
+      if (window.showToast) window.showToast('Token gerado — copie agora.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      genTokenBtn.disabled = false;
+    }
+  });
+  document.getElementById('copyTokenBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(tokenValue.value);
+      if (window.showToast) window.showToast('Copiado.', 'success');
+    } catch {
+      tokenValue.select();
+      if (window.showToast) window.showToast('Selecionado — copie com Ctrl+C.', 'success');
+    }
+  });
+
   const adminTabSwitch = document.getElementById('adminTabSwitch');
   adminTabSwitch.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -2871,36 +3080,6 @@
   // ---- Métricas de uma pesquisa ----
 
   function renderRatingBars(distribution) {
-  // Aba "API": gera o token de API (POST /api/settings/api-token, mesma rota
-  // de /settings.html) — a página inteira já é restrita a super admin.
-  const genTokenBtn = document.getElementById('genTokenBtn');
-  const tokenValue = document.getElementById('tokenValue');
-  genTokenBtn.addEventListener('click', async () => {
-    genTokenBtn.disabled = true;
-    try {
-      const res = await apiFetch(`${window.location.origin}/api/settings/api-token`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'falha ao gerar token');
-      tokenValue.value = data.token;
-      document.getElementById('tokenExpiry').textContent = new Date(data.expiresAt).toLocaleDateString('pt-BR');
-      document.getElementById('tokenResult').style.display = '';
-      if (window.showToast) window.showToast('Token gerado — copie agora.', 'success');
-    } catch (err) {
-      if (window.showToast) window.showToast(err.message, 'error');
-    } finally {
-      genTokenBtn.disabled = false;
-    }
-  });
-  document.getElementById('copyTokenBtn').addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(tokenValue.value);
-      if (window.showToast) window.showToast('Copiado.', 'success');
-    } catch {
-      tokenValue.select();
-      if (window.showToast) window.showToast('Selecionado — copie com Ctrl+C.', 'success');
-    }
-  });
-
     // Mesmo espírito visual de barra proporcional já usado no bloco de
     // "Páginas mais acessadas" (sem SVG, sem lib) — barra de largura
     // proporcional ao total de cada nota.

@@ -205,7 +205,45 @@ async function listAllOwnerIds() {
   return rows.map((r) => r.ownerId);
 }
 
+// Instâncias (não órfãs) pertencentes a qualquer um dos `ownerIds` — base do
+// "Compartilhar por departamento" no Admin.
+async function listByOwners(ownerIds) {
+  if (!ownerIds.length) return [];
+  const { rows } = await pool.query(
+    `select id, owner_id as "ownerId", label from instances where owner_id = any($1::text[])`,
+    [ownerIds]
+  );
+  return rows;
+}
+
+// Concede/revoga `delegateOwnerId` em várias instâncias de uma vez (admin,
+// mesma tabela instance_delegates de addDelegateAsAdmin). Pula as instâncias
+// do próprio delegado. Idempotente: rodar de novo só inclui o que faltava.
+async function addDelegatesBulkAsAdmin(instanceIds, delegateOwnerId, delegateName) {
+  if (!instanceIds.length) return 0;
+  const { rowCount } = await pool.query(
+    `insert into instance_delegates (instance_id, delegate_owner_id, delegate_name)
+     select i.id, $2, $3 from instances i
+     where i.id = any($1::text[]) and i.owner_id <> $2
+     on conflict (instance_id, delegate_owner_id) do update set delegate_name = excluded.delegate_name`,
+    [instanceIds, delegateOwnerId, delegateName || null]
+  );
+  return rowCount;
+}
+
+async function removeDelegatesBulkAsAdmin(instanceIds, delegateOwnerId) {
+  if (!instanceIds.length) return 0;
+  const { rowCount } = await pool.query(
+    `delete from instance_delegates where instance_id = any($1::text[]) and delegate_owner_id = $2`,
+    [instanceIds, delegateOwnerId]
+  );
+  return rowCount;
+}
+
 module.exports = {
+  listByOwners,
+  addDelegatesBulkAsAdmin,
+  removeDelegatesBulkAsAdmin,
   listByOwner,
   get,
   ensureDefault,
