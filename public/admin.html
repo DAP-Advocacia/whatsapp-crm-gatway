@@ -2475,19 +2475,24 @@
   function renderShareDeptOptions() {
     const term = shareDeptFilterInput.value.trim().toLowerCase();
     const byId = new Map(shareDeptList.map((d) => [d.id, d]));
-    const pathOf = (d) => {
+    // Ordena pela árvore (pai antes dos filhos, via caminho completo) mas
+    // exibe só o nome, recuado por nível — o caminho inteiro estourava a
+    // largura e deixava todas as linhas parecidas.
+    const pathParts = (d) => {
       const parts = [d.name];
       let p = d.parent && byId.get(d.parent);
       let n = 0;
-      while (p && n++ < 6) { parts.unshift(p.name); p = p.parent && byId.get(p.parent); }
-      return parts.join(' › ');
+      while (p && n++ < 8) { parts.unshift(p.name); p = p.parent && byId.get(p.parent); }
+      return parts;
     };
     const opts = shareDeptList
-      .map((d) => ({ id: d.id, label: pathOf(d) }))
-      .filter((o) => !term || o.label.toLowerCase().includes(term))
-      .sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'))
-      .slice(0, 200);
-    shareDeptSelect.innerHTML = opts.map((o) => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.label)}</option>`).join('');
+      .map((d) => { const parts = pathParts(d); return { id: d.id, name: d.name, depth: parts.length - 1, sortKey: parts.join(' › ') }; })
+      .filter((o) => !term || o.name.toLowerCase().includes(term))
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'pt-BR'))
+      .slice(0, 300);
+    shareDeptSelect.innerHTML = opts
+      .map((o) => `<option value="${escapeHtml(o.id)}">${'   '.repeat(Math.min(o.depth, 5))}${escapeHtml(o.name)}</option>`)
+      .join('');
     refreshShareDeptState();
   }
 
