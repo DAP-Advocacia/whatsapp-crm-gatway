@@ -801,6 +801,7 @@
 
   <div id="adminTab-visao-geral" class="admin-tab-content">
     <div class="metric-cards">
+    <button type="button" data-admin-tab="api">API</button>
       <div class="metric-card">
         <div class="metric-label">Online agora</div>
         <div class="metric-value online-dot" id="metricOnlineNow">—</div>
@@ -1063,6 +1064,25 @@
   syncThemeToggleUI();
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener('click', function () {
+  <div id="adminTab-api" class="admin-tab-content" style="display:none">
+  <div class="panel">
+    <h2>API</h2>
+    <p class="panel-hint">Gere um token de API (válido por 90 dias) pra puxar dados por fora do navegador — scripts, Power Query ou outra aplicação. Ele herda as permissões de super admin desta conta, então guarde como segredo. Gerar um novo não invalida os anteriores. Visível só pra você.</p>
+    <p class="panel-hint">Exemplo — lista de números conectados por colaborador: <code>GET /api/whatsapp/admin/instances</code> com o header <code>Authorization: Bearer &lt;token&gt;</code>.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+      <button class="btn" id="genTokenBtn">Gerar novo token</button>
+      <a href="/api-docs" target="_blank" rel="noopener" class="btn secondary">Ver documentação da API</a>
+    </div>
+    <div id="tokenResult" style="display:none;margin-top:16px;">
+      <label class="field-label">Token gerado — copie agora, não é possível ver de novo depois (válido até <span id="tokenExpiry"></span>)</label>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="tokenValue" readonly style="font-family:monospace;font-size:12px;flex:1;padding:9px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+        <button class="btn secondary" id="copyTokenBtn" type="button">Copiar</button>
+      </div>
+    </div>
+  </div>
+  </div>
+
       var isLight = document.documentElement.getAttribute('data-theme') === 'light';
       if (isLight) {
         document.documentElement.removeAttribute('data-theme');
@@ -2851,6 +2871,36 @@
   // ---- Métricas de uma pesquisa ----
 
   function renderRatingBars(distribution) {
+  // Aba "API": gera o token de API (POST /api/settings/api-token, mesma rota
+  // de /settings.html) — a página inteira já é restrita a super admin.
+  const genTokenBtn = document.getElementById('genTokenBtn');
+  const tokenValue = document.getElementById('tokenValue');
+  genTokenBtn.addEventListener('click', async () => {
+    genTokenBtn.disabled = true;
+    try {
+      const res = await apiFetch(`${window.location.origin}/api/settings/api-token`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao gerar token');
+      tokenValue.value = data.token;
+      document.getElementById('tokenExpiry').textContent = new Date(data.expiresAt).toLocaleDateString('pt-BR');
+      document.getElementById('tokenResult').style.display = '';
+      if (window.showToast) window.showToast('Token gerado — copie agora.', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      genTokenBtn.disabled = false;
+    }
+  });
+  document.getElementById('copyTokenBtn').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(tokenValue.value);
+      if (window.showToast) window.showToast('Copiado.', 'success');
+    } catch {
+      tokenValue.select();
+      if (window.showToast) window.showToast('Selecionado — copie com Ctrl+C.', 'success');
+    }
+  });
+
     // Mesmo espírito visual de barra proporcional já usado no bloco de
     // "Páginas mais acessadas" (sem SVG, sem lib) — barra de largura
     // proporcional ao total de cada nota.
