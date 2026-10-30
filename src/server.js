@@ -17,7 +17,6 @@ const http = require('http');
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
-const rateLimit = require('express-rate-limit');
 const { WebSocketServer } = require('ws');
 const { URL } = require('url');
 const swaggerUi = require('swagger-ui-express');
@@ -25,6 +24,7 @@ const openapiSpec = require('./openapi');
 
 const { SessionManager } = require('./sessions');
 const { refreshOwnNumber } = require('./ownNumbers');
+const { createApiLimiter } = require('./rateLimits');
 const { demoModeGate } = require('./demoModeGate');
 const { createDemoFixturesRouter } = require('./routes/demoFixtures');
 const demoData = require('./demoData');
@@ -109,13 +109,10 @@ app.use(
 // requisições/minuto sem que isso seja abuso. `standardHeaders`/
 // `legacyHeaders` só controlam quais headers de rate-limit são expostos
 // na resposta, não afetam o limite em si.
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 600, // por IP, por minuto
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'muitas requisições, aguarde um momento e tente de novo' },
-});
+// Por usuário autenticado (não por IP) — ver src/rateLimits.js pro porquê: o
+// escritório inteiro sai por 1 IP e o limite antigo de 600/min/IP gerava 429
+// ("falha ao autenticar com o Bitrix") em horário de uso normal.
+const apiLimiter = createApiLimiter();
 app.use('/api', apiLimiter);
 
 // `no-cache` (não `no-store`): o navegador ainda pode GUARDAR o arquivo, mas é

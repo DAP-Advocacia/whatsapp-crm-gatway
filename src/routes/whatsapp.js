@@ -110,6 +110,11 @@ async function notificationOwner(req) {
  * pertence a req.ownerId (ver src/authz.js) — a autenticação sozinha não
  * garante posse do recurso.
  */
+// "Contato sem foto de perfil" lembrado em memória (ver GET /avatar).
+const AVATAR_MISS_TTL_MS = 6 * 60 * 60 * 1000;
+const AVATAR_MISS_MAX = 50000;
+const avatarMisses = new Map(); // `${session}|${phone}` -> expira em (ms epoch)
+
 function createWhatsappRouter({ sessions, broadcast }) {
   const router = express.Router();
 
@@ -336,8 +341,17 @@ function createWhatsappRouter({ sessions, broadcast }) {
         let gateway = null;
         let status = 'offline';
         try {
-          gateway = sessions.get(i.id);
-          status = gateway.getStatus();
+          // Só inicia (sessions.get) sessão JÁ PAREADA (tem número em
+          // ownNumbers) — é assim que o boot preguiçoso as sobe quando o dono
+          // abre o app. Instância NUNCA pareada (sem creds) não é iniciada
+          // aqui: antes, toda abertura do Chat criava um socket+QR pra cada
+          // uma delas (medido em produção: ~100 sessões não pareadas em loop
+          // de reconexão/timeout 408, ~2.100 eventos "connecting" em 30 min,
+          // CPU e reputação junto ao WhatsApp gastas à toa). O QR continua
+          // sendo gerado quando a pessoa de fato abre a tela de pareamento
+          // (GET /qr, POST /instances), que chamam sessions.get direto.
+          gateway = sessions.getActiveGateway(i.id) || (ownNumbers[i.id] ? sessions.get(i.id) : null);
+          if (gateway) status = gateway.getStatus();
         } catch {
           // sessão ainda não foi iniciada nesse processo — status fica offline
         }
@@ -753,11 +767,26 @@ function createWhatsappRouter({ sessions, broadcast }) {
     if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
     try {
       let url = await store.getAvatarUrl(session, phone);
+      const missKey = `${session}|${phone}`;
       if (!url) {
+        // Cache NEGATIVO (2026-10-30): contato sem foto nunca era gravado
+        // (só `if (url)`), então toda renderização da lista de conversas
+        // perguntava de novo ao WhatsApp — 1.173 dos 2.008 pedidos barrados
+        // por rate limit em 2h eram /avatar. Lembra o "sem foto" em memória.
+        const missUntil = avatarMisses.get(missKey);
+        if (missUntil && missUntil > Date.now()) {
+          res.set('Cache-Control', 'private, max-age=3600');
+          return res.json({ url: null });
+        }
         const gateway = sessions.get(session);
         url = await gateway.getProfilePicture(phone);
         if (url) await store.setAvatarUrl(session, phone, url);
+        else {
+          if (avatarMisses.size >= AVATAR_MISS_MAX) avatarMisses.delete(avatarMisses.keys().next().value);
+          avatarMisses.set(missKey, Date.now() + AVATAR_MISS_TTL_MS);
+        }
       }
+      res.set('Cache-Control', 'private, max-age=600'); // o navegador também não repergunta a cada render
       res.json({ url: url || null });
     } catch (err) {
       console.error('[avatar] erro:', err.message);

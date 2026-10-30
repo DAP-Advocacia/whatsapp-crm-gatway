@@ -26,13 +26,25 @@ const API_TOKEN_TTL_MS = (Number(process.env.API_TOKEN_TTL_DAYS) || 90) * 24 * 6
 // Confirma que o access_token pertence de verdade a um usuário logado no
 // portal configurado, chamando o próprio Bitrix (não confia em nada que o
 // cliente afirme sobre si mesmo). Devolve o ID do usuário Bitrix, ou null.
+let lastAuthWarnAt = 0;
+
 async function verifyBitrixToken(accessToken) {
   if (!accessToken || !BITRIX_PORTAL_DOMAIN) return null;
   try {
     const url = `https://${BITRIX_PORTAL_DOMAIN}/rest/user.current.json?auth=${encodeURIComponent(accessToken)}`;
     const res = await fetch(url);
     const data = await res.json();
-    if (data.error || !data.result?.ID) return null;
+    if (data.error || !data.result?.ID) {
+      // Antes era silencioso: o 401 "token inválido" chegava ao usuário como
+      // "falha ao autenticar com o Bitrix" sem nenhum rastro no log. Registra o
+      // MOTIVO que o Bitrix devolveu (expired_token, QUERY_LIMIT_EXCEEDED...),
+      // no máximo 1 linha a cada 10s pra não encher o log.
+      if (Date.now() - lastAuthWarnAt > 10000) {
+        lastAuthWarnAt = Date.now();
+        console.warn(`[auth] Bitrix recusou o token: ${data.error || 'sem result.ID'} (HTTP ${res.status})`);
+      }
+      return null;
+    }
     return String(data.result.ID);
   } catch (err) {
     console.error('[auth] falha ao verificar token com o Bitrix:', err.message);
