@@ -115,6 +115,40 @@ const AVATAR_MISS_TTL_MS = 6 * 60 * 60 * 1000;
 const AVATAR_MISS_MAX = 50000;
 const avatarMisses = new Map(); // `${session}|${phone}` -> expira em (ms epoch)
 
+// Teto de consultas de foto AO VIVO por instância (ver GET /avatar).
+const AVATAR_MAX_LIVE_PER_SESSION = Number(process.env.AVATAR_MAX_LIVE_PER_SESSION || 2);
+const AVATAR_MAX_QUEUED_PER_SESSION = Number(process.env.AVATAR_MAX_QUEUED_PER_SESSION || 25);
+const AVATAR_LIVE_TIMEOUT_MS = Number(process.env.AVATAR_LIVE_TIMEOUT_MS || 8000);
+const avatarSlots = new Map(); // session -> { active, queue: [resolve...] }
+
+// Roda `fn` respeitando o teto por instância. Devolve { value } normalmente,
+// { busy: true } se a fila da instância já está cheia, ou { timedOut: true }
+// se a consulta passou de AVATAR_LIVE_TIMEOUT_MS (o slot é liberado na hora;
+// a consulta atrasada termina sozinha e o resultado dela é descartado).
+async function withAvatarSlot(session, fn) {
+  let slot = avatarSlots.get(session);
+  if (!slot) { slot = { active: 0, queue: [] }; avatarSlots.set(session, slot); }
+  if (slot.active >= AVATAR_MAX_LIVE_PER_SESSION) {
+    if (slot.queue.length >= AVATAR_MAX_QUEUED_PER_SESSION) return { busy: true };
+    await new Promise((resolve) => slot.queue.push(resolve)); // o slot é entregue por quem libera (active não muda)
+  } else {
+    slot.active++;
+  }
+  let timer;
+  try {
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve({ timedOut: true }), AVATAR_LIVE_TIMEOUT_MS); });
+    return await Promise.race([Promise.resolve(fn()).then((value) => ({ value })), timeout]);
+  } finally {
+    clearTimeout(timer);
+    const next = slot.queue.shift();
+    if (next) next();
+    else {
+      slot.active--;
+      if (slot.active === 0 && !slot.queue.length) avatarSlots.delete(session);
+    }
+  }
+}
+
 function createWhatsappRouter({ sessions, broadcast }) {
   const router = express.Router();
 
@@ -779,11 +813,28 @@ function createWhatsappRouter({ sessions, broadcast }) {
           return res.json({ url: null });
         }
         const gateway = sessions.get(session);
-        url = await gateway.getProfilePicture(phone);
+        // Consulta ao WhatsApp com TETO de concorrência por instância e de
+        // espera (2026-10-30): medido em produção, 693 pedidos de /avatar
+        // levaram 9,9s em média (149 acima de 15s) porque o Chat pedia a foto
+        // de todas as conversas ao mesmo tempo e cada uma é uma consulta ao
+        // vivo no socket do WhatsApp, que as enfileira. Aqui no máximo
+        // AVATAR_MAX_LIVE_PER_SESSION rodam juntas por instância; o excesso
+        // espera na fila e, se a fila passar do limite ou a consulta passar do
+        // tempo, responde "sem foto agora" SEM gravar cache de ausência (o
+        // Chat tenta de novo depois).
+        const outcome = await withAvatarSlot(session, () => gateway.getProfilePicture(phone));
+        if (outcome.busy) {
+          res.set('Cache-Control', 'no-store');
+          return res.json({ url: null, busy: true });
+        }
+        url = outcome.value;
         if (url) await store.setAvatarUrl(session, phone, url);
-        else {
+        else if (!outcome.timedOut) {
           if (avatarMisses.size >= AVATAR_MISS_MAX) avatarMisses.delete(avatarMisses.keys().next().value);
           avatarMisses.set(missKey, Date.now() + AVATAR_MISS_TTL_MS);
+        } else {
+          res.set('Cache-Control', 'no-store');
+          return res.json({ url: null });
         }
       }
       res.set('Cache-Control', 'private, max-age=600'); // o navegador também não repergunta a cada render

@@ -4329,10 +4329,11 @@
   async function requestAvatar(sessionId, phone) {
     try {
       const res = await apiFetch(`${API_BASE}/avatar?session=${encodeURIComponent(sessionId)}&phone=${encodeURIComponent(phone)}`);
-      if (!res.ok) return null;
-      return (await res.json()).url || null;
+      if (!res.ok) return { url: null, retry: true };
+      const data = await res.json();
+      return { url: data.url || null, retry: !!data.busy }; // busy = servidor ocupado, tenta de novo numa próxima carga
     } catch {
-      return null;
+      return { url: null, retry: true };
     }
   }
 
@@ -4347,9 +4348,16 @@
     }
   }
 
+  // Contatos cuja foto já foi pedida nesta aba (com ou sem resultado): a lista
+  // é recarregada a cada busca/troca de filtro e, sem isto, repedia a foto de
+  // todo mundo sem foto toda vez (cada pedido é uma consulta ao vivo no
+  // WhatsApp — ver GET /avatar, src/routes/whatsapp.js).
+  const avatarTried = new Set();
   async function fetchAvatarFor(sessionId, phone) {
     const conv = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
-    const url = await requestAvatar(sessionId, phone);
+    avatarTried.add(`${sessionId}|${phone}`);
+    const { url, retry } = await requestAvatar(sessionId, phone);
+    if (retry) avatarTried.delete(`${sessionId}|${phone}`);
     if (url) {
       if (conv) conv.avatarUrl = url;
       applyAvatarToDom(sessionId, phone, url, conv ? (conv.contactName || conv.phone) : phone);
@@ -4370,7 +4378,12 @@
     const BATCH_SIZE = 4;
     const BATCH_DELAY_MS = 150;
     try {
-      const pending = state.conversations.filter((c) => !c.avatarUrl);
+      // Só as 40 conversas mais recentes ainda sem foto e ainda não pedidas
+      // (a lista já vem ordenada por atividade): antes pedia as ~200 de cada
+      // instância de uma vez.
+      const pending = state.conversations
+        .filter((c) => !c.avatarUrl && !avatarTried.has(`${c.sessionId}|${c.phone}`))
+        .slice(0, 40);
       for (let i = 0; i < pending.length; i += BATCH_SIZE) {
         const batch = pending
           .slice(i, i + BATCH_SIZE)
