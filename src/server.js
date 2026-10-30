@@ -24,6 +24,7 @@ const swaggerUi = require('swagger-ui-express');
 const openapiSpec = require('./openapi');
 
 const { SessionManager } = require('./sessions');
+const { refreshOwnNumber } = require('./ownNumbers');
 const { demoModeGate } = require('./demoModeGate');
 const { createDemoFixturesRouter } = require('./routes/demoFixtures');
 const demoData = require('./demoData');
@@ -473,6 +474,9 @@ const sessions = new SessionManager({
   isCardGroup: store.isCardGroupId,
   onStatus: (sessionId, status) => {
     console.log(`[whatsapp:${sessionId}] status:`, status);
+    // Sessão ficou online (acabou de parear ou reconectou): atualiza só o número
+    // dela no cache de src/ownNumbers.js, sem reler o disco inteiro.
+    if (status === 'online') refreshOwnNumber(sessionId);
     broadcastStatus(sessionId, status);
     handleStatusForHealth(sessionId, status).catch((err) =>
       console.error(`[whatsapp:${sessionId}] falha ao processar histórico de status:`, err.message)
@@ -725,8 +729,28 @@ const sessions = new SessionManager({
   },
 });
 
-// retoma sessões já pareadas para continuar recebendo mensagens
-sessions.startAllExisting();
+// Boot das sessões já pareadas — 2026-10-30: PREGUIÇOSO por padrão. Antes,
+// todo restart reconectava TODAS as sessões salvas (uma a cada 15s: ~400
+// sessões = ~1h40 de espera, e centenas de sockets Baileys vivos no único
+// processo Node, que era o gargalo de CPU). Agora cada sessão sobe quando
+// alguém acessa a instância: o Chat/Conexões chama GET /instances (que faz
+// sessions.get() em cada instância visível), o WebSocket do Chat e as rotas
+// de envio idem; o agendador de campanhas também (tenta de novo a cada 30s).
+// Quem sobe passa pela fila de src/sessions.js (concorrência + espaçamento
+// PAIRING_MIN_GAP_MS), então uma rajada de gente abrindo o app não vira login
+// em massa. SESSION_BOOT_MODE=all volta ao comportamento antigo (reconectar
+// tudo no boot) sem mudar código — é o rollback.
+//
+// EFEITO COLATERAL aceito: enquanto o dono não abre o app, a sessão dele não
+// está conectada, então nada que dependa dela em tempo real roda (resposta
+// automática do Agente de IA, registro de mensagens novas no Bitrix, gatilhos
+// de grupo/negócio). O WhatsApp costuma reentregar as pendentes ao reconectar.
+const SESSION_BOOT_MODE = (process.env.SESSION_BOOT_MODE || 'lazy').toLowerCase();
+if (SESSION_BOOT_MODE === 'all') {
+  sessions.startAllExisting();
+} else {
+  console.log('[sessions] boot preguiçoso: sessões salvas sobem quando o dono acessa o app (SESSION_BOOT_MODE=all reconecta tudo no boot)');
+}
 
 // verifica a cada 30s se algum agendamento de campanha (Kanban/Calendário)
 // já chegou na hora marcada e dispara sozinho
@@ -744,6 +768,33 @@ require('./dealStagePoller').startPolling();
 // janela de banimento (categoria "Banida" na aba Instâncias, ver GET
 // /instances). Critério e canal confirmados com o usuário.
 require('./instanceBanPoller').startPolling(sessions);
+
+// Diagnóstico de desempenho (2026-10-30): mede o ATRASO do event loop (quanto
+// tempo o processo ficou "preso" sem atender nada — é o que o usuário sente
+// como lentidão) e só loga quando passa do limite, pra não poluir. Leve
+// (histograma nativo do Node, sem custo relevante). Se aparecer com frequência
+// nos logs de produção, o p99/max mostram o tamanho do travamento; ajuste o
+// limite com EVENT_LOOP_LAG_WARN_MS. Desliga com EVENT_LOOP_LAG_WARN_MS=0.
+{
+  const warnMs = Number(process.env.EVENT_LOOP_LAG_WARN_MS ?? 200);
+  if (warnMs > 0) {
+    const { monitorEventLoopDelay } = require('perf_hooks');
+    const histogram = monitorEventLoopDelay({ resolution: 20 });
+    histogram.enable();
+    setInterval(() => {
+      const p99 = histogram.percentile(99) / 1e6;
+      const max = histogram.max / 1e6;
+      if (p99 >= warnMs || max >= warnMs * 5) {
+        const mem = process.memoryUsage();
+        console.warn(
+          `[perf] event loop lento (últimos 60s): p99=${p99.toFixed(0)}ms max=${max.toFixed(0)}ms | ` +
+          `heap=${(mem.heapUsed / 1048576).toFixed(0)}MB rss=${(mem.rss / 1048576).toFixed(0)}MB`
+        );
+      }
+      histogram.reset();
+    }, 60000).unref();
+  }
+}
 
 // Fecha sozinha page_sessions "órfãs" (aba fechada sem o beacon de saída
 // disparar — crash, queda de luz, ver HANDOFF Parte CO) — sem isto,

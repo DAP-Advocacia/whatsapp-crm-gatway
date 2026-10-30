@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { WhatsAppGateway } = require('./whatsapp');
+const { refreshOwnNumber } = require('./ownNumbers');
 
 /**
  * Gerencia VÁRIAS sessões de WhatsApp — uma por usuário do Bitrix.
@@ -55,11 +56,27 @@ class SessionManager {
     this.pairingQueue = [];
     this.activePairings = 0;
     this.maxConcurrentPairings = Number(process.env.MAX_CONCURRENT_PAIRINGS || 4);
+    // Espaçamento MÍNIMO entre dois start() (2026-10-30). Com o boot
+    // preguiçoso (server.js, SESSION_BOOT_MODE) as sessões sobem quando o dono
+    // abre o app, então o limite de concorrência acima sozinho não segura uma
+    // rajada (start() devolve assim que o socket é criado, a fila esvaziava em
+    // segundos). Sessão que chega com a fila ociosa começa NA HORA (ninguém
+    // espera); só a 2ª, 3ª... de uma rajada esperam este intervalo. Padrão 5s
+    // — o incidente de 31/07 e o teste de 03/08 (5 de 11 caíram com 4s, ver
+    // ROADMAP) mostram que abrir muitos logins juntos derruba sessões.
+    this.minPairingGapMs = Number(process.env.PAIRING_MIN_GAP_MS ?? 5000);
+    this.lastPairingStartAt = 0;
+    this.pairingTimer = null;
   }
 
   _runPairingQueue() {
-    while (this.activePairings < this.maxConcurrentPairings && this.pairingQueue.length) {
+    if (this.pairingTimer || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
+    const wait = Math.max(0, this.lastPairingStartAt + this.minPairingGapMs - Date.now());
+    this.pairingTimer = setTimeout(() => {
+      this.pairingTimer = null;
+      if (!this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
       const gateway = this.pairingQueue.shift();
+      this.lastPairingStartAt = Date.now();
       this.activePairings++;
       gateway.status = 'connecting'; // sai de 'queued' assim que o start() real começa
       gateway
@@ -69,7 +86,8 @@ class SessionManager {
           this.activePairings--;
           this._runPairingQueue();
         });
-    }
+      this._runPairingQueue(); // agenda o próximo (respeitando o espaçamento)
+    }, wait);
   }
 
   _enqueuePairing(gateway) {
@@ -125,12 +143,14 @@ class SessionManager {
     if (gateway) {
       await gateway.disconnect();
       this.sessions.delete(id);
+      refreshOwnNumber(id); // número some do cache (a pasta de credenciais já foi apagada no disconnect)
       return;
     }
     const folder = path.join(this.baseFolder, id);
     if (fs.existsSync(folder)) {
       fs.rmSync(folder, { recursive: true, force: true });
     }
+    refreshOwnNumber(id);
   }
 
   /**
