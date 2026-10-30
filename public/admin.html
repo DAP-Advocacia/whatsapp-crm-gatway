@@ -622,6 +622,14 @@
   /* Modal "Compartilhar instância" (2026-10-01) — mesmo padrão visual de
      campo rotulado já usado no resto do Admin (.field-label acima), só
      generalizado pra fora do grid de detalhe do Bitrix. */
+  /* Aba "Números" — selo de situação por colaborador */
+  .num-badge{ display:inline-block; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+  .num-badge.on{ background:rgba(52,168,83,.18); color:#4caf78; }
+  .num-badge.off{ background:rgba(240,173,78,.2); color:#d9962f; }
+  .num-badge.never{ background:rgba(150,150,150,.2); color:var(--text-muted); }
+  .num-badge.none{ background:rgba(224,92,92,.18); color:#d85a5a; }
+  #numTable td .num-list{ font-family:monospace; font-size:12px; line-height:1.6; }
+  #numTable td .num-sub{ color:var(--text-faint); font-size:11px; }
   #shareDeptModal .field,
   #shareInstanceModal .field{ margin-bottom:14px; }
   #shareDeptModal .field-label,
@@ -797,6 +805,7 @@
   <div class="view-switch" id="adminTabSwitch">
     <button type="button" data-admin-tab="visao-geral" class="active">Visão Geral</button>
     <button type="button" data-admin-tab="usuarios">Usuários</button>
+    <button type="button" data-admin-tab="numeros">Números</button>
     <button type="button" data-admin-tab="feed">Feed</button>
     <button type="button" data-admin-tab="dapinho">Dapinho</button>
     <button type="button" data-admin-tab="sugestoes">Sugestões</button>
@@ -1062,6 +1071,38 @@
         <button class="btn secondary" id="shareInstanceClose">Fechar</button>
       </div>
     </div>
+  </div>
+
+  <div id="adminTab-numeros" class="admin-tab-content" style="display:none">
+  <div class="panel">
+    <h2>Números de WhatsApp <span class="panel-count" id="numCount">—</span></h2>
+    <p class="panel-hint">Auditoria de quem tem WhatsApp conectado. "Conectado agora" = número pareado e sessão online neste momento. "Já conectou" = o número foi pareado um dia, mas hoje a sessão não está online (os números aparecem na tabela). Só leitura — nada aqui reconecta sessão.</p>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
+      <button class="btn" id="numDownloadBtn" type="button">Baixar Excel</button>
+      <button class="btn secondary" id="numRefreshBtn" type="button">Atualizar</button>
+      <span id="numStatus" style="align-self:center;font-size:12px;color:var(--text-muted)"></span>
+    </div>
+    <div class="metric-cards" id="numCards"></div>
+    <div class="users-filters" style="margin-top:14px">
+      <input type="search" id="numSearch" placeholder="Buscar por nome, supervisor ou número…" style="flex:1;min-width:220px">
+      <select id="numFilterSituation">
+        <option value="">Situação: todas</option>
+        <option value="conectado_agora">Conectado agora</option>
+        <option value="ja_conectou_offline">Já conectou — hoje offline</option>
+        <option value="nunca_conectou">Nunca conectou (tem instância)</option>
+        <option value="sem_instancia">Sem instância</option>
+        <option value="fora_bitrix">Fora do cadastro ativo do Bitrix</option>
+      </select>
+      <select id="numFilterDepartment"><option value="">Setor: todos</option></select>
+    </div>
+    <table class="admin-table" id="numTable" style="margin-top:12px">
+      <thead>
+        <tr><th>Colaborador</th><th>Setor</th><th>Supervisor</th><th>Situação</th><th>Instâncias</th><th>Números online agora</th><th>Números que já conectou (hoje offline)</th></tr>
+      </thead>
+      <tbody id="numBody"><tr><td colspan="7" class="skeleton-row">Abra a aba para carregar…</td></tr></tbody>
+    </table>
+    <div id="numMore" style="margin-top:10px"></div>
+  </div>
   </div>
 
   <div id="adminTab-api" class="admin-tab-content" style="display:none">
@@ -2876,6 +2917,155 @@
   // .active no botão clicado, alterna display:block/none nos
   // .admin-tab-content correspondentes (nunca remove do DOM).
   // ---------------------------------------------------------------
+  // =========================================================
+  // Aba "Números" — GET /admin/phone-audit (só leitura, ver
+  // src/phoneAudit.js). Carrega na 1ª vez que a aba abre (a rota cruza o
+  // cadastro inteiro do Bitrix, ~10s) e tem botão pra baixar o Excel
+  // completo (?format=xlsx, 5 abas).
+  // =========================================================
+  const NUM_SIT = {
+    conectado_agora: ['on', 'Conectado agora'],
+    ja_conectou_offline: ['off', 'Já conectou — offline'],
+    nunca_conectou: ['never', 'Nunca conectou'],
+    sem_instancia: ['none', 'Sem instância'],
+  };
+  const NUM_SIT_ORDER = { conectado_agora: 0, ja_conectou_offline: 1, nunca_conectou: 2, sem_instancia: 3 };
+  const NUM_PAGE = 100;
+  let phoneAudit = null;
+  let phoneAuditLoadedOnce = false;
+  let numShown = NUM_PAGE;
+
+  function fmtPhone(p) { // 5521988887777 -> +55 21 98888-7777
+    const m = /^(\d{2})(\d{2})(\d{4,5})(\d{4})$/.exec(p || '');
+    return m ? `+${m[1]} ${m[2]} ${m[3]}-${m[4]}` : (p || '');
+  }
+
+  function renderNumCards() {
+    const s = phoneAudit.summary;
+    const cards = [
+      ['Colaboradores ativos', s.people.activeEmployees],
+      ['Conectados agora', s.people.connectedNow],
+      ['Já conectaram, hoje offline', s.people.wasConnectedNowOffline],
+      ['Têm instância, nunca conectaram', s.people.neverConnected],
+      ['Sem instância', s.people.noInstance],
+      ['Instâncias online agora', `${s.instances.connectedNow} / ${s.instances.total}`],
+      ['Números distintos já pareados', s.phones.distinct],
+      ['Números repetidos', s.phones.repeated],
+      ['Donos fora do Bitrix', `${s.people.ownersNotActiveInBitrix} (${s.people.ownersNotActiveWithPhone} c/ número)`],
+    ];
+    document.getElementById('numCards').innerHTML = cards.map(([label, value]) => `
+      <div class="metric-card"><div class="metric-label">${escapeHtml(label)}</div><div class="metric-value">${escapeHtml(String(value))}</div></div>`).join('');
+  }
+
+  function renderNumTable() {
+    const term = document.getElementById('numSearch').value.trim().toLowerCase();
+    const sit = document.getElementById('numFilterSituation').value;
+    const dept = document.getElementById('numFilterDepartment').value;
+    const rows = phoneAudit.people.filter((p) => {
+      if (sit === 'fora_bitrix') { if (p.activeInBitrix !== false) return false; }
+      else if (sit && p.situation !== sit) return false;
+      if (dept && p.department !== dept) return false;
+      if (term) {
+        const hay = [p.name, p.supervisor?.name, p.bitrixUserId, ...p.onlinePhones, ...p.offlinePhones].join(' ').toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    }).sort((a, b) => (NUM_SIT_ORDER[a.situation] - NUM_SIT_ORDER[b.situation])
+      || String(a.name || 'zzz').localeCompare(String(b.name || 'zzz'), 'pt-BR'));
+
+    document.getElementById('numCount').textContent = `${rows.length} de ${phoneAudit.people.length}`;
+    const body = document.getElementById('numBody');
+    if (!rows.length) { body.innerHTML = '<tr><td colspan="7" class="skeleton-row">Nenhum colaborador neste filtro.</td></tr>'; document.getElementById('numMore').innerHTML = ''; return; }
+    const phonesHtml = (list) => list.length ? `<div class="num-list">${list.map((n) => escapeHtml(fmtPhone(n))).join('<br>')}</div>` : '<span class="num-sub">—</span>';
+    body.innerHTML = rows.slice(0, numShown).map((p) => {
+      const [cls, label] = NUM_SIT[p.situation];
+      const inst = p.total
+        ? `${p.total}<div class="num-sub">${p.online} online · ${p.offlineWithPhone} offline · ${p.never} sem número</div>`
+        : '<span class="num-sub">—</span>';
+      const sup = p.supervisor?.name
+        ? `<span title="${escapeHtml(p.supervisor.source || '')}">${escapeHtml(p.supervisor.name)}</span>`
+        : '<span class="num-sub">—</span>';
+      const nameHtml = `<b>${escapeHtml(p.name || '(fora do cadastro ativo do Bitrix)')}</b>`
+        + `<div class="num-sub">ID Bitrix ${escapeHtml(p.bitrixUserId || '—')}${p.activeInBitrix === false ? ' · <span style="color:#d85a5a">não está ativo no Bitrix</span>' : ''}</div>`;
+      return `<tr>
+        <td>${nameHtml}</td>
+        <td>${escapeHtml(p.department || '—')}</td>
+        <td>${sup}</td>
+        <td><span class="num-badge ${cls}">${label}</span></td>
+        <td>${inst}</td>
+        <td>${phonesHtml(p.onlinePhones)}</td>
+        <td>${phonesHtml(p.offlinePhones)}</td>
+      </tr>`;
+    }).join('');
+    document.getElementById('numMore').innerHTML = rows.length > numShown
+      ? `<button class="btn secondary" type="button" id="numShowMore">Mostrar mais ${Math.min(NUM_PAGE, rows.length - numShown)} de ${rows.length - numShown} restantes</button>`
+      : '';
+  }
+
+  async function loadPhoneAudit() {
+    const status = document.getElementById('numStatus');
+    status.textContent = 'Carregando… (pode levar ~10s)';
+    document.getElementById('numBody').innerHTML = '<tr><td colspan="7" class="skeleton-row">Carregando…</td></tr>';
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/phone-audit`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'falha ao carregar');
+      phoneAudit = data;
+      numShown = NUM_PAGE;
+      const deptSel = document.getElementById('numFilterDepartment');
+      const keep = deptSel.value;
+      const depts = [...new Set(data.people.map((p) => p.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+      deptSel.innerHTML = '<option value="">Setor: todos</option>' + depts.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join('');
+      deptSel.value = keep;
+      renderNumCards();
+      renderNumTable();
+      status.textContent = `Atualizado às ${new Date(data.summary.generatedAt).toLocaleTimeString('pt-BR')}`
+        + (data.summary.hrConfigured ? '' : ' — cadastro do Bitrix não configurado (sem nomes/supervisor)');
+    } catch (err) {
+      status.textContent = '';
+      document.getElementById('numBody').innerHTML = `<tr><td colspan="7" class="skeleton-row">${escapeHtml(err.message)}</td></tr>`;
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  ['numSearch', 'numFilterSituation', 'numFilterDepartment'].forEach((id) => {
+    document.getElementById(id).addEventListener(id === 'numSearch' ? 'input' : 'change', () => {
+      if (!phoneAudit) return;
+      numShown = NUM_PAGE;
+      renderNumTable();
+    });
+  });
+  document.getElementById('numMore').addEventListener('click', (e) => {
+    if (!e.target.closest('#numShowMore')) return;
+    numShown += NUM_PAGE;
+    renderNumTable();
+  });
+  document.getElementById('numRefreshBtn').addEventListener('click', loadPhoneAudit);
+  document.getElementById('numDownloadBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('numDownloadBtn');
+    const status = document.getElementById('numStatus');
+    btn.disabled = true;
+    status.textContent = 'Gerando Excel… (pode levar ~10s)';
+    try {
+      const res = await apiFetch(`${API_BASE}/admin/phone-audit?format=xlsx`);
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'falha ao gerar o Excel');
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `dapzap-numeros-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(a.href);
+      status.textContent = 'Excel baixado.';
+    } catch (err) {
+      status.textContent = '';
+      if (window.showToast) window.showToast(err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   // Aba "API": gera o token de API (POST /api/settings/api-token, mesma rota
   // de /settings.html) — a página inteira já é restrita a super admin.
   const genTokenBtn = document.getElementById('genTokenBtn');
@@ -2918,6 +3108,10 @@
       // aberta (mesmo espírito do resto da tela, que já carrega tudo no
       // boot — mas satisfação é a única aba que não faz parte do
       // Promise.all inicial, ver init()).
+      if (tab === 'numeros' && !phoneAuditLoadedOnce) {
+        phoneAuditLoadedOnce = true;
+        loadPhoneAudit();
+      }
       if (tab === 'satisfacao' && !satisfactionLoadedOnce) {
         satisfactionLoadedOnce = true;
         loadSatisfactionList();

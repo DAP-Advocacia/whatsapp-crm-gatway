@@ -412,6 +412,88 @@ async function getResponsibleChain(bitrixUserId) {
   };
 }
 
+// Funcionários ativos com SUPERVISOR resolvido, pra auditoria de números de
+// WhatsApp (src/phoneAudit.js). Supervisor = campo "[GER] RESPONSÁVEL" do
+// próprio perfil (organograma comercial real, ver getResponsibleChain acima);
+// se vazio, cai no gestor do departamento (UF_HEAD, subindo a árvore se a
+// própria pessoa for o gestor). `supervisorSource` diz de onde veio, pra
+// auditar. Uma única varredura de user.get + department.get, sem chamada por
+// usuário. null se o webhook de RH não estiver configurado/falhar.
+async function listEmployeesForAudit() {
+  const [users, departments, topLevelMap] = await Promise.all([
+    callBitrixHRAll('user.get', { FILTER: { ACTIVE: true } }),
+    callBitrixHRAll('department.get'),
+    getTopLevelDepartmentMap(),
+  ]);
+  if (!users || !departments) return null;
+  // Paginação do Bitrix pode repetir o mesmo usuário se alguém for criado
+  // entre as páginas — dedupe por ID pra não contar a mesma pessoa 2x.
+  const seenIds = new Set();
+  for (let i = users.length - 1; i >= 0; i--) {
+    const uid = String(users[i].ID);
+    if (seenIds.has(uid)) users.splice(i, 1);
+    else seenIds.add(uid);
+  }
+
+  const fullName = (u) => [u.NAME, u.SECOND_NAME, u.LAST_NAME].filter(Boolean).join(' ') || null;
+  const nameById = new Map(users.map((u) => [String(u.ID), fullName(u)]));
+  const deptById = new Map(departments.map((d) => [String(d.ID), d]));
+  const nameFromChainField = (raw) => (raw ? String(raw).split('|')[0].trim() || null : null);
+
+  function departmentHead(userId, deptIds) {
+    for (const start of deptIds) {
+      let cur = deptById.get(start);
+      for (let hops = 0; cur && hops < 20; hops++) {
+        const head = cur.UF_HEAD ? String(cur.UF_HEAD) : null;
+        if (head && head !== userId) return head;
+        cur = cur.PARENT ? deptById.get(String(cur.PARENT)) : null;
+      }
+    }
+    return null;
+  }
+
+  return users.map((u) => {
+    const id = String(u.ID);
+    const deptIds = (u.UF_DEPARTMENT || []).map(String);
+    const managerRaw = u[RESPONSIBLE_CHAIN_FIELDS.manager];
+    const directorRaw = u[RESPONSIBLE_CHAIN_FIELDS.director];
+
+    // O campo [GER] RESPONSÁVEL aponta pra PRÓPRIA pessoa nos gestores (dado
+    // real: ~100 casos) — nunca mostrar alguém como supervisor de si mesmo.
+    // Ordem: [GER] (se não for a própria pessoa) -> [DIR] (idem) -> gestor do
+    // departamento (subindo a árvore).
+    let supervisor = { name: null, userId: null, source: null };
+    const fieldManagerId = extractUserIdFromChainField(managerRaw);
+    const fieldDirectorId = extractUserIdFromChainField(directorRaw);
+    if (fieldManagerId && fieldManagerId !== id) {
+      supervisor = { name: nameFromChainField(managerRaw), userId: fieldManagerId, source: 'campo [GER] RESPONSÁVEL' };
+    } else if (fieldDirectorId && fieldDirectorId !== id) {
+      supervisor = { name: nameFromChainField(directorRaw), userId: fieldDirectorId, source: 'campo [DIR] RESPONSÁVEL' };
+    } else {
+      const headId = departmentHead(id, deptIds);
+      if (headId) supervisor = { name: nameById.get(headId) || `Usuário ${headId}`, userId: headId, source: 'gestor do departamento' };
+    }
+
+    let department = null;
+    for (const deptId of deptIds) {
+      const top = topLevelMap.get(deptId);
+      if (top) { department = top; break; }
+    }
+
+    return {
+      id,
+      name: fullName(u),
+      department,
+      departmentName: deptIds.length ? deptById.get(deptIds[0])?.NAME || null : null,
+      supervisor,
+      director: {
+        name: nameFromChainField(directorRaw),
+        userId: extractUserIdFromChainField(directorRaw),
+      },
+    };
+  });
+}
+
 // Celular do Bitrix costuma vir SEM o código do país (DDD + número, 10-11
 // dígitos) — mesmo critério já usado em public/admin.html/src/routes/leads.js
 // pra telefone de fonte externa: detecta por TAMANHO, nunca por já começar
@@ -459,6 +541,7 @@ async function listEmployeesInDepartment(departmentId, includeSubdepartments) {
 module.exports = {
   listDepartments,
   listEmployeesInDepartment,
+  listEmployeesForAudit,
   getSubordinates,
   getResponsibleChain,
   ensureHierarchyCacheFresh,

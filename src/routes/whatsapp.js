@@ -23,6 +23,7 @@ const { requireSuperAdmin, isSuperAdmin } = require('../adminAuth');
 const { publishFeedPost, recordFeedPost, listFeedPosts } = require('../bitrixFeed');
 const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
+const { buildPhoneAudit, buildPhoneAuditWorkbook } = require('../phoneAudit');
 const actionLog = require('../actionLog');
 const webpush = require('../webpush');
 
@@ -2203,6 +2204,31 @@ function createWhatsappRouter({ sessions, broadcast }) {
     } catch (err) {
       console.error('[admin] falha ao listar instâncias:', err.message);
       res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/phone-audit            -> JSON (resumo + pessoas + instâncias)
+  // GET /admin/phone-audit?format=xlsx -> mesma coisa em planilha Excel
+  // Auditoria de números de WhatsApp por colaborador: quem está conectado
+  // agora, quem já conectou e hoje está offline (com os números), quem nunca
+  // conectou, supervisor, números repetidos. Só LEITURA — status ao vivo vem
+  // de sessions.getActiveGateway (não inicia sessão nenhuma, ver
+  // src/phoneAudit.js). Restrito a super admin.
+  // ---------------------------------------------------------------
+  router.get('/admin/phone-audit', requireSuperAdmin, async (req, res) => {
+    try {
+      const audit = await buildPhoneAudit(sessions);
+      if (req.query.format !== 'xlsx') return res.json(audit);
+      const wb = await buildPhoneAuditWorkbook(audit);
+      const day = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="dapzap-numeros-${day}.xlsx"`);
+      await wb.xlsx.write(res);
+      res.end();
+    } catch (err) {
+      console.error('[admin] falha na auditoria de números:', err.message);
+      if (!res.headersSent) res.status(502).json({ error: err.message });
     }
   });
 
