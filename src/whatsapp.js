@@ -163,6 +163,7 @@ class WhatsAppGateway extends EventEmitter {
     // ao vivo a cada GET /instances.
     this.groupsCache = null; // { map: Map, at: number }
     this.groupsLoading = null;
+    this.groupsRetryAt = 0;
     this.groupMetaTried = new Map();
     // Quantas mensagens de HISTÓRICO de cada grupo já foram salvas nesta
     // conexão (teto GROUP_HISTORY_MAX_PER_GROUP, ver messaging-history.set).
@@ -230,6 +231,9 @@ class WhatsAppGateway extends EventEmitter {
   async _getGroups(maxAgeMs = 6 * 60 * 60 * 1000) {
     if (this.groupsCache && Date.now() - this.groupsCache.at < maxAgeMs) return this.groupsCache.map;
     if (this.status !== 'online' || !this.sock) return this.groupsCache?.map || null;
+    // Pausa depois de falha (2026-11-03): o WhatsApp respondia rate-overlimit e o
+    // código tentava de novo a CADA mensagem de grupo (117 vezes em 20 min).
+    if (this.groupsRetryAt && Date.now() < this.groupsRetryAt) return this.groupsCache?.map || null;
     if (!this.groupsLoading) {
       this.groupsLoading = (async () => {
         try {
@@ -239,9 +243,11 @@ class WhatsAppGateway extends EventEmitter {
             map.set(jid, { subject: g.subject || null, size: g.size ?? g.participants?.length ?? 0 });
           }
           this.groupsCache = { map, at: Date.now() };
+          this.groupsRetryAt = 0;
           return map;
         } catch (err) {
-          console.warn(`[whatsapp:${this.sessionId}] falha ao listar grupos:`, err.message);
+          this.groupsRetryAt = Date.now() + (/rate/i.test(err.message) ? 30 : 5) * 60 * 1000;
+          console.warn(`[whatsapp:${this.sessionId}] falha ao listar grupos (nova tentativa só depois da pausa):`, err.message);
           return this.groupsCache?.map || null;
         } finally {
           this.groupsLoading = null;
@@ -260,6 +266,7 @@ class WhatsAppGateway extends EventEmitter {
     // cada 10 min por grupo desconhecido (não martela o WhatsApp).
     const last = this.groupMetaTried.get(jid) || 0;
     if (Date.now() - last < 10 * 60 * 1000 || this.status !== 'online' || !this.sock) return null;
+    if (this.groupsRetryAt && Date.now() < this.groupsRetryAt) return null; // WhatsApp limitando consultas de grupo
     this.groupMetaTried.set(jid, Date.now());
     try {
       const meta = await this.sock.groupMetadata(jid);
