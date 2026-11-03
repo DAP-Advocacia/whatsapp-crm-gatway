@@ -17,9 +17,15 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, isCardGroup }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onQr, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
+    this.onQr = onQr; // (sessionId) => void — só o worker usa (repassa o QR novo ao processo principal)
+    // Opções do modo com workers (ver src/sessionWorker.js): cada worker sobe só
+    // as sessões do seu pedaço (shardFilter) e espaça os logins N vezes mais,
+    // pra o ritmo TOTAL de logins no IP continuar o mesmo de um processo só.
+    this.staggerMs = staggerMs;
+    this.shardFilter = shardFilter;
     this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageStatus = onMessageStatus; // (sessionId, phone, messageId, status) => void
@@ -64,7 +70,7 @@ class SessionManager {
     // espera); só a 2ª, 3ª... de uma rajada esperam este intervalo. Padrão 5s
     // — o incidente de 31/07 e o teste de 03/08 (5 de 11 caíram com 4s, ver
     // ROADMAP) mostram que abrir muitos logins juntos derruba sessões.
-    this.minPairingGapMs = Number(process.env.PAIRING_MIN_GAP_MS ?? 5000);
+    this.minPairingGapMs = Number(pairingGapMs ?? process.env.PAIRING_MIN_GAP_MS ?? 5000);
     this.lastPairingStartAt = 0;
     this.pairingTimer = null;
   }
@@ -111,6 +117,13 @@ class SessionManager {
       existing.requestFreshQr().catch((err) =>
         console.error(`[whatsapp:${id}] falha ao reiniciar sessão deslogada:`, err.message)
       );
+      // Sessão nunca pareada cujo QR expirou parou de tentar sozinha (ver
+      // WhatsAppGateway, handler de 'close'); quem pede o QR de novo (a tela
+      // de Conexões consulta /qr a cada poucos segundos) volta pra fila.
+      if (existing.idleUnpaired && existing.getStatus() === 'offline' && !existing.starting) {
+        existing.idleUnpaired = false;
+        this._enqueuePairing(existing);
+      }
       return existing;
     }
 
@@ -127,6 +140,7 @@ class SessionManager {
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
     gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));
+    gateway.on('qr', () => this.onQr?.(id));
     this._enqueuePairing(gateway);
 
     this.sessions.set(id, gateway);
@@ -167,7 +181,7 @@ class SessionManager {
    */
   async startAllExisting() {
     if (!fs.existsSync(this.baseFolder)) return;
-    const STAGGER_MS = Number(process.env.SESSION_STAGGER_MS || 15000);
+    const STAGGER_MS = Number(this.staggerMs || process.env.SESSION_STAGGER_MS || 15000);
     const entries = fs.readdirSync(this.baseFolder, { withFileTypes: true });
     // `creds.registered` (Baileys, ver initAuthCreds) só vira true DEPOIS do
     // QR ser escaneado com sucesso — antes disso, creds.json já existe (o
@@ -184,6 +198,7 @@ class SessionManager {
     let skippedUnregistered = 0;
     const pending = entries.filter((entry) => {
       if (!entry.isDirectory()) return false;
+      if (this.shardFilter && !this.shardFilter(entry.name)) return false;
       const credsPath = path.join(this.baseFolder, entry.name, 'creds.json');
       if (!fs.existsSync(credsPath)) return false;
       try {

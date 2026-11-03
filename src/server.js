@@ -1,5 +1,15 @@
 require('dotenv').config();
 
+// IA DESLIGADA por padrão (2026-11-03). Agente de IA, Copiloto Comercial,
+// Dapinho, análises/auditoria de conversas, reconhecimento de áudio/imagem e
+// embeddings todos dependem da chave da OpenAI, lida na carga de cada módulo.
+// Sem a chave, qualquer chamada falha na hora com erro tratado (nenhuma
+// consulta externa, nenhum custo de CPU) — e os gatilhos que rodavam a cada
+// mensagem nova ou em varredura periódica ficam de fora (ver AI_ENABLED
+// abaixo). Pra religar: AI_FEATURES=true (e OPENAI_API_KEY no ambiente).
+const AI_ENABLED = process.env.AI_FEATURES === 'true';
+if (!AI_ENABLED) delete process.env.OPENAI_API_KEY;
+
 // Rede de segurança: uma falha de rede transitória chamando o Bitrix (ex:
 // ECONNRESET no meio de um fetch de logMessageToTimeline/verifyBitrixToken)
 // pode escapar do try/catch normal — é um bug conhecido do undici, onde o
@@ -23,6 +33,7 @@ const swaggerUi = require('swagger-ui-express');
 const openapiSpec = require('./openapi');
 
 const { SessionManager } = require('./sessions');
+const { RemoteSessionManager } = require('./remoteSessions');
 const { refreshOwnNumber } = require('./ownNumbers');
 const { createApiLimiter } = require('./rateLimits');
 const { demoModeGate } = require('./demoModeGate');
@@ -134,6 +145,12 @@ app.use('/api', apiLimiter);
 // outros mounts de API.
 app.use(demoModeGate);
 
+// Telas de IA/análise tiradas do ar (2026-11-03, junto com AI_FEATURES): quem
+// abrir o link antigo (favorito, Bitrix) cai no Chat. Os arquivos ficam em
+// public/ — pra voltar, é só remover estas 2 linhas e ligar AI_FEATURES.
+if (!AI_ENABLED) {
+  app.all(['/dashboard.html', '/conversation-analysis.html', '/agente-ia.html', '/agent-examples.html'], (req, res) => res.redirect(303, '/chat.html'));
+}
 app.use(express.static('public', { setHeaders: (res) => res.set('Cache-Control', 'no-cache') }));
 // Imagem/áudio/vídeo ficam no Supabase Storage (ver src/media.js) — não
 // precisa de rota estática local pra mídia.
@@ -466,7 +483,12 @@ function broadcastStatus(sessionId, status) {
 // ---------------------------------------------------------------
 // Boot do WhatsApp multi-sessão (Baileys)
 // ---------------------------------------------------------------
-const sessions = new SessionManager({
+// SESSION_WORKERS=N (N>=1): as sessões do WhatsApp rodam em N processos filhos
+// (src/remoteSessions.js) em vez de dentro deste processo. 0 (padrão) = como sempre.
+const SESSION_WORKERS = Number(process.env.SESSION_WORKERS || 0);
+const SessionsImpl = SESSION_WORKERS > 0 ? RemoteSessionManager : SessionManager;
+const sessions = new SessionsImpl({
+  workers: SESSION_WORKERS,
   baseFolder: AUTH_FOLDER,
   isCardGroup: store.isCardGroupId,
   onStatus: (sessionId, status) => {
@@ -481,7 +503,7 @@ const sessions = new SessionManager({
     // Fila de retry do Agente de IA (src/agentRetryQueue.js) — reprocessa
     // mensagens de lead que não puderam ser respondidas enquanto esta
     // instância estava offline, agora que ela voltou.
-    if (status === 'online') {
+    if (AI_ENABLED && status === 'online') {
       agentRetryWorker.processRetryQueueForSession(sessionId).catch((err) =>
         console.error(`[agent-retry:${sessionId}] falha ao processar fila:`, err.message)
       );
@@ -611,7 +633,7 @@ const sessions = new SessionManager({
         // notificação) já rodou, uma falha aqui nunca deve apagar
         // esse processamento já feito.
         if (!isGroupMsg && !conversationExistedBefore) {
-          agentDispatch.handleNewLeadMessage({
+          if (AI_ENABLED) agentDispatch.handleNewLeadMessage({
             sessionId,
             phone,
             pushName,
@@ -640,7 +662,7 @@ const sessions = new SessionManager({
         // de conversationExistedBefore — diferente do Agente de IA
         // acima, o copiloto sugere em QUALQUER conversa comercial, não
         // só lead novo). Best-effort, mesmo padrão do bloco acima.
-        if (!isGroupMsg) {
+        if (AI_ENABLED && !isGroupMsg) {
           insightGenerator.maybeGenerateInsight({
             sessionId, phone, dealId, messageId: message.id,
           }).catch((err) => console.error('[insights] falha ao gerar insight:', err.message));
@@ -757,20 +779,25 @@ if (SESSION_BOOT_MODE === 'all') {
 
 // verifica a cada 30s se algum agendamento de campanha (Kanban/Calendário)
 // já chegou na hora marcada e dispara sozinho
-require('./scheduler').startPolling(sessions);
+// BACKGROUND_JOBS=false desliga as rotinas periódicas (agendamentos, alerta de
+// banimento, snapshots): usar ao rodar LOCALMENTE com o .env apontando pro banco
+// de produção, pra não disparar nada real.
+const BACKGROUND_JOBS = process.env.BACKGROUND_JOBS !== 'false';
+if (BACKGROUND_JOBS) require('./scheduler').startPolling(sessions);
 
 // Varre a cada ~20min os negócios vinculados a conversas em busca de
 // mudança pra etapa "ganho" — dispara o grupo automático do Agente de
 // IA no FECHAMENTO do negócio (mudança de gatilho, antes disparava na
 // criação do card — ver HANDOFF). Sem retroatividade: só mudança
 // observada a partir de agora conta.
-require('./dealStagePoller').startPolling();
+// (Só existe pra disparar o grupo do Agente de IA — fica desligado com a IA.)
+if (AI_ENABLED) require('./dealStagePoller').startPolling();
 
 // Varre a cada ~20min instâncias com 'forbidden' aberto há mais de 24h
 // (ver src/instanceBanStore.js) — dispara o alerta multicanal 1x por
 // janela de banimento (categoria "Banida" na aba Instâncias, ver GET
 // /instances). Critério e canal confirmados com o usuário.
-require('./instanceBanPoller').startPolling(sessions);
+if (BACKGROUND_JOBS) require('./instanceBanPoller').startPolling(sessions);
 
 // Diagnóstico de desempenho (2026-10-30): mede o ATRASO do event loop (quanto
 // tempo o processo ficou "preso" sem atender nada — é o que o usuário sente
@@ -844,7 +871,7 @@ async function runDailyMetricsSnapshot() {
     }
   }
 }
-setInterval(() => {
+if (BACKGROUND_JOBS) setInterval(() => {
   runDailyMetricsSnapshot().catch((err) =>
     console.error('[instance-health] falha ao rodar snapshot diário de métricas:', err.message)
   );
@@ -852,7 +879,7 @@ setInterval(() => {
 // Dispara 1x já no boot (com um pequeno atraso, pra não competir com o
 // escalonamento de reconexão de sessões salvas — startAllExisting acima),
 // pra não esperar até 1h depois de um deploy pra ter o 1º dado do dia.
-setTimeout(() => {
+if (BACKGROUND_JOBS) setTimeout(() => {
   runDailyMetricsSnapshot().catch((err) =>
     console.error('[instance-health] falha ao rodar snapshot inicial de métricas:', err.message)
   );

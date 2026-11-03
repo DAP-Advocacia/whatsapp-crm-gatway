@@ -3,6 +3,7 @@ const path = require('path');
 const {
   default: makeWASocket,
   useMultiFileAuthState,
+  makeCacheableSignalKeyStore,
   DisconnectReason,
   fetchLatestBaileysVersion,
   downloadMediaMessage,
@@ -52,6 +53,28 @@ function runHistoryExclusive(fn) {
   return run;
 }
 const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+// libsignal despeja com console.info/warn o objeto INTEIRO da sessão de
+// criptografia ("Closing session: SessionEntry {...}"), incluindo chaves
+// privadas, a cada troca de chave — 40+ vezes por hora nos logs de produção
+// (2026-11-03). Além de vazar segredo pro log do Docker, custa CPU e disco.
+// Só essas mensagens são descartadas; qualquer outro console.* segue igual.
+const LIBSIGNAL_NOISE = /^(Closing session|Opening session|Closing open session|Removing old closed session|Migrating session|Session already (closed|open)|Decrypted message with closed session)/;
+for (const level of ['info', 'warn']) {
+  const original = console[level].bind(console);
+  console[level] = (...args) => {
+    if (typeof args[0] === 'string' && LIBSIGNAL_NOISE.test(args[0])) return;
+    original(...args);
+  };
+}
+
+// Mensagens que ESTA sessão enviou há pouco, por id (2026-11-03). O Baileys
+// chama getMessage quando o aparelho do destinatário não consegue abrir a
+// mensagem e pede reenvio (acontece com aparelho novo, troca de chave, LID).
+// Sem getMessage o reenvio falha em silêncio: pro atendente a mensagem
+// "foi enviada", mas no WhatsApp do cliente fica "aguardando a mensagem" ou
+// nunca aparece. Guardamos só as últimas SENT_CACHE_MAX por sessão.
+const SENT_CACHE_MAX = 300;
 
 /**
  * Encapsula UMA sessão de WhatsApp pessoal (um número).
@@ -145,6 +168,35 @@ class WhatsAppGateway extends EventEmitter {
     // conexão (teto GROUP_HISTORY_MAX_PER_GROUP, ver messaging-history.set).
     this.groupHistoryCount = new Map();
     this.groupHistoryTotal = 0;
+    // Controle de ciclo de vida do socket (2026-11-03). Antes start() não
+    // tinha nenhuma trava: nada impedia dois sockets da MESMA sessão ao mesmo
+    // tempo (cada um com sua cópia das chaves em memória, gravando na mesma
+    // pasta — corrompe o estado de criptografia, e o WhatsApp responde com
+    // "Over 2000 messages into the future"/"No session found"), nem um
+    // reconexão agendada ressuscitar uma sessão já removida.
+    this.starting = false;
+    this.destroyed = false; // true após disconnect(): nunca mais inicia nem reconecta
+    this.reconnectTimer = null;
+    this.idleUnpaired = false; // sessão nunca pareada que parou de tentar (QR expirou)
+    this.sentCache = new Map(); // id da mensagem -> proto da mensagem enviada
+  }
+
+  _rememberSent(result) {
+    const id = result?.key?.id;
+    if (!id || !result.message) return;
+    this.sentCache.set(id, result.message);
+    while (this.sentCache.size > SENT_CACHE_MAX) {
+      this.sentCache.delete(this.sentCache.keys().next().value);
+    }
+  }
+
+  // Encerra o socket atual (se houver) sem disparar o handler de 'close' dele.
+  _teardownSocket() {
+    const old = this.sock;
+    if (!old) return;
+    this.sock = null;
+    try { old.ev.removeAllListeners(); } catch { /* já limpo */ }
+    try { old.end(undefined); } catch { /* já fechado */ }
   }
 
   getContactCount() {
@@ -229,12 +281,38 @@ class WhatsAppGateway extends EventEmitter {
   }
 
   async start() {
+    if (this.destroyed || this.starting) return;
+    this.starting = true;
+    try {
+      await this._start();
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  async _start() {
+    this.idleUnpaired = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this._teardownSocket();
+
     const { state, saveCreds } = await useMultiFileAuthState(this.authFolder);
     const version = await getBaileysVersion();
+    if (this.destroyed) return; // removida enquanto carregava
 
-    this.sock = makeWASocket({
+    const sock = makeWASocket({
       version,
-      auth: state,
+      // Chaves de criptografia com cache em memória (recomendado pelo Baileys):
+      // sem isto TODA leitura/escrita de chave ia ao disco — a pasta de sessões
+      // chegou a 3,5 milhões de arquivos, e o kernel passava metade do tempo
+      // da CPU (50% sy) só em I/O de arquivo.
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
+      },
+      getMessage: async (key) => this.sentCache.get(key.id),
       logger: pino({ level: 'warn' }),
       // QR só é necessário até o primeiro pareamento; depois disso a sessão fica
       // salva em `authFolder` e o login persiste entre reinícios do processo.
@@ -271,10 +349,23 @@ class WhatsAppGateway extends EventEmitter {
       // cobrindo qualquer mensagem que chegue mais de uma vez.
       shouldSyncHistoryMessage: (msg) => msg.syncType !== proto.HistorySync.HistorySyncType.FULL,
     });
+    this.sock = sock;
 
-    this.sock.ev.on('creds.update', saveCreds);
+    // Guarda o proto de tudo que esta sessão envia (texto, mídia, reação...)
+    // pra responder ao getMessage acima.
+    const originalSend = sock.sendMessage.bind(sock);
+    sock.sendMessage = async (...args) => {
+      const result = await originalSend(...args);
+      this._rememberSent(result);
+      return result;
+    };
 
-    this.sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', async (update) => {
+      // Evento de um socket já substituído/encerrado: ignora (senão agendaria
+      // uma reconexão duplicada e abriria um 2º socket da mesma sessão).
+      if (sock !== this.sock) return;
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -340,6 +431,18 @@ class WhatsAppGateway extends EventEmitter {
           console.error(
             `[whatsapp:${sessionLabel}] desconexão PERMANENTE (${reason}) — parando de reconectar sozinho, precisa de ação manual.`
           );
+        } else if (!state.creds.me && !state.creds.registered) {
+          // Sessão NUNCA pareada (ninguém escaneou o QR): não há o que
+          // reconectar. Antes isto entrava no backoff abaixo e ficava
+          // gerando QR novo pra sempre — medido em produção (2026-11-03):
+          // 74 dos 90 sockets em loop eram desse tipo, saturando a CPU e
+          // atrasando as conexões de quem já estava pareado. Só reinicia
+          // quando alguém pedir o QR de novo (ver SessionManager.get).
+          // `me` (e não `registered`) é o teste certo: `registered` só vira
+          // true DEPOIS do reinício que o WhatsApp pede logo após o
+          // pareamento (515), então usá-lo aqui quebraria pareamento novo.
+          this.idleUnpaired = true;
+          console.log(`[whatsapp:${sessionLabel}] QR expirou sem pareamento — aguardando alguém pedir um novo`);
         } else if (this.consecutiveFailures + 1 >= MAX_CONSECUTIVE_FAILURES) {
           // Teto de tentativas totais (não só de intervalo entre elas) —
           // achado 2026-09-30: sessões já pareadas um dia mas mortas/
@@ -372,7 +475,15 @@ class WhatsAppGateway extends EventEmitter {
           if (this.consecutiveFailures > 1) {
             console.warn(`[whatsapp:${sessionLabel}] tentativa ${this.consecutiveFailures}, próxima em ${Math.round(backoffMs / 1000)}s`);
           }
-          setTimeout(() => this.start(), backoffMs);
+          // Variação aleatória (jitter) de até 30%: sem ela, todas as sessões
+          // que caíram juntas (ex: reinício do servidor) tentam voltar juntas,
+          // exatamente no mesmo segundo, e travam de novo.
+          const jitteredMs = Math.round(backoffMs * (1 + Math.random() * 0.3));
+          if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = setTimeout(() => {
+            this.reconnectTimer = null;
+            this.start().catch((err) => console.error(`[whatsapp:${sessionLabel}] falha ao reconectar:`, err.message));
+          }, jitteredMs);
         }
       }
     });
@@ -593,13 +704,20 @@ class WhatsAppGateway extends EventEmitter {
    * (ex: já estava offline).
    */
   async disconnect() {
+    // destroyed ANTES de tudo: impede reconexão agendada (ou start() em curso)
+    // de recriar a pasta de credenciais que apagamos logo abaixo.
+    this.destroyed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     try {
       await this.sock?.logout();
     } catch (err) {
       console.error('[whatsapp] falha ao deslogar (limpando mesmo assim):', err.message);
     }
+    this._teardownSocket();
     this.status = 'offline';
-    this.sock = null;
     if (fs.existsSync(this.authFolder)) {
       fs.rmSync(this.authFolder, { recursive: true, force: true });
     }
