@@ -1216,6 +1216,16 @@ class WhatsAppGateway extends EventEmitter {
       }
     }
 
+    // Mídia de HISTÓRICO que não foi baixada (antiga demais, fora do orçamento do
+    // lote ou link expirado) e sem legenda: antes a mensagem INTEIRA era
+    // descartada, e na conversa sumiam áudios/fotos no meio do diálogo (caso
+    // reportado 2026-11-03: só a saudação do colaborador aparecia). Agora fica um
+    // marcador, e a ordem da conversa se mantém.
+    if (!mediaUrl && !text && media) {
+      const label = { audio: 'áudio', image: 'imagem', video: 'vídeo', document: 'documento' }[media.type] || media.type;
+      text = `[${label} não disponível]`;
+    }
+
     if (!mediaUrl && !text) return null;
 
     return {

@@ -1133,6 +1133,9 @@
   /* Reagir/Responder — barra que aparece ao passar o mouse na mensagem
      (mesmo padrão do WhatsApp Web). Fica de fora do balão, do lado de fora
      (esquerda pra mensagem nossa, direita pra do contato). */
+  .resend-btn{ display:block; margin-top:4px; padding:2px 8px; border:1px solid #d9685f; border-radius:10px; background:transparent; color:#d9685f; font-size:11px; cursor:pointer; }
+  .resend-btn:hover{ background:rgba(217,104,95,.12); }
+  .resend-btn:disabled{ opacity:.6; cursor:default; }
   .bubble-actions-wrap{ display: none; align-items: center; gap: 3px; padding-bottom: 6px; flex-shrink: 0; }
   .bubble-row:hover .bubble-actions-wrap, .bubble-actions-wrap.picker-open{ display: flex; }
   .bubble-action-btn{
@@ -4983,7 +4986,7 @@
       const res = await apiFetch(url);
       if (!res.ok) throw new Error('falha ao carregar histórico');
       const data = await res.json();
-      state.messages = data.messages || [];
+      state.messages = outboxRestoreInto(data.messages || [], a.sessionId, a.phone);
       // Paginação (2026-09-30) — só a página mais recente vem aqui (ver
       // GET /history no backend), mensagens mais antigas são buscadas sob
       // demanda ao rolar pro topo (ver loadOlderMessages/bindMessagesScroll).
@@ -5204,6 +5207,7 @@
           ${quotedHtml}
           ${renderBubbleBody(msg, mine)}
           <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
+          ${mine && msg.status === 'failed' && msg.text && !msg.mediaUrl ? `<button type="button" class="resend-btn" data-resend-id="${escapeHtml(String(msg.id))}">Não enviada · Reenviar</button>` : ''}
           ${msg.reaction ? `<span class="reaction-badge${reactionMine ? ' reaction-badge--mine' : ''}" title="${reactionMine ? 'Clique pra remover sua reação' : 'Reação'}" data-msg-id="${escapeHtml(msg.id)}" data-reaction-mine="${reactionMine ? '1' : ''}">${escapeHtml(msg.reaction)}</span>` : ''}
         </div>
       `;
@@ -5901,6 +5905,118 @@
     }
   }
 
+  // ---------- Caixa de saída (mensagens de texto que falharam) ----------
+  // Antes a mensagem com bolinha vermelha existia só na tela: sumia ao recarregar
+  // e nunca era reenviada. Agora fica guardada no navegador de quem enviou, com
+  // botão "Reenviar", e é reenviada SOZINHA quando a falha foi claramente de
+  // "não chegou ao WhatsApp" (sessão desconectada/servidor reiniciando). Quando
+  // não dá pra ter certeza (queda de rede no meio do envio — pode ter saído),
+  // NÃO reenvia sozinho pra não duplicar: só pelo botão.
+  const OUTBOX_KEY = 'dapOutbox';
+  const OUTBOX_AUTO_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+  const OUTBOX_AUTO_MAX_TRIES = 12;
+  let outboxFlushing = false;
+
+  function outboxLoad() {
+    try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]').filter((e) => e && e.tmpId && e.ownerId === state.ownerId); } catch { return []; }
+  }
+  function outboxSave(list) {
+    try {
+      const others = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]').filter((e) => e && e.ownerId !== state.ownerId);
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify([...others, ...list].slice(-200)));
+    } catch { /* storage cheio ou bloqueado: só perde a persistência */ }
+  }
+  function outboxAdd(entry) {
+    const list = outboxLoad().filter((e) => e.tmpId !== entry.tmpId);
+    list.push({ ...entry, ownerId: state.ownerId, tries: 0 });
+    outboxSave(list);
+  }
+  function outboxRemove(tmpId) { outboxSave(outboxLoad().filter((e) => e.tmpId !== tmpId)); }
+
+  // Falha do envio é "claramente não enviada"? (ver comentário acima)
+  async function sendFailureWasNotSent(res) {
+    if (!res) return false; // erro de rede: incerto
+    if (res.status === 503 || res.status === 502) {
+      const body = await res.clone().json().catch(() => null);
+      if (!body) return true; // 502/503 sem JSON = proxy, a requisição nem chegou no app
+      return /não está conectado|reiniciando|tente de novo/i.test(String(body.error || ''));
+    }
+    return false;
+  }
+
+  // Põe de volta na conversa aberta as mensagens com falha guardadas.
+  function outboxRestoreInto(messages, sessionId, phone) {
+    for (const e of outboxLoad()) {
+      if (e.session !== sessionId || e.phone !== phone) continue;
+      if (messages.some((m) => m.id === e.tmpId)) continue;
+      messages.push({ id: e.tmpId, text: e.text, replyToId: e.replyToId || null, direction: 'out', status: 'failed', createdAt: e.createdAt, sentBy: e.ownerId, sentByName: e.senderName || null, _outbox: true });
+    }
+    return messages;
+  }
+
+  async function outboxResend(entry) {
+    const res = await apiFetch(`${API_BASE}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: entry.session, dealId: entry.dealId, phone: entry.phone, text: entry.text, replyToId: entry.replyToId, senderName: entry.senderName }),
+    });
+    if (!res.ok) { const err = new Error('falha no reenvio'); err.res = res; throw err; }
+    const data = await res.json();
+    outboxRemove(entry.tmpId);
+    if (state.active && state.active.sessionId === entry.session && state.active.phone === entry.phone) {
+      const real = data.message;
+      state.messages = state.messages.filter((m) => m.id !== entry.tmpId);
+      if (real && !state.messages.some((m) => m.id === real.id)) state.messages.push(real);
+      renderMessages();
+    }
+    bumpConversation(entry.session, entry.phone, { lastText: entry.text, lastType: 'text', lastDirection: 'out', lastAt: new Date().toISOString() });
+  }
+
+  // Reenvio automático, uma por vez e em ordem (preserva a ordem da conversa).
+  async function outboxFlush() {
+    if (outboxFlushing) return;
+    outboxFlushing = true;
+    try {
+      const now = Date.now();
+      for (const e of outboxLoad().filter((x) => x.auto && x.tries < OUTBOX_AUTO_MAX_TRIES && now - new Date(x.createdAt).getTime() < OUTBOX_AUTO_MAX_AGE_MS)) {
+        if (state.instanceStatus && state.instanceStatus[e.session] && state.instanceStatus[e.session] !== 'online') continue;
+        try {
+          await outboxResend(e);
+        } catch (err) {
+          const list = outboxLoad();
+          const cur = list.find((x) => x.tmpId === e.tmpId);
+          if (cur) {
+            cur.tries++;
+            // Se agora a falha deixou de ser "claramente não enviada", para de insistir sozinho.
+            if (!(await sendFailureWasNotSent(err.res))) cur.auto = false;
+            outboxSave(list);
+          }
+          break; // mantém a ordem: não passa pra próxima enquanto esta falha
+        }
+      }
+    } finally {
+      outboxFlushing = false;
+    }
+  }
+  setInterval(() => { if (state.ownerId) outboxFlush(); }, 20000);
+
+  document.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest && ev.target.closest('[data-resend-id]');
+    if (!btn) return;
+    const tmpId = btn.getAttribute('data-resend-id');
+    const entry = outboxLoad().find((e) => e.tmpId === tmpId);
+    if (!entry) { if (window.showToast) window.showToast('Não foi possível reenviar: copie o texto e envie de novo.', 'error'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    try {
+      await outboxResend(entry);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Reenviar';
+      if (window.showToast) window.showToast('Ainda não foi possível enviar. Verifique se o WhatsApp está conectado.', 'error');
+    }
+  });
+
   function tickIcon(status) {
     // Falha no envio: antes caía no "else" e mostrava check duplo, como se
     // tivesse sido entregue — corrigido com um ícone próprio, em vermelho.
@@ -6148,7 +6264,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session: a.sessionId, dealId: a.dealId, phone: a.phone, text, replyToId, senderName: myBitrixName }),
         });
-        if (!res.ok) throw new Error('Falha no envio');
+        if (!res.ok) { const e = new Error('Falha no envio'); e.res = res; throw e; }
         const data = await res.json();
         resolveOptimisticId(optimisticMsg, data.message.id);
         bumpConversation(a.sessionId, a.phone, { lastText: text, lastType: 'text', lastDirection: 'out', lastAt: optimisticMsg.createdAt });
@@ -6156,6 +6272,11 @@
         optimisticMsg.status = 'failed';
         renderMessages();
         console.error('Erro ao enviar mensagem:', err);
+        outboxAdd({
+          tmpId: optimisticMsg.id, session: a.sessionId, dealId: a.dealId, phone: a.phone, text, replyToId,
+          senderName: myBitrixName, createdAt: optimisticMsg.createdAt,
+          auto: await sendFailureWasNotSent(err.res),
+        });
       }
     }
 
@@ -6358,6 +6479,7 @@
 
       if (payload.type === 'status') {
         state.instanceStatus[id] = payload.status;
+        if (payload.status === 'online') setTimeout(outboxFlush, 1500);
         renderConvList();
         if (state.active && state.active.sessionId === id) {
           state.connectionStatus = payload.status;

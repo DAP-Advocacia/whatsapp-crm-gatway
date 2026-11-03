@@ -1,5 +1,13 @@
 # Backlog (anotado em 2026-11-03)
 
+## Decisões do Gabriel (2026-11-03)
+- Reenvio de mensagem que falhou: botão **e** reenvio automático (FEITO só para texto; mídia/áudio ainda não).
+- Mídia de histórico: manter 2 dias; **continuar puxando ao rolar a conversa pra cima** (pedir ao celular via fetchMessageHistory; junto com o botão de sincronizar).
+- Instância criada e nunca conectada: apagar ao sair da tela de configuração; plano B 12 h (só nunca pareadas, nunca as que têm conversa).
+- Boot das sessões: SESSION_BOOT_MODE=all (depois do upgrade da VPS).
+- Workers: esperar até testar com contas reais.
+- Lista do gestor: "Instância principal — Maria".
+
 ## Prioridade alta (pedido do Gabriel)
 1. **Mensagem não enviada (bolinha vermelha)**: hoje a mensagem só existe na tela e se perde ao recarregar.
    Guardar a tentativa e reenviar (botão "Reenviar" e/ou reenvio automático quando a sessão voltar online).
@@ -7,7 +15,7 @@
 2. **Botão "Sincronizar esta conversa"** dentro do chat (ressincroniza só aquele contato, sem fila grande).
    Base: `sock.fetchMessageHistory(count, oldestMsgKey, oldestMsgTimestamp)` do Baileys (histórico sob demanda,
    o celular precisa estar online). Validar na versão 7.0.0-rc13 antes de prometer.
-3. **Áudio/mídia de histórico com mais de 2 dias é descartado** (`HISTORY_MEDIA_MAX_AGE_DAYS=2`, e sem legenda a
+3. (FEITO) **Áudio/mídia de histórico com mais de 2 dias é descartado** (`HISTORY_MEDIA_MAX_AGE_DAYS=2`, e sem legenda a
    mensagem inteira é descartada). Causa provável do caso "só a saudação apareceu, áudios sumiram".
    Mínimo: salvar um marcador `[áudio]` em vez de descartar.
 4. **Mensagens enviadas pelo celular com o gateway offline** chegam como `type='append'` e o handler de
