@@ -25,6 +25,34 @@ const { convertToOggOpus } = require('./audioConvert');
 // instância de teste abandonada) reconectando pra sempre.
 const MAX_CONSECUTIVE_FAILURES = Number(process.env.MAX_RECONNECT_ATTEMPTS || 20);
 
+// Versão do WhatsApp Web usada no socket, em cache (2026-11-03). Antes, TODO
+// start() — inclusive cada tentativa de reconexão de sessão caída — fazia uma
+// chamada de rede ao GitHub (fetchLatestBaileysVersion). Medido em produção:
+// ~4.800 inícios de socket em ~1h40, ou seja, milhares de chamadas à toa.
+const VERSION_TTL_MS = 6 * 60 * 60 * 1000;
+let versionCache = null; // { version, at }
+async function getBaileysVersion() {
+  if (versionCache && Date.now() - versionCache.at < VERSION_TTL_MS) return versionCache.version;
+  const { version } = await fetchLatestBaileysVersion();
+  versionCache = { version, at: Date.now() };
+  return version;
+}
+
+// Sincronização de histórico (messaging-history.set) processada UMA POR VEZ no
+// processo inteiro. Medido em produção (2026-11-03): 14 sessões recém-pareadas
+// recebendo, juntas, ~100 lotes de 5.000 mensagens em ~1h40 faziam o atraso do
+// event loop passar de 1s (p99), o RSS do node chegar a 6,7 GB e o processo
+// morrer (OOM do kernel e FatalProcessOutOfMemory do V8) — derrubando todas as
+// conexões. Em fila, o custo vira tempo de espera de quem acabou de parear, não
+// queda pra todo mundo.
+let historyChain = Promise.resolve();
+function runHistoryExclusive(fn) {
+  const run = historyChain.then(fn, fn);
+  historyChain = run.catch(() => {});
+  return run;
+}
+const yieldToEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
 /**
  * Encapsula UMA sessão de WhatsApp pessoal (um número).
  * Emite eventos que o resto da aplicação escuta:
@@ -57,7 +85,20 @@ class WhatsAppGateway extends EventEmitter {
     // seguro: nenhum grupo é "de card" até alguém passar a função real —
     // preserva o comportamento de descarte total pra qualquer código que
     // instancie este gateway sem passar essa opção.
-    this.isCardGroup = isCardGroup || (async () => false);
+    // Com cache curto (2026-11-03): um lote de histórico tem milhares de
+    // mensagens de grupo e cada uma fazia uma consulta ao banco (pool de só 10
+    // conexões), competindo com o login e o resto do app. "É de card" vale 10
+    // min; "não é" vale 30s (um grupo de card acabou de ser criado pelo app).
+    const rawIsCardGroup = isCardGroup || (async () => false);
+    const cardCache = new Map(); // jid -> { v, until }
+    this.isCardGroup = async (jid) => {
+      const hit = cardCache.get(jid);
+      if (hit && hit.until > Date.now()) return hit.v;
+      const v = !!(await rawIsCardGroup(jid));
+      if (cardCache.size >= 5000) cardCache.delete(cardCache.keys().next().value);
+      cardCache.set(jid, { v, until: Date.now() + (v ? 10 * 60 * 1000 : 30 * 1000) });
+      return v;
+    };
     this.sock = null;
     this.status = 'offline';
     this.lastQrDataUrl = null;
@@ -93,6 +134,17 @@ class WhatsAppGateway extends EventEmitter {
     // celular (que pode ter muito mais contatos nunca vistos pelo WhatsApp
     // Web). Zera a cada reinício do processo/reconexão do zero.
     this.contactIds = new Set();
+    // Cache dos grupos de WhatsApp desta conta (jid -> { subject, size }), vindo
+    // de UMA consulta groupFetchAllParticipating — ver _getGroups(). Serve pra
+    // dar nome à conversa de grupo e pra contar grupos sem repetir a consulta
+    // ao vivo a cada GET /instances.
+    this.groupsCache = null; // { map: Map, at: number }
+    this.groupsLoading = null;
+    this.groupMetaTried = new Map();
+    // Quantas mensagens de HISTÓRICO de cada grupo já foram salvas nesta
+    // conexão (teto GROUP_HISTORY_MAX_PER_GROUP, ver messaging-history.set).
+    this.groupHistoryCount = new Map();
+    this.groupHistoryTotal = 0;
   }
 
   getContactCount() {
@@ -108,8 +160,61 @@ class WhatsAppGateway extends EventEmitter {
   async getGroupCount() {
     if (this.status !== 'online' || !this.sock) return null;
     try {
-      const groups = await this.sock.groupFetchAllParticipating();
-      return Object.keys(groups || {}).length;
+      const map = await this._getGroups(10 * 60 * 1000);
+      return map ? map.size : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Grupos desta conta (jid -> { subject, size }). UMA consulta ao WhatsApp
+   * (groupFetchAllParticipating), reaproveitada por `maxAgeMs` — antes cada
+   * GET /instances refazia essa consulta ao vivo por instância só pra contar
+   * grupos, e o nome da conversa de grupo também precisa dela. Chamadas
+   * simultâneas dividem a mesma consulta. Devolve o cache antigo se a sessão
+   * não está online ou a consulta falhar (null se nunca houve cache).
+   */
+  async _getGroups(maxAgeMs = 6 * 60 * 60 * 1000) {
+    if (this.groupsCache && Date.now() - this.groupsCache.at < maxAgeMs) return this.groupsCache.map;
+    if (this.status !== 'online' || !this.sock) return this.groupsCache?.map || null;
+    if (!this.groupsLoading) {
+      this.groupsLoading = (async () => {
+        try {
+          const groups = await this.sock.groupFetchAllParticipating();
+          const map = new Map();
+          for (const [jid, g] of Object.entries(groups || {})) {
+            map.set(jid, { subject: g.subject || null, size: g.size ?? g.participants?.length ?? 0 });
+          }
+          this.groupsCache = { map, at: Date.now() };
+          return map;
+        } catch (err) {
+          console.warn(`[whatsapp:${this.sessionId}] falha ao listar grupos:`, err.message);
+          return this.groupsCache?.map || null;
+        } finally {
+          this.groupsLoading = null;
+        }
+      })();
+    }
+    return this.groupsLoading;
+  }
+
+  // Nome (assunto) do grupo, pra dar nome à conversa. null se não achar — a
+  // conversa aparece com o JID até uma próxima mensagem trazer o nome.
+  async _groupSubject(jid) {
+    const known = (await this._getGroups())?.get(jid)?.subject;
+    if (known) return known;
+    // Grupo que entrou depois do cache: consulta pontual, no máximo 1 vez a
+    // cada 10 min por grupo desconhecido (não martela o WhatsApp).
+    const last = this.groupMetaTried.get(jid) || 0;
+    if (Date.now() - last < 10 * 60 * 1000 || this.status !== 'online' || !this.sock) return null;
+    this.groupMetaTried.set(jid, Date.now());
+    try {
+      const meta = await this.sock.groupMetadata(jid);
+      if (meta?.subject && this.groupsCache) {
+        this.groupsCache.map.set(jid, { subject: meta.subject, size: meta.size ?? meta.participants?.length ?? 0 });
+      }
+      return meta?.subject || null;
     } catch {
       return null;
     }
@@ -125,7 +230,7 @@ class WhatsAppGateway extends EventEmitter {
 
   async start() {
     const { state, saveCreds } = await useMultiFileAuthState(this.authFolder);
-    const { version } = await fetchLatestBaileysVersion();
+    const version = await getBaileysVersion();
 
     this.sock = makeWASocket({
       version,
@@ -134,8 +239,16 @@ class WhatsAppGateway extends EventEmitter {
       // QR só é necessário até o primeiro pareamento; depois disso a sessão fica
       // salva em `authFolder` e o login persiste entre reinícios do processo.
       printQRInTerminal: false,
-      // syncFullHistory já é o default (true) — só PEDE o histórico completo
-      // ao celular. Quem de fato decide o que chega no evento
+      // 2026-11-03: syncFullHistory agora é FALSE por padrão. O default do
+      // Baileys (true) manda `requireFullSync` no pareamento e o celular
+      // despeja o histórico inteiro (cota de 10 GB) — o shouldSyncHistoryMessage
+      // abaixo só descarta o tipo FULL DEPOIS que o app já baixou e decodificou
+      // tudo, que é a parte pesada. Com false o celular manda só o histórico
+      // recente. Só afeta pareamentos NOVOS (vai no payload de registro).
+      // SYNC_FULL_HISTORY=true volta ao comportamento antigo.
+      syncFullHistory: process.env.SYNC_FULL_HISTORY === 'true',
+      // Antes: syncFullHistory já era o default (true) — só PEDIA o histórico
+      // completo ao celular. Quem de fato decide o que chega no evento
       // messaging-history.set é shouldSyncHistoryMessage.
       //
       // REVERTIDO (2026-10-02) — mitigação de risco de ban no 1º pareamento.
@@ -311,14 +424,49 @@ class WhatsAppGateway extends EventEmitter {
 
       if (!messages?.length) return;
 
-      let saved = 0;
-      for (const m of messages) {
-        const payload = await this._processIncomingMessage(m, { isHistory: true });
-        if (payload) {
-          this.emit('message', payload);
-          saved++;
+      // Grupos: só as mais RECENTES de cada grupo (GROUP_HISTORY_MAX_PER_GROUP,
+      // padrão 20) e no máximo GROUP_HISTORY_MAX_TOTAL (padrão 500) por conexão
+      // — o histórico de grupo é enorme e o pedido foi "só as últimas".
+      // Ordena por data (mais nova primeiro) pra a cota ser gasta com as mais
+      // novas do lote, e descarta o excedente sem processar (sem consulta, sem
+      // download). Tudo isto roda ANTES de entrar na fila abaixo, pra o lote
+      // que fica esperando já estar enxuto.
+      const groupMax = Number(process.env.GROUP_HISTORY_MAX_PER_GROUP ?? 20);
+      const groupTotalMax = Number(process.env.GROUP_HISTORY_MAX_TOTAL ?? 500);
+      const tsOf = (m) => Number(m.messageTimestamp?.low ?? m.messageTimestamp ?? 0);
+      const ordered = [...messages].sort((a, b) => tsOf(b) - tsOf(a));
+      const toProcess = [];
+      for (const m of ordered) {
+        const jid = m.key?.remoteJid || '';
+        if (jid.endsWith('@g.us')) {
+          const used = this.groupHistoryCount.get(jid) || 0;
+          if (used >= groupMax || this.groupHistoryTotal >= groupTotalMax) continue;
+          this.groupHistoryCount.set(jid, used + 1);
+          this.groupHistoryTotal++;
         }
+        toProcess.push(m);
       }
+      toProcess.reverse(); // volta à ordem cronológica pra gravar na ordem natural
+
+      // Orçamento de downloads de mídia deste lote (HISTORY_MEDIA_MAX_PER_EVENT,
+      // padrão 30) — ver _processIncomingMessage. Medido em produção: ~12.000
+      // downloads de mídia antiga em ~1h, quase todos falhando (link expirado).
+      const mediaBudget = { left: Number(process.env.HISTORY_MEDIA_MAX_PER_EVENT ?? 30) };
+
+      let saved = 0;
+      await runHistoryExclusive(async () => {
+        let i = 0;
+        for (const m of toProcess) {
+          // Respiro pro event loop a cada 25 mensagens, senão um lote de 5.000
+          // monopoliza o único thread e trava login/Chat de todo mundo.
+          if (++i % 25 === 0) await yieldToEventLoop();
+          const payload = await this._processIncomingMessage(m, { isHistory: true, mediaBudget });
+          if (payload) {
+            this.emit('message', payload);
+            saved++;
+          }
+        }
+      });
       console.log(
         `[whatsapp] histórico recebido: ${saved}/${messages.length} mensagens processadas (syncType=${syncType}, isLatest=${isLatest})`
       );
@@ -766,7 +914,7 @@ class WhatsAppGateway extends EventEmitter {
   // foi), mas mensagem antiga sem mídia (link do CDN do WhatsApp expirado,
   // comum em histórico) ainda tem valor — mantém o texto/legenda em vez de
   // jogar a mensagem toda fora.
-  async _processIncomingMessage(m, { isHistory = false } = {}) {
+  async _processIncomingMessage(m, { isHistory = false, mediaBudget = null } = {}) {
     if (!m.message) return null;
 
     // Status/Stories do WhatsApp (remoteJid "status@broadcast") — quando
@@ -796,8 +944,21 @@ class WhatsAppGateway extends EventEmitter {
     // usuário, esse conteúdo precisa aparecer na conversa dentro do
     // card. Qualquer outro grupo (manual, POST /groups da tela
     // Contatos/Chat) continua descartando, sem nenhuma mudança.
+    //
+    // MUDANÇA DE POLÍTICA (2026-11-03, decisão do usuário — colaboradores
+    // precisam dos grupos que já existem no WhatsApp): por padrão, TODO grupo
+    // passa a ser salvo (GROUP_MESSAGES_MODE=all). Reverte, de propósito, o
+    // descarte total de julho/2026 (HANDOFF Parte S), que existia por
+    // privacidade — o conteúdo de grupo agora fica no banco do CRM e visível
+    // a quem tem acesso à instância. GROUP_MESSAGES_MODE=card_only volta
+    // EXATAMENTE ao comportamento anterior (só grupo de card), sem mudar
+    // código. Pra grupo comum (não-card): não baixa mídia pesada, histórico é
+    // limitado às mais recentes e não gera notificação (ver abaixo/server.js).
     const isGroupMsg = (m.key.remoteJid || '').endsWith('@g.us');
-    if (isGroupMsg && !(await this.isCardGroup(m.key.remoteJid))) return null;
+    const isCard = isGroupMsg ? await this.isCardGroup(m.key.remoteJid) : false;
+    const groupsOpen = (process.env.GROUP_MESSAGES_MODE || 'all').toLowerCase() !== 'card_only';
+    if (isGroupMsg && !isCard && !groupsOpen) return null;
+    const isPlainGroup = isGroupMsg && !isCard; // grupo comum (não criado pelo card de negócio)
 
     // Canal do WhatsApp (remoteJid termina em "@newsletter") — posts de
     // canais seguidos (ex: ESPN Brasil, Netflix Brasil) chegam pelo mesmo
@@ -867,11 +1028,16 @@ class WhatsAppGateway extends EventEmitter {
       // uma "conversa" própria, em vez de todas caírem na conversa do
       // grupo. Quem mandou DENTRO do grupo fica em senderPhone/senderName,
       // separado (grupo tem N remetentes possíveis; DM sempre teve só 1).
-      const participantSource = m.key.participantAlt || m.key.participant;
+      // Mensagem que o PRÓPRIO usuário mandou do celular num grupo costuma vir
+      // sem `participant` — o remetente é a própria conta.
+      const participantSource = m.key.participantAlt || m.key.participant || (m.key.fromMe ? this.sock?.user?.id : null);
       // Sem remetente identificável dentro do grupo, não dá pra saber quem
       // mandou — descarta em vez de salvar sem essa informação.
       if (!participantSource) return null;
-      senderPhone = await this._resolveLidPhone(participantSource);
+      // Se o LID não resolver pra telefone, cai no id cru (só dígitos) em vez
+      // de null: senderPhone vazio faria o servidor tratar a mensagem como DM
+      // e criar um "contato" com o JID do grupo (ver onMessage, isGroupMsg).
+      senderPhone = (await this._resolveLidPhone(participantSource)) || String(participantSource).split('@')[0].split(':')[0];
       senderName = m.key.fromMe ? null : m.pushName || null;
       phone = m.key.remoteJid;
     } else {
@@ -886,11 +1052,36 @@ class WhatsAppGateway extends EventEmitter {
     if (!phone) return null;
 
     const media = this._extractMediaInfo(m.message);
-    const text = media ? media.caption : this._extractText(m.message);
+    let text = media ? media.caption : this._extractText(m.message);
     let mediaUrl = null;
     let mimetype = null;
 
-    if (media) {
+    // Grupo comum: guarda só o texto/legenda, com um marcador do tipo ("[vídeo]"),
+    // sem baixar o arquivo — grupo movimentado geraria milhares de downloads e
+    // uploads pro Storage (CPU, banda, custo) e, no histórico, centenas de uma
+    // vez. Imagem e áudio ao VIVO continuam sendo baixados (são pequenos e é o
+    // que as pessoas esperam ver); GROUP_MEDIA_TYPES ajusta (ex: "image,audio,video").
+    const groupMediaTypes = (process.env.GROUP_MEDIA_TYPES || 'image,audio').split(',').map((t) => t.trim()).filter(Boolean);
+    const skipMedia = isPlainGroup && media && (isHistory || !groupMediaTypes.includes(media.type));
+    // Mídia de HISTÓRICO (qualquer conversa): só baixa se for recente
+    // (HISTORY_MEDIA_MAX_AGE_DAYS, padrão 2 — o link do CDN do WhatsApp de
+    // mídia antiga quase sempre já expirou e o download só falha, depois de
+    // gastar rede e memória) e enquanto houver orçamento no lote. Fora disso
+    // mantém só o texto/legenda, igual já acontecia quando o download falhava.
+    let skipOldHistoryMedia = false;
+    if (isHistory && media && !skipMedia) {
+      const ageLimitMs = Number(process.env.HISTORY_MEDIA_MAX_AGE_DAYS ?? 2) * 86400 * 1000;
+      const tsMs = Number(m.messageTimestamp?.low ?? m.messageTimestamp ?? 0) * 1000;
+      const tooOld = tsMs > 0 && Date.now() - tsMs > ageLimitMs;
+      const noBudget = mediaBudget && mediaBudget.left <= 0;
+      if (tooOld || noBudget) skipOldHistoryMedia = true;
+      else if (mediaBudget) mediaBudget.left--;
+    }
+    if (skipMedia) {
+      text = `[${media.type}]${media.caption ? ' ' + media.caption : ''}`;
+    } else if (skipOldHistoryMedia) {
+      // sem download: fica só a legenda (se não tiver, a mensagem é descartada abaixo, como já era)
+    } else if (media) {
       try {
         const buffer = await downloadMediaMessage(m, 'buffer', {});
         mediaUrl = await saveMedia(this.sessionId, m.key.id, buffer, media.mimetype);
@@ -918,7 +1109,10 @@ class WhatsAppGateway extends EventEmitter {
       // sobrescrito pelo nome de quem mandou por último) — o nome do
       // grupo já vem de outro lugar (wa_groups.name, definido na criação),
       // e quem mandou fica em senderName, separado.
-      pushName: isGroupMsg || m.key.fromMe ? null : m.pushName || null,
+      // Grupo comum: o "pushName" da CONVERSA é o assunto (nome) do grupo — é o
+      // que dá nome à conversa na lista (listConversations usa push_name). É
+      // sempre o MESMO valor, então não oscila conforme quem falou por último.
+      pushName: isPlainGroup ? await this._groupSubject(m.key.remoteJid) : isGroupMsg || m.key.fromMe ? null : m.pushName || null,
       // Preenchidos SÓ em mensagem de grupo de card — telefone/nome de
       // quem mandou DENTRO do grupo (não a conversa em si). DM nunca
       // preenche isso (remetente já é a conversa inteira, sem

@@ -1122,6 +1122,7 @@
     align-self: center; font-size: 11px; color: var(--gold); background: rgba(var(--gold-rgb),.1);
     border: 1px solid var(--gold-dim); padding: 4px 12px; border-radius: 100px; margin: 10px 0;
   }
+  .bubble-group-sender{ display:block; font-size:11.5px; font-weight:600; color:var(--gold); margin-bottom:3px; }
   .bubble-sender{ flex-shrink:0; margin-bottom:2px; }
   .bubble-sender .avatar{ width:20px; height:20px; font-size:8.5px; border:none; }
   .bubble-row{ display: flex; align-items: flex-end; gap: 4px; margin: 3px 0; }
@@ -4136,7 +4137,9 @@
   // usuário: só grupos que o próprio app conhece/criou.
   function passesGroupsFilter(conv) {
     if (!state.groupsFilter) return true;
-    return state.groupIds.has(conv.phone);
+    // Qualquer JID de grupo (@g.us) conta — desde 2026-11-03 os grupos que já
+    // existiam no WhatsApp também são salvos, não só os criados pelo app.
+    return state.groupIds.has(conv.phone) || String(conv.phone).endsWith('@g.us');
   }
 
   // Reconstrói os botões do filtro de atendente a partir de quem já está
@@ -5307,8 +5310,14 @@
       const senderHtml = mine && msg.sentByName
         ? `<span class="bubble-sender" title="Enviada por ${escapeHtml(msg.sentByName)}"><span class="avatar">${escapeHtml(initials(msg.sentByName))}</span></span>`
         : '';
+      // Conversa de GRUPO: mostra QUEM falou (nome ou telefone) acima do texto
+      // das mensagens recebidas — sem isso, um grupo vira um bloco de texto sem
+      // autor. Só em mensagem recebida (as nossas já têm o avatar do atendente).
+      const groupWho = !mine ? (msg.groupSenderName || (msg.groupSenderPhone ? '+' + msg.groupSenderPhone : '')) : '';
+      const groupSenderHtml = groupWho ? `<span class="bubble-group-sender">${escapeHtml(groupWho)}</span>` : '';
       const bubbleHtml = `
         <div class="bubble ${bubbleClass}">
+          ${groupSenderHtml}
           ${quotedHtml}
           ${renderBubbleBody(msg, mine)}
           <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>

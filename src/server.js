@@ -578,7 +578,13 @@ const sessions = new SessionManager({
       // silenciada (notifica por padrão).
       if (message.direction === 'in') {
         const prefs = await store.getConversationNotifPrefs(sessionId, phone);
-        if (prefs.notificationsEnabled !== false) {
+        // Grupo comum (sem negócio associado) NÃO gera notificação (2026-11-03):
+        // grupo movimentado criaria dezenas de notificações por hora pro dono E
+        // pra todos os delegados da instância e afogaria a Central de
+        // Notificações. A mensagem aparece normalmente na conversa do grupo.
+        // Grupo de card (dealId) continua notificando como sempre.
+        const isPlainGroupMsg = isGroupMsg && !dealId;
+        if (prefs.notificationsEnabled !== false && !isPlainGroupMsg) {
           const contactName = pushName || prefs.pushName || phone;
           // Conversa atribuída (ver POST /conversations/assign) notifica só
           // quem está atendendo — sem atribuição (inclusive contato novo),

@@ -584,6 +584,9 @@ async function markNotificationsReadForConversation(sessionId, phone) {
 // src/metrics.js) — sem isso, qualquer usuário autenticado veria as
 // conversas de TODOS os donos no dashboard (bug de isolamento corrigido em
 // 2026-07-09, ver Parte AQ do HANDOFF).
+// Exclui conversas de GRUPO (@g.us): as métricas são de conversa com cliente, e
+// grupo (que raramente tem "resposta" nossa) distorceria taxa de resposta,
+// tempo médio e contagem de conversas.
 async function getAll(sessionIds) {
   const { rows } = await pool.query(
     `select
@@ -593,6 +596,7 @@ async function getAll(sessionIds) {
      from conversations c
      left join messages m on m.conversation_id = c.id
      where c.session_id = any($1::text[])
+       and c.phone not like '%@g.us'
      order by c.session_id, c.phone, m.created_at asc`,
     [sessionIds]
   );
@@ -807,13 +811,16 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
   const ownNumbers = new Set(Object.values(getOwnNumbersBySession()));
 
   return rows.map((r) => {
-    const isInternal = ownNumbers.has(r.phone);
-    const originTag = {
-      id: isInternal ? 'origin:interna' : 'origin:externa',
-      name: isInternal ? 'Interno' : 'Externo',
-      color: isInternal ? '#5b8dd8' : '#4caf6e',
-      system: true,
-    };
+    const isGroup = String(r.phone).endsWith('@g.us');
+    const isInternal = !isGroup && ownNumbers.has(r.phone);
+    const originTag = isGroup
+      ? { id: 'origin:grupo', name: 'Grupo', color: '#9a8cc4', system: true }
+      : {
+          id: isInternal ? 'origin:interna' : 'origin:externa',
+          name: isInternal ? 'Interno' : 'Externo',
+          color: isInternal ? '#5b8dd8' : '#4caf6e',
+          system: true,
+        };
     return { ...r, lastAt: r.lastAt.toISOString(), tags: [originTag, ...r.tags] };
   });
 }
