@@ -573,6 +573,9 @@ class WhatsAppGateway extends EventEmitter {
         }
       }
 
+      if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
+        console.log(`[conversations:sync] ${this.sessionId}: resposta do celular com ${messages?.length || 0} mensagens`);
+      }
       if (!messages?.length) return;
 
       // Grupos: só as mais RECENTES de cada grupo (GROUP_HISTORY_MAX_PER_GROUP,
@@ -802,9 +805,22 @@ class WhatsAppGateway extends EventEmitter {
   async syncConversation(phone, anchor, count = 50) {
     if (this.status !== 'online' || !this.sock) throw new Error('WhatsApp não está conectado no momento');
     if (!anchor?.id) throw new Error('conversa sem mensagens para usar de referência');
-    const jid = this._phoneToJid(phone);
+    const pnJid = this._phoneToJid(phone);
+    // Timestamp EXATO da mensagem-âncora, em ms (1º teste em produção, 2026-11-04, com
+    // ts+1 e só o JID de telefone: 4 pedidos, nenhuma resposta do celular).
     const ts = new Date(anchor.createdAt).getTime() || Date.now();
-    await this.sock.fetchMessageHistory(Math.min(Math.max(count, 10), 100), { remoteJid: jid, fromMe: !!anchor.fromMe, id: anchor.id }, ts + 1);
+    const n = Math.min(Math.max(count, 10), 50); // o WhatsApp aceita no máximo 50 por pedido
+    // A conversa no celular pode estar indexada pelo LID do contato (endereçamento novo
+    // do WhatsApp), não pelo telefone — pede pelos dois quando houver LID.
+    const jids = [pnJid];
+    try {
+      const lid = await this.sock.signalRepository?.lidMapping?.getLIDForPN?.(pnJid);
+      if (lid && lid !== pnJid) jids.push(lid);
+    } catch { /* sem mapeamento: só o telefone */ }
+    for (const jid of jids) {
+      await this.sock.fetchMessageHistory(n, { remoteJid: jid, fromMe: !!anchor.fromMe, id: anchor.id }, ts);
+    }
+    console.log(`[conversations:sync] ${this.sessionId}: pedido ao celular (${jids.join(' + ')}, âncora ${anchor.id} ${anchor.createdAt}, ${n} msgs)`);
     return { requested: true };
   }
 
