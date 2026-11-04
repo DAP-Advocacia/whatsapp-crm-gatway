@@ -542,6 +542,78 @@ async function dealForPhoneCached(sessionId, phone) {
   return v;
 }
 
+// ---------------------------------------------------------------
+// Ligações recebidas (2026-11-04). O DapZap não atende chamada; sem isto o cliente
+// liga, o celular do vendedor toca (às vezes longe dele) e ninguém fica sabendo.
+// Ao tocar: grava um aviso na conversa, avisa ao vivo quem está com o Chat aberto e
+// cria notificação. Ao terminar: troca o texto pelo resultado (atendida no celular,
+// recusada ou perdida). Uma mensagem por ligação (id "call-<id>"), sem duplicar.
+// ---------------------------------------------------------------
+const callState = new Map(); // callId -> { accepted, done, at }
+function callText(kind, isVideo) {
+  const what = isVideo ? 'Chamada de vídeo' : 'Ligação de voz';
+  if (kind === 'ringing') return `📞 ${what} recebida — o DapZap não atende ligações. Atenda pelo celular ou retorne ao cliente.`;
+  if (kind === 'accepted') return `📞 ${what} — atendida pelo celular.`;
+  if (kind === 'rejected') return `📞 ${what} recusada pelo celular.`;
+  return `📞 ${what} perdida (não atendida) — retorne ao cliente.`;
+}
+async function notifyCall(sessionId, phone, text) {
+  const prefs = await store.getConversationNotifPrefs(sessionId, phone);
+  const contactName = prefs.pushName || phone;
+  let recipients;
+  if (prefs.assignedTo) {
+    recipients = [prefs.assignedTo];
+  } else {
+    const ownerId = await instancesStore.ownerOf(sessionId);
+    const delegates = await instancesStore.listDelegates(sessionId);
+    recipients = [ownerId, ...delegates.map((d) => d.delegateOwnerId)];
+  }
+  await Promise.all(recipients.filter(Boolean).map((ownerId) => store.addNotification({
+    ownerId,
+    title: `Ligação de ${contactName}`,
+    body: text,
+    target: { sessionId, phone, contactName },
+  })));
+}
+async function handleIncomingCall(sessionId, info) {
+  const { phone, callId, status, isVideo, offline } = info || {};
+  if (!phone || !callId) return;
+  for (const [k, v] of callState) if (Date.now() - v.at > 6 * 3600 * 1000) callState.delete(k);
+  let st = callState.get(callId);
+  const msgId = 'call-' + callId;
+
+  if (status === 'offer' || !st) {
+    if (st) return; // offer repetido
+    st = { accepted: false, done: false, at: Date.now() };
+    callState.set(callId, st);
+    // Ligação que aconteceu com o gateway offline (offline=true) já chega encerrada.
+    const kind = offline ? 'missed' : 'ringing';
+    const text = callText(kind, isVideo);
+    const dealId = await store.getDealForPhone(sessionId, phone);
+    const message = { id: msgId, type: 'text', text, direction: 'in', status: 'delivered', createdAt: info.createdAt || new Date().toISOString() };
+    const isNew = await store.addMessage(sessionId, phone, message, dealId);
+    if (!isNew) return;
+    broadcast(sessionId, phone, { type: 'message', message });
+    await notifyCall(sessionId, phone, text);
+    if (dealId) logMessageToTimeline(dealId, text, 'in').catch(() => {});
+    if (offline) st.done = true;
+    if (status === 'offer') return;
+  }
+
+  if (st.done) return;
+  let kind = null;
+  if (status === 'accept') { st.accepted = true; kind = 'accepted'; }
+  else if (status === 'reject') kind = 'rejected';
+  else if (status === 'timeout') kind = 'missed';
+  else if (status === 'terminate') kind = st.accepted ? null : 'missed';
+  if (!kind) return;
+  if (kind !== 'accepted') st.done = true;
+  const text = callText(kind, isVideo);
+  await store.updateMessageText(sessionId, phone, msgId, text);
+  broadcast(sessionId, phone, { type: 'messageText', messageId: msgId, text });
+  if (kind === 'missed') await notifyCall(sessionId, phone, text);
+}
+
 // SESSION_WORKERS=N (N>=1): as sessões do WhatsApp rodam em N processos filhos
 // (src/remoteSessions.js) em vez de dentro deste processo. 0 (padrão) = como sempre.
 const SESSION_WORKERS = Number(process.env.SESSION_WORKERS || 0);
@@ -567,6 +639,11 @@ const sessions = new SessionsImpl({
         console.error(`[agent-retry:${sessionId}] falha ao processar fila:`, err.message)
       );
     }
+  },
+  onCall: (sessionId, info) => {
+    handleIncomingCall(sessionId, info).catch((err) =>
+      console.error(`[call:${sessionId}] falha ao registrar ligação:`, err.message)
+    );
   },
   onMessage: limitHistory(async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
     try {

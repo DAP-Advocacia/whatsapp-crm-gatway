@@ -17,10 +17,11 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onQr, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
     this.onQr = onQr; // (sessionId) => void — só o worker usa (repassa o QR novo ao processo principal)
+    this.onCall = onCall; // (sessionId, { phone, callId, status, isVideo, offline, createdAt }) => void
     // Opções do modo com workers (ver src/sessionWorker.js): cada worker sobe só
     // as sessões do seu pedaço (shardFilter) e espaça os logins N vezes mais,
     // pra o ritmo TOTAL de logins no IP continuar o mesmo de um processo só.
@@ -174,6 +175,7 @@ class SessionManager {
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
     gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));
     gateway.on('qr', () => this.onQr?.(id));
+    gateway.on('call', (info) => this.onCall?.(id, info));
     gateway._bootQueued = boot; // veio do boot automático: um acesso de usuário depois dá prioridade (ver acima)
     this._enqueuePairing(gateway);
 

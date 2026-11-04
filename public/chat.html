@@ -6435,6 +6435,15 @@
       let payload;
       try { payload = JSON.parse(event.data); } catch { return; }
 
+      // Texto de uma mensagem trocou (ex: ligação: 'recebida' -> 'perdida').
+      if (payload.type === 'messageText') {
+        if (state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+          const m = state.messages.find((x) => x.id === payload.messageId);
+          if (m) { m.text = payload.text; renderMessages(); }
+        }
+        return;
+      }
+
       if (payload.type === 'message') {
         const phone = payload.phone;
         const isActive = state.active && state.active.sessionId === id && state.active.phone === phone;

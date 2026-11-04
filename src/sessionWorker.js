@@ -82,6 +82,7 @@ const manager = new SessionManager({
   onMessageStatus: (id, phone, messageId, status) => send({ t: 'messageStatus', id, args: [phone, messageId, status] }),
   onPresence: (id, phone, state) => send({ t: 'presence', id, args: [phone, state] }),
   onContact: (id, phone, name) => send({ t: 'contact', id, args: [phone, name] }),
+  onCall: (id, info) => send({ t: 'callEvent', id, args: [info] }),
 });
 
 setInterval(() => {

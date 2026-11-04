@@ -495,6 +495,31 @@ class WhatsAppGateway extends EventEmitter {
       }
     });
 
+    // Ligações (2026-11-04). O DapZap não atende chamada (o Baileys não faz voz),
+    // então quem liga só faz tocar o celular do vendedor — que muitas vezes nem vê.
+    // Repassamos cada mudança da ligação (offer = tocando, accept, reject, timeout,
+    // terminate) pra o servidor registrar na conversa e notificar. NÃO recusamos a
+    // chamada: o vendedor ainda pode atender pelo celular. Ligação de grupo fica de fora.
+    sock.ev.on('call', async (calls) => {
+      for (const call of calls || []) {
+        try {
+          if (!call?.id || call.isGroup) continue;
+          const phone = this._jidToPhone(call.callerPn || '') || (await this._resolveLidPhone(call.from || call.chatId));
+          if (!phone) continue;
+          this.emit('call', {
+            phone,
+            callId: call.id,
+            status: call.status,
+            isVideo: !!call.isVideo,
+            offline: !!call.offline,
+            createdAt: (call.date instanceof Date ? call.date : new Date()).toISOString(),
+          });
+        } catch (err) {
+          console.error(`[whatsapp:${this.sessionId}] falha ao processar ligação:`, err.message);
+        }
+      }
+    });
+
     this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
       // 'append' (2026-11-04): mensagens que o WhatsApp entrega fora do fluxo ao vivo
       // (enviadas pelo próprio celular, ou recuperadas depois de uma reconexão) eram
