@@ -98,6 +98,10 @@ app.set('trust proxy', 1);
 // Limite alto porque imagem/áudio/vídeo de /send-media chega em base64 no corpo
 // JSON (base64 infla o tamanho original em ~33%; vídeo é o maior caso, por isso
 // o limite folgado).
+// Versão do app em toda resposta — public/assets/theme-boot.js compara e, se mudar
+// (deploy com a tela aberta), pede pra atualizar a página.
+const APP_VERSION = process.env.GIT_SHA || String(Date.now());
+app.use((req, res, next) => { res.set('X-App-Version', APP_VERSION); next(); });
 app.use(express.json({ limit: '40mb' }));
 // O Bitrix24 sempre carrega a página do app via POST (envia o contexto
 // de auth/placement no corpo, como form-urlencoded), então precisamos

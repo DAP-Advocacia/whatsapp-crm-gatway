@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/assets/theme.css?v=20260925">
 <link rel="stylesheet" href="/assets/base.css?v=20260925">
 <link rel="stylesheet" href="/assets/components.css?v=20260925">
-<script src="/assets/theme-boot.js?v=20260925"></script>
+<script src="/assets/theme-boot.js?v=20261104"></script>
 <script>
   // Tema claro/escuro (2026-08-30) — preferência POR NAVEGADOR (mesmo
   // padrão de localStorage puro das outras 21 telas), aplicada ANTES do
@@ -762,13 +762,13 @@
   // frente via `Authorization: Bearer`. Ver src/auth.js.
   async function verifyAuth() {
     const auth = BX24.getAuth ? BX24.getAuth() : null;
-    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    if (!auth?.access_token) { if (window.showReloadBanner) window.showReloadBanner('auth'); throw new Error('não foi possível obter o token do Bitrix'); }
     const res = await fetch(`${window.location.origin}/api/auth/verify`, {
       method: 'POST',
       headers: { ...FETCH_HEADERS, 'Content-Type': 'application/json' },
       body: JSON.stringify({ accessToken: auth.access_token }),
     });
-    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    if (!res.ok) { if (window.showReloadBanner) window.showReloadBanner('auth'); throw new Error('falha ao autenticar com o Bitrix'); }
     const data = await res.json();
     state.appToken = data.token;
     return data.ownerId;
@@ -786,6 +786,7 @@
         res = await doFetch();
       } catch (err) {
         console.error('[auth] falha ao reautenticar:', err.message);
+        if (window.showReloadBanner) window.showReloadBanner('auth');
       }
     }
     return res;

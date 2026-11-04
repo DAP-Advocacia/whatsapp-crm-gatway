@@ -12,7 +12,7 @@
 <link rel="stylesheet" href="/assets/theme.css?v=20260925">
 <link rel="stylesheet" href="/assets/base.css?v=20260925">
 <link rel="stylesheet" href="/assets/components.css?v=20260925">
-<script src="/assets/theme-boot.js?v=20260925"></script>
+<script src="/assets/theme-boot.js?v=20261104"></script>
 <script>
   if (localStorage.getItem('sidebarCollapsed') === '1') {
     document.documentElement.classList.add('sidebar-collapsed');
@@ -799,13 +799,13 @@
     if (!window.BX24) throw new Error('abra esta página de dentro do Bitrix24');
     await bx24Ready;
     const auth = BX24.getAuth ? BX24.getAuth() : null;
-    if (!auth?.access_token) throw new Error('não foi possível obter o token do Bitrix');
+    if (!auth?.access_token) { if (window.showReloadBanner) window.showReloadBanner('auth'); throw new Error('não foi possível obter o token do Bitrix'); }
     const res = await fetch(`${window.location.origin}/api/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ accessToken: auth.access_token }),
     });
-    if (!res.ok) throw new Error('falha ao autenticar com o Bitrix');
+    if (!res.ok) { if (window.showReloadBanner) window.showReloadBanner('auth'); throw new Error('falha ao autenticar com o Bitrix'); }
     const data = await res.json();
     appToken = data.token;
     return data.ownerId;
@@ -832,6 +832,7 @@
         res = await doFetch();
       } catch (err) {
         console.error('[auth] falha ao reautenticar:', err.message);
+        if (window.showReloadBanner) window.showReloadBanner('auth');
       }
     }
     return res;
