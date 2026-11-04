@@ -73,6 +73,7 @@ class RemoteGateway extends EventEmitter {
   getGroupParticipantPhones(...a) { return this._call('getGroupParticipantPhones', ...a); }
   getProfilePicture(...a) { return this._call('getProfilePicture', ...a); }
   resolveLidToPhone(...a) { return this._call('resolveLidToPhone', ...a); }
+  syncConversation(...a) { return this._call('syncConversation', ...a); }
   getGroupCount() { return this._call('getGroupCount'); }
   retryManually() { return this._call('retryManually'); }
   requestFreshQr() { return this._call('requestFreshQr'); }

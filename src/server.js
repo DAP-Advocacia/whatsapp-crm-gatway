@@ -505,8 +505,15 @@ function pumpHistory() {
 function limitHistory(fn) {
   return (...args) => {
     const isHistory = args[4]; // (sessionId, phone, message, pushName, isHistory, ...)
-    if (!isHistory) return fn(...args);
-    if (historyQueue.length >= HISTORY_QUEUE_MAX) { historyDropped++; return undefined; }
+    const message = args[2];
+    // Ao vivo e "prioridade" (sincronizar conversa / append) não esperam a fila.
+    if (!isHistory || message?.priority) return fn(...args);
+    if (historyQueue.length >= HISTORY_QUEUE_MAX) {
+      // Fila cheia: só descarta o que é antigo (> 3 dias). Mensagem recente de
+      // histórico pode ser uma que não chegou ao vivo (queda/deploy) — essa entra.
+      const age = Date.now() - new Date(message?.createdAt || 0).getTime();
+      if (age > 3 * 86400 * 1000) { historyDropped++; return undefined; }
+    }
     historyQueue.push(() => fn(...args));
     pumpHistory();
     return undefined;

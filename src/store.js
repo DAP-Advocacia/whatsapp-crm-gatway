@@ -200,6 +200,19 @@ async function getHistoryPage(sessionId, phone, { before, limit = 50 } = {}) {
   return { messages: page, hasMore };
 }
 
+// Mensagem mais recente de uma conversa — âncora do "Sincronizar conversa".
+async function getLatestMessageKey(sessionId, phone) {
+  const { rows } = await pool.query(
+    `select m.wa_message_id as id, m.direction, m.created_at as "createdAt"
+     from messages m join conversations c on c.id = m.conversation_id
+     where c.session_id = $1 and c.phone = $2 and m.wa_message_id not like 'tmp-%'
+     order by m.created_at desc limit 1`,
+    [sessionId, phone]
+  );
+  const r = rows[0];
+  return r ? { id: r.id, fromMe: r.direction === 'out', createdAt: r.createdAt.toISOString() } : null;
+}
+
 async function updateMessageStatus(sessionId, phone, messageId, status) {
   await pool.query(
     `update messages m set status = $1
@@ -1192,6 +1205,7 @@ module.exports = {
   updateMessageText,
   setMessageReaction,
   getMessageForReply,
+  getLatestMessageKey,
   setDealForPhone,
   getDealForPhone,
   getSessionsWithHistory,

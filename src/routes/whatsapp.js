@@ -1420,6 +1420,33 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // Notificações. Não afeta o status das mensagens em si (✓✓), só a
   // notificação.
   // ---------------------------------------------------------------
+  // ---------------------------------------------------------------
+  // POST /conversations/sync { session, phone }
+  // Pede ao celular as últimas mensagens dessa conversa (ver
+  // WhatsAppGateway.syncConversation). Responde na hora; as mensagens que faltavam
+  // chegam em alguns segundos e entram na conversa (o Chat recarrega sozinho).
+  // ---------------------------------------------------------------
+  const syncCooldown = new Map(); // session::phone -> último pedido (evita martelar o celular)
+  router.post('/conversations/sync', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone } = req.body || {};
+    if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
+    const key = session + '::' + phone;
+    if (Date.now() - (syncCooldown.get(key) || 0) < 20000) return res.json({ ok: true, throttled: true });
+    syncCooldown.set(key, Date.now());
+    if (syncCooldown.size > 5000) syncCooldown.clear();
+    try {
+      const anchor = await store.getLatestMessageKey(session, phone);
+      if (!anchor) return res.status(400).json({ error: 'conversa sem mensagens para sincronizar' });
+      const gateway = sessions.getActiveGateway(session) || sessions.get(session);
+      if (gateway.getStatus() !== 'online') return res.status(409).json({ error: 'WhatsApp não está conectado no momento' });
+      await gateway.syncConversation(phone, anchor, 50);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[conversations:sync] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   router.post('/conversations/mark-read', requireSession((req) => req.body?.session), async (req, res) => {
     const { session, phone } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });

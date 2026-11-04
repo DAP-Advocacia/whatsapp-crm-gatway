@@ -97,7 +97,7 @@ setInterval(() => {
 const METHODS = new Set([
   'sendMessage', 'sendReaction', 'sendPresence', 'subscribePresence', 'sendMedia',
   'createGroup', 'promoteParticipant', 'getGroupParticipantPhones', 'getProfilePicture',
-  'resolveLidToPhone', 'getGroupCount', 'retryManually', 'requestFreshQr',
+  'resolveLidToPhone', 'getGroupCount', 'retryManually', 'requestFreshQr', 'syncConversation',
 ]);
 
 async function handleCall({ rid, id, method, args }) {

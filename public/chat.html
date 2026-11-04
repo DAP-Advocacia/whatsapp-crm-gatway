@@ -4844,7 +4844,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/></svg>
             </button>
           ` : ''}
-          <button class="icon-btn" id="refreshConvBtn" title="Atualizar conversa">
+          <button class="icon-btn" id="refreshConvBtn" title="Sincronizar conversa com o celular (busca mensagens que não chegaram)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/></svg>
           </button>
           <button class="icon-btn" id="moveInstanceBtn" title="Mover conversa pra outra instância">
@@ -4942,7 +4942,33 @@
     bindMessagesScroll();
     renderReplyPreview();
 
-    document.getElementById('refreshConvBtn').addEventListener('click', loadHistory);
+    // Sincronizar (2026-11-04): além de reler o banco, pede ao celular as últimas
+    // mensagens desta conversa — recupera as que não chegaram (queda/deploy). Elas
+    // chegam em alguns segundos, por isso recarrega de novo depois.
+    document.getElementById('refreshConvBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('refreshConvBtn');
+      const conv = state.active;
+      if (!conv || btn.disabled) return;
+      btn.disabled = true;
+      btn.style.opacity = '.5';
+      try {
+        const res = await apiFetch(`${API_BASE}/conversations/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session: conv.sessionId, phone: conv.phone }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          if (window.showToast) window.showToast(data.error || 'Não foi possível sincronizar agora.', 'error');
+        } else if (window.showToast) {
+          window.showToast('Buscando mensagens no celular… a conversa atualiza em alguns segundos.', 'success');
+        }
+      } catch { /* rede: só recarrega o que já temos */ }
+      await loadHistory();
+      const same = () => state.active && state.active.sessionId === conv.sessionId && state.active.phone === conv.phone;
+      setTimeout(() => { if (same()) loadHistory(); }, 6000);
+      setTimeout(() => { if (same()) loadHistory(); btn.disabled = false; btn.style.opacity = ''; }, 15000);
+    });
     document.getElementById('moveInstanceBtn').addEventListener('click', openMoveInstanceModal);
     document.getElementById('backBtn').addEventListener('click', closeConversation);
     const exportBtn = document.getElementById('exportConvBtn');

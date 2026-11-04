@@ -496,11 +496,19 @@ class WhatsAppGateway extends EventEmitter {
     });
 
     this.sock.ev.on('messages.upsert', async ({ messages, type }) => {
-      if (type !== 'notify') return;
+      // 'append' (2026-11-04): mensagens que o WhatsApp entrega fora do fluxo ao vivo
+      // (enviadas pelo próprio celular, ou recuperadas depois de uma reconexão) eram
+      // ignoradas e sumiam da conversa. Agora são salvas como histórico (sem
+      // notificação), com prioridade — são poucas e recentes. Duplicata é ignorada.
+      if (type !== 'notify' && type !== 'append') return;
+      const asHistory = type === 'append';
 
       for (const m of messages) {
-        const payload = await this._processIncomingMessage(m);
-        if (payload) this.emit('message', payload);
+        const payload = await this._processIncomingMessage(m, asHistory ? { isHistory: true } : undefined);
+        if (payload) {
+          if (asHistory) payload.message.priority = true;
+          this.emit('message', payload);
+        }
       }
     });
 
@@ -572,7 +580,11 @@ class WhatsAppGateway extends EventEmitter {
       const mediaBudget = { left: Number(process.env.HISTORY_MEDIA_MAX_PER_EVENT ?? 50) };
 
       let saved = 0;
-      await runHistoryExclusive(async () => {
+      // ON_DEMAND = resposta do botão "Sincronizar conversa" (poucas mensagens, alguém
+      // esperando na tela): não entra na fila exclusiva de histórico nem na fila do
+      // banco (ver message.priority em server.js).
+      const onDemand = syncType === proto.HistorySync.HistorySyncType.ON_DEMAND;
+      const processAll = async () => {
         let i = 0;
         for (const m of toProcess) {
           // Respiro pro event loop a cada 25 mensagens, senão um lote de 5.000
@@ -580,11 +592,14 @@ class WhatsAppGateway extends EventEmitter {
           if (++i % 25 === 0) await yieldToEventLoop();
           const payload = await this._processIncomingMessage(m, { isHistory: true, mediaBudget });
           if (payload) {
+            if (onDemand) payload.message.priority = true;
             this.emit('message', payload);
             saved++;
           }
         }
-      });
+      };
+      if (onDemand) await processAll();
+      else await runHistoryExclusive(processAll);
       console.log(
         `[whatsapp] histórico recebido: ${saved}/${messages.length} mensagens processadas (syncType=${syncType}, isLatest=${isLatest})`
       );
@@ -750,6 +765,22 @@ class WhatsAppGateway extends EventEmitter {
       status: 'sent',
       createdAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Pede ao CELULAR as últimas mensagens de UMA conversa (histórico sob demanda do
+   * WhatsApp). `anchor` é a mensagem mais recente que já temos dela
+   * ({ id, fromMe, createdAt }): o celular devolve até `count` mensagens anteriores a
+   * ela, que chegam depois pelo evento de histórico (syncType ON_DEMAND) e são gravadas
+   * com dedupe — então só o que faltava aparece de novo. O celular precisa estar online.
+   */
+  async syncConversation(phone, anchor, count = 50) {
+    if (this.status !== 'online' || !this.sock) throw new Error('WhatsApp não está conectado no momento');
+    if (!anchor?.id) throw new Error('conversa sem mensagens para usar de referência');
+    const jid = this._phoneToJid(phone);
+    const ts = new Date(anchor.createdAt).getTime() || Date.now();
+    await this.sock.fetchMessageHistory(Math.min(Math.max(count, 10), 100), { remoteJid: jid, fromMe: !!anchor.fromMe, id: anchor.id }, ts + 1);
+    return { requested: true };
   }
 
   _buildQuoted(jid, replyTo) {
