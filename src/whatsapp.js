@@ -569,7 +569,7 @@ class WhatsAppGateway extends EventEmitter {
       // Orçamento de downloads de mídia deste lote (HISTORY_MEDIA_MAX_PER_EVENT,
       // padrão 30) — ver _processIncomingMessage. Medido em produção: ~12.000
       // downloads de mídia antiga em ~1h, quase todos falhando (link expirado).
-      const mediaBudget = { left: Number(process.env.HISTORY_MEDIA_MAX_PER_EVENT ?? 100) };
+      const mediaBudget = { left: Number(process.env.HISTORY_MEDIA_MAX_PER_EVENT ?? 50) };
 
       let saved = 0;
       await runHistoryExclusive(async () => {
@@ -1195,7 +1195,7 @@ class WhatsAppGateway extends EventEmitter {
     // mantém só o texto/legenda, igual já acontecia quando o download falhava.
     let skipOldHistoryMedia = false;
     if (isHistory && media && !skipMedia) {
-      const ageLimitMs = Number(process.env.HISTORY_MEDIA_MAX_AGE_DAYS ?? 7) * 86400 * 1000;
+      const ageLimitMs = Number(process.env.HISTORY_MEDIA_MAX_AGE_DAYS ?? 5) * 86400 * 1000;
       const tsMs = Number(m.messageTimestamp?.low ?? m.messageTimestamp ?? 0) * 1000;
       const tooOld = tsMs > 0 && Date.now() - tsMs > ageLimitMs;
       const noBudget = mediaBudget && mediaBudget.left <= 0;
