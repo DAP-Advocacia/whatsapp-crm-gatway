@@ -483,6 +483,54 @@ function broadcastStatus(sessionId, status) {
 // ---------------------------------------------------------------
 // Boot do WhatsApp multi-sessão (Baileys)
 // ---------------------------------------------------------------
+// Histórico de mensagens (backfill) entra pelo MESMO pool de conexões do banco que
+// atende as requisições dos usuários. Medido em produção (2026-11-04): ~540
+// mensagens/s de histórico x 4 consultas cada saturavam o pool de 10 conexões e o
+// ping/heartbeat do Chat chegava a esperar mais de 2 minutos. Agora o histórico passa
+// por um limitador de concorrência (sobra sempre conexão livre pros usuários) e a fila
+// tem teto — histórico é melhor-esforço, e o que passar do teto é descartado (quase
+// sempre já está no banco: o WhatsApp reenvia o recente a cada reconexão).
+const HISTORY_CONCURRENCY = Number(process.env.HISTORY_DB_CONCURRENCY || 6);
+const HISTORY_QUEUE_MAX = Number(process.env.HISTORY_QUEUE_MAX || 150000);
+let historyActive = 0;
+let historyDropped = 0;
+const historyQueue = [];
+function pumpHistory() {
+  while (historyActive < HISTORY_CONCURRENCY && historyQueue.length) {
+    const job = historyQueue.shift();
+    historyActive++;
+    Promise.resolve().then(job).catch(() => {}).finally(() => { historyActive--; pumpHistory(); });
+  }
+}
+function limitHistory(fn) {
+  return (...args) => {
+    const isHistory = args[4]; // (sessionId, phone, message, pushName, isHistory, ...)
+    if (!isHistory) return fn(...args);
+    if (historyQueue.length >= HISTORY_QUEUE_MAX) { historyDropped++; return undefined; }
+    historyQueue.push(() => fn(...args));
+    pumpHistory();
+    return undefined;
+  };
+}
+setInterval(() => {
+  if (historyQueue.length > 1000 || historyDropped) {
+    console.log(`[history] fila de histórico: ${historyQueue.length} aguardando, ${historyActive} gravando, ${historyDropped} descartadas`);
+    historyDropped = 0;
+  }
+}, 30000).unref();
+
+// Negócio vinculado a um telefone, com cache de 60 s (só pro caminho de histórico).
+const dealCache = new Map();
+async function dealForPhoneCached(sessionId, phone) {
+  const key = sessionId + '::' + phone;
+  const hit = dealCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.v;
+  const v = await store.getDealForPhone(sessionId, phone);
+  if (dealCache.size > 20000) dealCache.clear();
+  dealCache.set(key, { v, until: Date.now() + 60000 });
+  return v;
+}
+
 // SESSION_WORKERS=N (N>=1): as sessões do WhatsApp rodam em N processos filhos
 // (src/remoteSessions.js) em vez de dentro deste processo. 0 (padrão) = como sempre.
 const SESSION_WORKERS = Number(process.env.SESSION_WORKERS || 0);
@@ -509,7 +557,7 @@ const sessions = new SessionsImpl({
       );
     }
   },
-  onMessage: async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
+  onMessage: limitHistory(async (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => {
     try {
       // Mensagem de GRUPO de card (feature de Negócio) — identificada por
       // senderPhone vir preenchido (só acontece nesse caso, ver
@@ -518,7 +566,13 @@ const sessions = new SessionsImpl({
       // grupo (wa_groups.deal_id), nunca de getDealForPhone (que é por
       // telefone de cliente e nunca teria linha pra um JID de grupo).
       const isGroupMsg = !!senderPhone;
-      const dealId = isGroupMsg ? await store.getDealForGroup(phone) : await store.getDealForPhone(sessionId, phone);
+      // Histórico: o negócio do telefone vem de um cache curto (um lote tem milhares
+      // de mensagens da mesma conversa) — antes era 1 consulta por mensagem.
+      const dealId = isGroupMsg
+        ? await store.getDealForGroup(phone)
+        : isHistory
+          ? await dealForPhoneCached(sessionId, phone)
+          : await store.getDealForPhone(sessionId, phone);
       if (isGroupMsg) {
         message.groupSenderPhone = senderPhone;
         message.groupSenderName = senderName;
@@ -529,9 +583,11 @@ const sessions = new SessionsImpl({
       // conversa via upsert se ela não existir) — depois disso seria
       // tarde demais pra saber. Não se aplica a grupo (JID de grupo
       // nunca é "lead").
-      const conversationExistedBefore = isGroupMsg ? true : await store.conversationExists(sessionId, phone);
+      // Só é usado depois do `if (isHistory) return` abaixo (gatilho de lead novo) —
+      // pular a consulta no histórico economiza 1 ida ao banco por mensagem.
+      const conversationExistedBefore = isGroupMsg || isHistory ? true : await store.conversationExists(sessionId, phone);
 
-      const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName);
+      const isNew = await store.addMessage(sessionId, phone, message, dealId, pushName, { cacheConversation: isHistory });
       if (!isNew) return; // já tínhamos essa mensagem (ex: eco da que nós mesmos enviamos)
 
       // Sincroniza automaticamente com a tela de Contatos (ver
@@ -671,7 +727,7 @@ const sessions = new SessionsImpl({
     } catch (err) {
       console.error('[server] falha ao processar mensagem:', err.message);
     }
-  },
+  }),
   // Nome de contato vindo da AGENDA do WhatsApp (contacts.upsert/update ao
   // vivo, ou o backfill de histórico — ver WhatsAppGateway._extractContactInfo),
   // não de uma mensagem em si. Existe separado de onMessage/pushName porque

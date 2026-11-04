@@ -71,8 +71,24 @@ async function getAgentEnabled(sessionId, phone) {
 // Retorna true se a mensagem foi de fato adicionada, false se já existia (mesmo
 // `id` para essa conversa) — usado para não duplicar quando o WhatsApp ecoa de
 // volta uma mensagem que nós mesmos já salvamos ao enviar (ver sendMessage/sendMedia).
-async function addMessage(sessionId, phone, message, dealId, pushName) {
-  const conversationId = await getOrCreateConversation(sessionId, phone, dealId, pushName);
+// Id da conversa por (sessão, telefone), só usado no histórico: um lote tem milhares de
+// mensagens da mesma conversa e o upsert (que também reescreve updated_at) rodava a cada
+// uma — 5 milhões de updates em 425 mil conversas. 1º upsert real, o resto reaproveita.
+const convIdCache = new Map();
+async function addMessage(sessionId, phone, message, dealId, pushName, { cacheConversation = false } = {}) {
+  let conversationId;
+  if (cacheConversation) {
+    const key = sessionId + '::' + phone;
+    const hit = convIdCache.get(key);
+    if (hit && hit.until > Date.now()) conversationId = hit.id;
+    else {
+      conversationId = await getOrCreateConversation(sessionId, phone, dealId, pushName);
+      if (convIdCache.size > 20000) convIdCache.clear();
+      convIdCache.set(key, { id: conversationId, until: Date.now() + 10 * 60 * 1000 });
+    }
+  } else {
+    conversationId = await getOrCreateConversation(sessionId, phone, dealId, pushName);
+  }
 
   const { rowCount } = await pool.query(
     `insert into messages
