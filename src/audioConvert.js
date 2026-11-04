@@ -27,8 +27,17 @@ function convertToOggOpus(buffer) {
 
     fs.writeFileSync(inputPath, buffer);
 
+    // Mesmo perfil das notas de voz nativas do WhatsApp (2026-11-04): mono, 48 kHz,
+    // ~32 kb/s, modo "voip" e sem metadados. Antes saía estéreo a ~106 kb/s com
+    // metadados do encoder — tocava no DapZap e em parte dos celulares, mas no
+    // destinatário aparecia "não foi possível baixar, problema com o arquivo".
     ffmpeg(inputPath)
+      .noVideo()
       .audioCodec('libopus')
+      .audioChannels(1)
+      .audioFrequency(48000)
+      .audioBitrate('32k')
+      .outputOptions(['-application voip', '-map_metadata -1', '-avoid_negative_ts make_zero', '-fflags +bitexact', '-flags:a +bitexact'])
       .format('ogg')
       .on('error', (err) => {
         cleanup();

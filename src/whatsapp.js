@@ -847,7 +847,10 @@ class WhatsAppGateway extends EventEmitter {
         ? { video: outBuffer, mimetype: outMimetype, caption: caption || undefined }
         : type === 'document'
         ? { document: outBuffer, mimetype: outMimetype, fileName: fileName || 'arquivo', caption: caption || undefined }
-        : { audio: outBuffer, mimetype: outMimetype, ptt: false };
+        // ptt: true = enviado como nota de voz (o formato que o WhatsApp espera pra
+        // OGG/Opus). Como "arquivo de áudio" (ptt: false) parte dos celulares não
+        // consegue baixar/abrir o OGG. Duração e forma de onda o Baileys calcula.
+        : { audio: outBuffer, mimetype: outMimetype, ptt: true };
     const options = replyTo ? { quoted: this._buildQuoted(jid, replyTo) } : undefined;
     const result = await this.sock.sendMessage(jid, content, options);
     return {
