@@ -749,8 +749,29 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
   const params = [sessionIds, archived];
   let searchClause = '';
   if (term) {
-    params.push(`%${term}%`);
-    searchClause = `and (c.phone ilike $3 or ct.name ilike $3 or c.push_name ilike $3)`;
+    // Busca por palavras (cada uma precisa aparecer em algum lugar do nome/telefone),
+    // sem diferenciar acento nem maiúscula, e telefone digitado com máscara
+    // ("(21) 99999-9999") casa com o número salvo só com dígitos. Antes era a frase
+    // inteira como um bloco: "Verli Marcon" não achava "Verli Paulo Marcon" (reportado
+    // 2026-11-04).
+    const fold = (x) => `translate(lower(${x}), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')`;
+    // Termo só de dígitos e pontuação ("(71) 98233-8368", "+55 71 ...") é UM número.
+    const asPhone = /^[\d\s()+\-.]+$/.test(term) && term.replace(/\D/g, '').length >= 4;
+    const words = asPhone ? [term.replace(/\D/g, '')] : term.split(/\s+/).filter(Boolean).slice(0, 6);
+    const parts = [];
+    for (const w of words) {
+      const folded = w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      params.push(`%${folded}%`);
+      const idx = params.length;
+      const digits = w.replace(/\D/g, '');
+      let clause = `${fold('ct.name')} like $${idx} or ${fold('c.push_name')} like $${idx} or c.phone ilike $${idx}`;
+      if (digits.length >= 3) {
+        params.push(`%${digits}%`);
+        clause += ` or c.phone like $${params.length}`;
+      }
+      parts.push(`(${clause})`);
+    }
+    searchClause = `and ${parts.join(' and ')}`;
   }
 
   const { rows } = await pool.query(

@@ -96,7 +96,28 @@ class SessionManager {
     }, wait);
   }
 
+  // Sessão que NUNCA foi pareada (sem creds.me) só gera um QR — não é um login de
+  // conta existente, então não precisa do espaçamento que protege contra login em
+  // massa (esse espaçamento é pras sessões já pareadas reconectando). Antes, tudo
+  // entrava na MESMA fila: com 4 workers o intervalo é de 20 s por sessão, e
+  // dezenas de telas de QR abertas (cada consulta recoloca a sessão ociosa na
+  // fila) formavam uma fila de ~10 min — quem criava uma conexão nova ficava só
+  // com a barra de progresso, sem QR (reportado 2026-11-04).
+  _isUnpaired(gateway) {
+    try {
+      const creds = JSON.parse(fs.readFileSync(path.join(gateway.authFolder, 'creds.json'), 'utf8'));
+      return !creds.me;
+    } catch {
+      return true; // sem creds.json (ou ilegível): nunca pareada
+    }
+  }
+
   _enqueuePairing(gateway) {
+    if (this._isUnpaired(gateway)) {
+      gateway.status = 'connecting';
+      gateway.start().catch((err) => console.error(`[whatsapp:${gateway.sessionId}] falha ao iniciar sessão:`, err.message));
+      return;
+    }
     gateway.status = 'queued';
     this.pairingQueue.push(gateway);
     this._runPairingQueue();
