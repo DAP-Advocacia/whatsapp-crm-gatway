@@ -410,7 +410,12 @@ class WhatsAppGateway extends EventEmitter {
         const PERMANENT_CODES = new Set([
           DisconnectReason.forbidden,
           DisconnectReason.connectionReplaced,
-          DisconnectReason.badSession,
+          // badSession (500) SAIU daqui em 2026-11-04: em produção ele vem de um
+          // stream:error passageiro (ex: ack de mídia de status) — 57 sessões caíram
+          // assim em 2 h e ficavam paradas até alguém clicar "Tentar reconectar",
+          // recebendo nada no DapZap com o WhatsApp funcionando no celular. Agora
+          // reconecta com backoff; o teto de tentativas (MAX_RECONNECT_ATTEMPTS)
+          // continua protegendo contra loop se for credencial corrompida de verdade.
         ]);
         const isPermanent = PERMANENT_CODES.has(statusCode);
         const sessionLabel = path.basename(this.authFolder);
@@ -1243,6 +1248,20 @@ class WhatsAppGateway extends EventEmitter {
     } else {
       const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
       phone = await this._resolveLidPhone(phoneSource);
+      // O mapeamento LID->telefone às vezes chega segundos depois da mensagem
+      // (2026-11-04): antes a mensagem era descartada na hora, sem registro. Agora
+      // tenta mais 2 vezes (1,5 s e 4 s) só pra mensagem AO VIVO e loga se ainda
+      // assim não resolver.
+      if (!phone && !isHistory && String(phoneSource).endsWith('@lid')) {
+        for (const wait of [1500, 4000]) {
+          await new Promise((r) => setTimeout(r, wait));
+          phone = await this._resolveLidPhone(phoneSource);
+          if (phone) break;
+        }
+        if (!phone) {
+          console.warn(`[whatsapp:${this.sessionId}] mensagem descartada: contato ${phoneSource} sem telefone mapeado (id ${m.key.id}, fromMe=${!!m.key.fromMe})`);
+        }
+      }
     }
     // Sem telefone resolvido, não tem conversa/contato pra associar — mesma
     // decisão de grupo/status/newsletter acima: descarta em vez de salvar

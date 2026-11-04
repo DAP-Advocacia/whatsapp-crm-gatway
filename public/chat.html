@@ -6416,6 +6416,7 @@
   // atual, pra atualizar a lista (nova mensagem em qualquer conversa) e a
   // conversa aberta, sem precisar reabrir a conexão ao trocar de conversa.
   // =========================================================
+  const inboxSocketFails = {}; // id da instância -> quedas seguidas sem nunca conectar
   function openInboxSockets() {
     state.sessionIds.forEach((id) => openSingleInboxSocket(id));
   }
@@ -6632,7 +6633,26 @@
       }
     };
 
-    socket.onclose = () => { setTimeout(() => openSingleInboxSocket(id), 4000); };
+    // Tempo real (2026-11-04): uma aba aberta com instâncias que foram APAGADAS
+    // depois ficava tentando reconectar nelas a cada 4 s pra sempre (o servidor
+    // recusa — 2.000 tentativas em 30 min de uma só pessoa). Se a conexão cai 3
+    // vezes seguidas sem nunca abrir, recarrega a lista de instâncias; e o
+    // intervalo cresce (4 s, 8 s ... até 60 s) em vez de ficar fixo.
+    let opened = false;
+    socket.onopen = () => { opened = true; inboxSocketFails[id] = 0; };
+    socket.onclose = () => {
+      if (!opened) inboxSocketFails[id] = (inboxSocketFails[id] || 0) + 1;
+      const fails = inboxSocketFails[id] || 0;
+      const delay = Math.min(4000 * 2 ** Math.max(0, fails - 1), 60000);
+      const retry = () => setTimeout(() => openSingleInboxSocket(id), delay);
+      if (fails > 0 && fails % 3 === 0) {
+        // initInstances reabre os sockets das instâncias que ainda existem; se falhar
+        // (ex: servidor reiniciando num deploy), segue tentando normalmente.
+        initInstances().catch(retry);
+        return;
+      }
+      retry();
+    };
 
     state.inboxSockets.push({ id, socket });
   }
