@@ -498,6 +498,10 @@ const HISTORY_CONCURRENCY = Number(process.env.HISTORY_DB_CONCURRENCY || 6);
 const HISTORY_QUEUE_MAX = Number(process.env.HISTORY_QUEUE_MAX || 150000);
 let historyActive = 0;
 let historyDropped = 0;
+// Conversas que tiveram mensagem de histórico descartada (2026-11-04): o log
+// [history-drop] lista sessão + telefone, pra saber exatamente em quais clicar em
+// "Sincronizar conversa". Junta por conversa a cada 30 s (não 1 linha por mensagem).
+const historyDroppedConvs = new Map(); // "sessionId::phone" -> { n, oldest, newest }
 const historyQueue = [];
 function pumpHistory() {
   while (historyActive < HISTORY_CONCURRENCY && historyQueue.length) {
@@ -516,7 +520,17 @@ function limitHistory(fn) {
       // Fila cheia: só descarta o que é antigo (> 3 dias). Mensagem recente de
       // histórico pode ser uma que não chegou ao vivo (queda/deploy) — essa entra.
       const age = Date.now() - new Date(message?.createdAt || 0).getTime();
-      if (age > 3 * 86400 * 1000) { historyDropped++; return undefined; }
+      if (age > 3 * 86400 * 1000) {
+        historyDropped++;
+        const key = args[0] + '::' + args[1];
+        const at = message?.createdAt || null;
+        const cur = historyDroppedConvs.get(key) || { n: 0, oldest: at, newest: at };
+        cur.n++;
+        if (at && (!cur.oldest || at < cur.oldest)) cur.oldest = at;
+        if (at && (!cur.newest || at > cur.newest)) cur.newest = at;
+        if (historyDroppedConvs.size < 5000 || historyDroppedConvs.has(key)) historyDroppedConvs.set(key, cur);
+        return undefined;
+      }
     }
     historyQueue.push(() => fn(...args));
     pumpHistory();
@@ -527,6 +541,13 @@ setInterval(() => {
   if (historyQueue.length > 1000 || historyDropped) {
     console.log(`[history] fila de histórico: ${historyQueue.length} aguardando, ${historyActive} gravando, ${historyDropped} descartadas`);
     historyDropped = 0;
+  }
+  if (historyDroppedConvs.size) {
+    for (const [key, v] of historyDroppedConvs) {
+      const [sessionId, phone] = key.split('::');
+      console.log(`[history-drop] session=${sessionId} phone=${phone} descartadas=${v.n} de=${v.oldest} ate=${v.newest}`);
+    }
+    historyDroppedConvs.clear();
   }
 }, 30000).unref();
 
