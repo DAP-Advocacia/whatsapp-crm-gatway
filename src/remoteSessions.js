@@ -223,7 +223,9 @@ class RemoteSessionManager {
     if (!gw) gw = this._mirror(id);
     // Sessão nova, deslogada (precisa de QR novo) ou parada esperando alguém pedir o QR:
     // avisa o worker (com limite de frequência — get() é chamado a cada requisição da API).
-    const needsEnsure = isNew || gw.loggedOut || gw.idleUnpaired;
+    // status 'queued': a sessão espera na fila do worker; avisa que um usuário pediu pra
+    // ela passar à frente das sessões do boot automático.
+    const needsEnsure = isNew || gw.loggedOut || gw.idleUnpaired || gw.status === 'queued';
     const now = Date.now();
     if (needsEnsure && now - gw.lastEnsureAt >= ENSURE_THROTTLE_MS) {
       gw.lastEnsureAt = now;

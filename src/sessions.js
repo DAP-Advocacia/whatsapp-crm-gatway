@@ -127,11 +127,23 @@ class SessionManager {
    * Devolve (criando e iniciando se necessário) o gateway daquele usuário.
    * Iniciar gera um QR novo caso ainda não exista sessão pareada na pasta.
    */
-  get(sessionId) {
+  get(sessionId, { boot = false } = {}) {
     const id = sanitize(sessionId);
     if (!id) throw new Error('sessão inválida');
     if (this.sessions.has(id)) {
       const existing = this.sessions.get(id);
+      // Prioridade (2026-11-04): sessão que entrou na fila pelo boot automático e agora
+      // um usuário pediu (abriu o app) passa pra FRENTE da fila — quem está esperando
+      // com a tela aberta não fica atrás de sessões de gente que nem está online. O
+      // espaçamento entre logins continua valendo.
+      if (!boot && existing._bootQueued && existing.getStatus() === 'queued') {
+        const i = this.pairingQueue.indexOf(existing);
+        if (i > 0) {
+          this.pairingQueue.splice(i, 1);
+          this.pairingQueue.unshift(existing);
+        }
+        existing._bootQueued = false;
+      }
       // Sem isso, uma sessão deslogada pelo celular fica "morta" pra sempre —
       // requestFreshQr() não faz nada se ela não estiver deslogada, então é
       // seguro chamar em todo acesso (cada /qr, /status, /send, etc.).
@@ -162,6 +174,7 @@ class SessionManager {
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
     gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));
     gateway.on('qr', () => this.onQr?.(id));
+    gateway._bootQueued = boot; // veio do boot automático: um acesso de usuário depois dá prioridade (ver acima)
     this._enqueuePairing(gateway);
 
     this.sessions.set(id, gateway);
@@ -245,7 +258,7 @@ class SessionManager {
     console.log(`[sessions] retomando ${pending.length} sessão(ões) salva(s), escalonado a cada ${STAGGER_MS}ms`);
     for (const entry of pending) {
       console.log(`[sessions] retomando sessão salva: ${entry.name}`);
-      this.get(entry.name);
+      this.get(entry.name, { boot: true });
       if (entry !== pending[pending.length - 1]) {
         await new Promise((resolve) => setTimeout(resolve, STAGGER_MS));
       }
