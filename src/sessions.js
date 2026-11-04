@@ -203,7 +203,10 @@ class SessionManager {
       if (!fs.existsSync(credsPath)) return false;
       try {
         const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-        if (!creds.registered) {
+        // 2026-11-04: no Baileys 7 `registered` nunca é gravado como true (medido em
+        // produção: 0 de 573 sessões pareadas), então o filtro só por ele descartava
+        // TODAS e o boot "all" retomava 0 sessões. `me` é o que identifica o pareamento.
+        if (!creds.registered && !creds.me) {
           skippedUnregistered++;
           return false;
         }
