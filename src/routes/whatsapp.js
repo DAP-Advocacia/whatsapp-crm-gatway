@@ -83,7 +83,8 @@ function validateDelayOverride(minDelayMs, maxDelayMs) {
 
 // Máximo de instâncias de WhatsApp por dono (ver POST /instances abaixo) —
 // decisão do usuário, não uma limitação técnica do Baileys/gateway em si.
-const MAX_INSTANCES_PER_OWNER = 3;
+// 2026-11-04: de 3 para 5 (equipe de vendas com vários chips). MAX_INSTANCES_PER_OWNER ajusta sem código.
+const MAX_INSTANCES_PER_OWNER = Number(process.env.MAX_INSTANCES_PER_OWNER) || 5;
 
 // Resolve o dono de um agendamento (session_id) pra checagem de posse nas
 // rotas /scheduled-campaigns/:id/... — a coluna vem com nome de banco
@@ -572,7 +573,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ---------------------------------------------------------------
   // Delegação de acesso (ver db/schema.sql, instance_delegates) — um
   // gerente compartilha a própria instância com outros usuários do Bitrix
-  // (ex: funcionários), sem contar contra o limite de 3 de quem recebe. Só
+  // (ex: funcionários), sem contar contra o limite de instâncias de quem recebe. Só
   // o dono de verdade concede/revoga/lista (conferido dentro de
   // instancesStore, não só por requireOwnerMatch — mesmo cuidado de
   // DELETE /instances/:id acima).
