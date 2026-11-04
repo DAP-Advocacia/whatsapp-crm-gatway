@@ -1338,6 +1338,7 @@
   .state-screen .state-icon{ width: 46px; height: 46px; color: var(--text-faint); }
   .state-screen h3{ font-family: 'Fraunces', serif; font-weight: 500; font-size: 16px; color: var(--text); margin: 4px 0 0; }
   .state-screen p{ font-size: 12.5px; max-width: 280px; margin: 0; color: var(--text-faint); }
+  .conv-loading{ display:flex; flex-direction:column; align-items:center; gap:10px; padding:36px 16px; color:var(--text-faint); font-size:13px; }
   .spinner{ width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--text-faint); animation: spin .8s linear infinite; }
   @keyframes spin{ to{ transform: rotate(360deg); } }
 
@@ -1556,7 +1557,7 @@
       </div>
     </div>
     <div class="conv-list" id="convList">
-      <p class="empty">Carregando conversas…</p>
+      <div class="conv-loading"><div class="spinner"></div><span>Carregando conversas…</span></div>
     </div>
   </div>
   <div class="conv-view" id="convView"></div>
@@ -3981,6 +3982,9 @@
   // =========================================================
   async function loadConversations() {
     if (!state.sessionIds.length) return;
+    // Spinner só quando a lista está vazia (1ª carga ou troca de filtro/busca);
+    // numa recarga com conversas já na tela, mantém a lista pra não piscar.
+    if (!state.conversations.length) convList.innerHTML = '<div class="conv-loading"><div class="spinner"></div><span>Carregando conversas…</span></div>';
     try {
       const params = new URLSearchParams({ session: state.sessionIds.join(','), archived: String(state.archivedView) });
       if (state.search) params.set('search', state.search);
