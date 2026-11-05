@@ -128,7 +128,7 @@ class SessionManager {
    * Devolve (criando e iniciando se necessário) o gateway daquele usuário.
    * Iniciar gera um QR novo caso ainda não exista sessão pareada na pasta.
    */
-  get(sessionId, { boot = false } = {}) {
+  get(sessionId, { boot = false, wantQr = false } = {}) {
     const id = sanitize(sessionId);
     if (!id) throw new Error('sessão inválida');
     if (this.sessions.has(id)) {
@@ -145,16 +145,17 @@ class SessionManager {
         }
         existing._bootQueued = false;
       }
-      // Sem isso, uma sessão deslogada pelo celular fica "morta" pra sempre —
-      // requestFreshQr() não faz nada se ela não estiver deslogada, então é
-      // seguro chamar em todo acesso (cada /qr, /status, /send, etc.).
-      existing.requestFreshQr().catch((err) =>
-        console.error(`[whatsapp:${id}] falha ao reiniciar sessão deslogada:`, err.message)
-      );
-      // Sessão nunca pareada cujo QR expirou parou de tentar sozinha (ver
-      // WhatsAppGateway, handler de 'close'); quem pede o QR de novo (a tela
-      // de Conexões consulta /qr a cada poucos segundos) volta pra fila.
-      if (existing.idleUnpaired && existing.getStatus() === 'offline' && !existing.starting) {
+      // Sessão deslogada pelo celular ou nunca pareada com o QR expirado: só
+      // gera QR novo quando alguém PEDE o QR (GET /qr, janela de QR aberta).
+      // Até 2026-11-05 qualquer acesso (status, foto, histórico, WebSocket do
+      // Chat) reiniciava o pareamento: 564 QRs/h em produção, gerados pra
+      // ninguém, no mesmo worker que segura as sessões conectadas.
+      if (wantQr) {
+        existing.requestFreshQr().catch((err) =>
+          console.error(`[whatsapp:${id}] falha ao reiniciar sessão deslogada:`, err.message)
+        );
+      }
+      if (wantQr && existing.idleUnpaired && existing.getStatus() === 'offline' && !existing.starting) {
         existing.idleUnpaired = false;
         this._enqueuePairing(existing);
       }

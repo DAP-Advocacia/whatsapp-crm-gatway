@@ -1623,7 +1623,23 @@
     const qrImageWrap = document.getElementById('qrImageWrap');
 
     if (qrPollInterval) clearInterval(qrPollInterval);
+    // Teto de tempo (2026-11-05): cada consulta ao /qr mantém o pareamento
+    // gerando QR no servidor. Janela esquecida aberta (ou aba em segundo plano)
+    // gerava QR pra sempre. Depois de QR_MAX_MS sem conectar, para e oferece
+    // um botão pra gerar outro; com a aba escondida, não consulta.
+    const QR_MAX_MS = 4 * 60 * 1000;
+    const pollStartedAt = Date.now();
+    function stopForInactivity() {
+      clearInterval(qrPollInterval);
+      qrPollInterval = null;
+      qrImageWrap.innerHTML = '';
+      qrStatus.className = '';
+      qrStatus.innerHTML = 'O QR Code expirou. <button type="button" class="btn" id="qrRegenBtn" style="margin-left:8px">Gerar novo QR Code</button>';
+      document.getElementById('qrRegenBtn').addEventListener('click', () => openQrModal(instanceId));
+    }
     async function poll() {
+      if (document.hidden) return;
+      if (Date.now() - pollStartedAt > QR_MAX_MS) { stopForInactivity(); return; }
       try {
         const res = await apiFetch(`${API_BASE}/qr?session=${encodeURIComponent(instanceId)}`, { headers: FETCH_HEADERS });
         const data = await res.json();
@@ -2023,6 +2039,8 @@
     const qrStatusEl = document.getElementById('firstAccessQrStatus');
 
     async function poll() {
+      // Aba em segundo plano não mantém o pareamento gerando QR (ver openQrModal).
+      if (document.hidden) return;
       try {
         // ownerId como session: mesmo id que ensureDefault usaria pra
         // "Principal" (ver src/instances.js) — assertOwnsSession já libera

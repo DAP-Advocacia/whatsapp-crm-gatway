@@ -1381,7 +1381,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // endpoint também CRIA/INICIA a sessão (gera o QR no primeiro acesso).
   // ---------------------------------------------------------------
   router.get('/qr', requireSession((req) => req.query.session), (req, res) => {
-    const gateway = sessions.get(req.query.session);
+    const gateway = sessions.get(req.query.session, { wantQr: true });
     res.json({ qr: gateway.getLastQr(), status: gateway.getStatus() });
   });
 

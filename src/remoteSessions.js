@@ -217,7 +217,7 @@ class RemoteSessionManager {
   }
 
   /** Igual ao SessionManager.get: devolve na hora (síncrono) e garante que a sessão existe no worker. */
-  get(sessionId) {
+  get(sessionId, { wantQr = false } = {}) {
     const id = sanitize(sessionId);
     if (!id) throw new Error('sessão inválida');
     let gw = this.sessions.get(id);
@@ -227,11 +227,12 @@ class RemoteSessionManager {
     // avisa o worker (com limite de frequência — get() é chamado a cada requisição da API).
     // status 'queued': a sessão espera na fila do worker; avisa que um usuário pediu pra
     // ela passar à frente das sessões do boot automático.
-    const needsEnsure = isNew || gw.loggedOut || gw.idleUnpaired || gw.status === 'queued';
+    // Deslogada/nunca pareada só volta a gerar QR quando alguém pede o QR (ver sessions.js).
+    const needsEnsure = isNew || gw.status === 'queued' || (wantQr && (gw.loggedOut || gw.idleUnpaired));
     const now = Date.now();
     if (needsEnsure && now - gw.lastEnsureAt >= ENSURE_THROTTLE_MS) {
       gw.lastEnsureAt = now;
-      this._post(this.workers[shardOf(id, this.count)], { t: 'ensure', id });
+      this._post(this.workers[shardOf(id, this.count)], { t: 'ensure', id, wantQr: !!wantQr });
     }
     return gw;
   }

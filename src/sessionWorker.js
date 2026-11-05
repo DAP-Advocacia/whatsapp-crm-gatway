@@ -127,7 +127,7 @@ process.on('message', (msg) => {
   } else if (msg.t === 'ensure') {
     const id = sanitize(msg.id);
     if (!id) return;
-    manager.get(id); // cria/inicia (fila de pareamento) ou renova QR de sessão deslogada
+    manager.get(id, { wantQr: !!msg.wantQr }); // cria/inicia (fila de pareamento); QR novo só se pedido
     pushState(id);
   } else if (msg.t === 'bootAll') {
     manager.startAllExisting().catch((err) => console.error(`[worker ${INDEX}] falha no boot das sessões:`, err.message));
