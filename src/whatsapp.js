@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const {
   default: makeWASocket,
-  useMultiFileAuthState,
   makeCacheableSignalKeyStore,
   DisconnectReason,
   fetchLatestBaileysVersion,
@@ -15,6 +14,7 @@ const {
 const QRCode = require('qrcode');
 const pino = require('pino');
 const { EventEmitter } = require('events');
+const { useAtomicAuthState, flushAuthWrites } = require('./authState');
 const { saveMedia } = require('./media');
 const { convertToOggOpus } = require('./audioConvert');
 
@@ -208,6 +208,20 @@ class WhatsAppGateway extends EventEmitter {
     try { old.end(undefined); } catch { /* já fechado */ }
   }
 
+  /**
+   * Desligamento do processo (SIGTERM, ver SessionManager.shutdown): fecha o socket
+   * sem deslogar (a sessão continua válida no WhatsApp e volta no próximo boot) e
+   * impede qualquer reconexão agendada. Sem eventos de status: não é queda.
+   */
+  shutdown() {
+    this.destroyed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this._teardownSocket();
+  }
+
   getContactCount() {
     return this.contactIds.size;
   }
@@ -313,7 +327,23 @@ class WhatsAppGateway extends EventEmitter {
     }
     this._teardownSocket();
 
-    const { state, saveCreds } = await useMultiFileAuthState(this.authFolder);
+    let authState;
+    try {
+      authState = await useAtomicAuthState(this.authFolder);
+    } catch (err) {
+      if (err.code !== 'AUTH_CREDS_CORRUPT') throw err;
+      // creds.json ilegível e sem cópia boa: a sessão não tem como voltar. NÃO cria
+      // credencial nova por cima das chaves antigas da pasta (era o que misturava
+      // as chaves); marca como deslogada, e o próximo pedido de QR (requestFreshQr)
+      // limpa a pasta e começa do zero.
+      console.error(`[whatsapp:${path.basename(this.authFolder)}] ${err.message} — precisa parear de novo`);
+      this.loggedOut = true;
+      this.lastDisconnectReason = 'loggedOut';
+      this.status = 'offline';
+      this.emit('status', this.status);
+      return;
+    }
+    const { state, saveCreds } = authState;
     const version = await getBaileysVersion();
     if (this.destroyed) return; // removida enquanto carregava
 
@@ -770,6 +800,45 @@ class WhatsAppGateway extends EventEmitter {
     if (fs.existsSync(this.authFolder)) {
       fs.rmSync(this.authFolder, { recursive: true, force: true });
     }
+    await this.start();
+  }
+
+  /**
+   * Botão "Reconectar com QR Code" (2026-11-05): a sessão está caída (passou de
+   * QR_UNLOCK_ATTEMPTS tentativas seguidas, ou parou de tentar) e a pessoa decidiu
+   * parear de novo. Cancela a reconexão agendada, fecha o socket, APAGA as credenciais
+   * e começa do zero com um QR novo — nunca fica com dois sockets da mesma sessão.
+   * Não dá pra deslogar do lado do WhatsApp (o logout precisa do socket conectado): o
+   * aparelho antigo continua na lista "Aparelhos conectados" do celular até a pessoa
+   * remover; sem conexão, ele não recebe nada. Mensagens e histórico (banco) não mudam.
+   */
+  async forceFreshQr() {
+    if (this.destroyed || this.status === 'online') return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    // Espera um start() em andamento terminar: ele já leu as credenciais antigas e
+    // criaria o socket com elas depois de a pasta ser apagada.
+    for (let i = 0; this.starting && i < 150; i++) await new Promise((r) => setTimeout(r, 100));
+    if (this.destroyed || this.status === 'online') return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this._teardownSocket();
+    await flushAuthWrites(3000); // gravação pendente do socket antigo não pode recriar o creds.json
+    this.loggedOut = false;
+    this.needsAttention = false;
+    this.lastDisconnectReason = null;
+    this.consecutiveFailures = 0;
+    this.lastQrDataUrl = null;
+    this.idleUnpaired = false;
+    if (fs.existsSync(this.authFolder)) {
+      fs.rmSync(this.authFolder, { recursive: true, force: true });
+    }
+    this.status = 'connecting';
+    this.emit('status', this.status);
     await this.start();
   }
 

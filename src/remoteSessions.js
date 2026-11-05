@@ -36,6 +36,7 @@ class RemoteGateway extends EventEmitter {
     this.status = 'queued';
     this.loggedOut = false;
     this.needsAttention = false;
+    this.consecutiveFailures = 0;
     this.lastDisconnectReason = null;
     this.sock = null; // só "tem ou não tem" interessa (ver listActive)
     this.idleUnpaired = false;
@@ -48,6 +49,7 @@ class RemoteGateway extends EventEmitter {
     this.status = s.status;
     this.loggedOut = s.loggedOut;
     this.needsAttention = s.needsAttention;
+    this.consecutiveFailures = s.consecutiveFailures || 0;
     this.lastDisconnectReason = s.lastDisconnectReason;
     this.idleUnpaired = s.idleUnpaired;
     this._qr = s.qr;
@@ -79,6 +81,7 @@ class RemoteGateway extends EventEmitter {
   getGroupCount() { return this._call('getGroupCount'); }
   retryManually() { return this._call('retryManually'); }
   requestFreshQr() { return this._call('requestFreshQr'); }
+  forceFreshQr() { return this._call('forceFreshQr'); }
 
   // Usado só por SessionManager.remove (caminho local); aqui vira 'remove' no worker.
   disconnect() { return this._call('remove'); }
@@ -93,6 +96,7 @@ class RemoteSessionManager {
     this.nextRid = 1;
     this.heapMb = Number(process.env.WORKER_HEAP_MB || 2048);
     this.bootAll = false;
+    this.stopping = false; // true depois de shutdown(): workers que saem não são recriados
     this.workers = [];
     for (let i = 0; i < this.count; i++) this.workers.push({ index: i, child: null, ready: false, pending: new Map(), restarts: 0, queue: [] });
     for (const w of this.workers) this._spawn(w);
@@ -100,6 +104,7 @@ class RemoteSessionManager {
   }
 
   _spawn(w) {
+    if (this.stopping) return;
     const child = fork(path.join(__dirname, 'sessionWorker.js'), [], {
       env: {
         ...process.env,
@@ -122,6 +127,7 @@ class RemoteSessionManager {
     if (w.child !== child) return;
     w.child = null;
     w.ready = false;
+    if (this.stopping) return; // desligamento pedido: sem recriar nem marcar as sessões como caídas
     console.error(`[sessions] worker ${w.index} encerrou (code=${code} signal=${signal}) — recriando; só as sessões dele ficam offline`);
     for (const { reject, timer } of w.pending.values()) {
       clearTimeout(timer);
@@ -253,6 +259,21 @@ class RemoteSessionManager {
     }
     if (gw) this.sessions.delete(id);
     refreshOwnNumber(id);
+  }
+
+  /**
+   * Desligamento limpo (SIGTERM): pede a cada worker que feche as sessões sem deslogar e
+   * termine as gravações de credenciais, e espera eles saírem (até waitMs).
+   */
+  async shutdown(waitMs = 6500) {
+    this.stopping = true;
+    const exits = this.workers
+      .filter((w) => w.child)
+      .map((w) => new Promise((resolve) => {
+        w.child.once('exit', resolve);
+        try { w.child.send({ t: 'shutdown' }); } catch { resolve(); }
+      }));
+    await Promise.race([Promise.all(exits), new Promise((resolve) => setTimeout(resolve, waitMs))]);
   }
 
   async startAllExisting() {

@@ -1432,7 +1432,20 @@
   const ICON_CONTACTS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
   const ICON_GROUPS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 
-  const STATUS_LABEL = { online: 'Conectada', connecting: 'Aguardando QR', offline: 'Desconectada' };
+  // Rótulo do selo do card a partir de i.connState (calculado em GET /instances, ver
+  // src/routes/whatsapp.js). Antes usava o status cru e 'queued' aparecia escrito em inglês.
+  //  online       -> verde
+  //  reconnecting -> amarelo: sessão pareada voltando sozinha (não precisa de QR)
+  //  unpaired     -> amarelo: nunca pareou / esperando o QR
+  //  down         -> vermelho: o gateway desistiu de reconectar (ou foi deslogada pelo celular)
+  function instanceBadge(i) {
+    switch (i.connState) {
+      case 'online': return { cls: 'online', label: 'Conectada' };
+      case 'reconnecting': return { cls: 'connecting', label: i.status === 'queued' ? 'Na fila de reconexão' : 'Reconectando…' };
+      case 'unpaired': return { cls: 'connecting', label: 'Aguardando QR' };
+      default: return { cls: 'offline', label: 'Desconectada' };
+    }
+  }
   // Traduz o DisconnectReason cru (ver src/whatsapp.js) pra uma frase que
   // faz sentido pra quem não é técnico — HANDOFF Parte CQ.
   const DISCONNECT_REASON_LABEL = {
@@ -1479,7 +1492,7 @@
             <div class="instance-label">${escapeHtml(i.label)}</div>
             <div class="instance-sub">WhatsApp (QR Code)</div>
           </div>
-          <span class="status-badge ${i.status}"><span class="status-dot"></span>${STATUS_LABEL[i.status] || i.status}</span>
+          <span class="status-badge ${instanceBadge(i).cls}"><span class="status-dot"></span>${instanceBadge(i).label}</span>
         </div>
         <div class="instance-phone">${i.phone ? 'Número: ' + escapeHtml(i.phone) : 'ainda não pareado'}${i.delegated ? ` · <span class="instance-delegated-tag">compartilhada${i.ownerName ? ' por ' + escapeHtml(i.ownerName) : ' com você'}</span>` : ''}</div>
         <div class="instance-stats">
@@ -1494,14 +1507,22 @@
           <div class="instance-attention">
             <span><strong>Precisa de atenção:</strong> ${DISCONNECT_REASON_LABEL[i.lastDisconnectReason] || 'a conexão parou sozinha e não volta automaticamente'}. Pare de usar por algumas horas e tente reconectar, ou remova e pareie de novo se persistir.</span>
           </div>
-        ` : i.openConnectionEvent ? `
+        ` : i.loggedOut ? `
+          <div class="instance-attention">
+            <span><strong>Desconectada:</strong> ${DISCONNECT_REASON_LABEL.loggedOut}. Clique em "Conectar WhatsApp" e escaneie o QR de novo.</span>
+          </div>
+        ` : i.connState === 'reconnecting' && i.openConnectionEvent ? `
           <div class="instance-downtime" data-downtime-since="${i.openConnectionEvent.startedAt}">
-            <span><strong>Fora do ar</strong> há <span data-downtime-text>—</span> — reconectando sozinha.</span>
+            <span><strong>Fora do ar</strong> há <span data-downtime-text>—</span> — reconectando sozinha, não precisa escanear o QR.</span>
+          </div>
+        ` : i.connState === 'reconnecting' ? `
+          <div class="instance-downtime">
+            <span>Reconectando sozinha — não precisa escanear o QR de novo.</span>
           </div>
         ` : ''}
         <div class="instance-actions">
           ${i.needsAttention ? `<button type="button" data-reconnect="${i.id}">Tentar reconectar</button>` : ''}
-          ${i.status !== 'online' ? `<button type="button" data-qr="${i.id}">Conectar WhatsApp</button>` : ''}
+          ${i.canReconnectWithQr ? `<button type="button" data-forceqr="${i.id}">${i.connState === 'down' ? 'Conectar WhatsApp' : 'Reconectar com QR Code'}</button>` : (i.connState === 'down' || i.connState === 'unpaired') ? `<button type="button" data-qr="${i.id}">Conectar WhatsApp</button>` : ''}
           <button type="button" class="instance-history-btn" data-history="${i.id}" data-label="${escapeHtml(i.label)}">Ver histórico</button>
           ${i.delegated ? '' : `
             <button type="button" data-rename="${i.id}" data-label="${escapeHtml(i.label)}">Renomear</button>
@@ -1541,6 +1562,9 @@
 
     instancesWrap.querySelectorAll('[data-qr]').forEach((btn) => {
       btn.addEventListener('click', () => openQrModal(btn.dataset.qr));
+    });
+    instancesWrap.querySelectorAll('[data-forceqr]').forEach((btn) => {
+      btn.addEventListener('click', () => reconnectWithQr(btn.dataset.forceqr));
     });
     instancesWrap.querySelectorAll('[data-reconnect]').forEach((btn) => {
       btn.addEventListener('click', () => reconnectInstance(btn.dataset.reconnect));
@@ -1996,6 +2020,21 @@
       if (!res.ok) throw new Error((await res.json()).error);
       loadInstances();
       if (window.showToast) window.showToast('Tentando reconectar…', 'success');
+    } catch (err) {
+      if (window.showToast) window.showToast(err.message, 'error');
+    }
+  }
+
+  // ---------------- Reconectar com QR Code ----------------
+  // Sessão que não volta sozinha: descarta a atual (o servidor apaga as credenciais) e
+  // abre o QR. Pede confirmação porque, depois disso, a sessão antiga não volta mais.
+  async function reconnectWithQr(id) {
+    const confirmed = await window.confirmDialog('Isso desconecta o número atual e exige escanear o QR Code de novo. Se o celular estiver sem internet, o QR não vai funcionar. Continuar?');
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/instances/${id}/reconnect-qr?owner=${encodeURIComponent(myOwnerId)}`, { method: 'POST' });
+      if (!res.ok) throw new Error((await res.json()).error);
+      openQrModal(id);
     } catch (err) {
       if (window.showToast) window.showToast(err.message, 'error');
     }

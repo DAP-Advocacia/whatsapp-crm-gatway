@@ -1440,3 +1440,25 @@ server.listen(PORT, () => {
   console.log(`[server] gateway multi-sessão rodando na porta ${PORT}`);
   console.log(`[server] o QR Code de cada usuário aparece dentro da aba "WhatsApp" do card de Negócio`);
 });
+
+// Desligamento limpo (deploy/restart do Swarm manda SIGTERM). Antes não havia handler: o
+// Node como PID 1 do container ignora o sinal, e o Swarm matava tudo com SIGKILL depois
+// do prazo, no meio da gravação das credenciais. Agora fecha as sessões sem deslogar e
+// espera os workers terminarem as gravações, tudo dentro do prazo do Swarm (10 s padrão).
+let shuttingDown = false;
+async function shutdownGracefully(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[server] ${signal}: desligando (sessões fechadas sem deslogar)`);
+  setTimeout(() => process.exit(0), Number(process.env.SHUTDOWN_MS || 8000)).unref();
+  try { server.close(); } catch { /* já fechado */ }
+  try {
+    await sessions.shutdown?.();
+  } catch (err) {
+    console.error('[server] erro ao desligar as sessões:', err.message);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => shutdownGracefully('SIGTERM'));
+process.on('SIGINT', () => shutdownGracefully('SIGINT'));
+

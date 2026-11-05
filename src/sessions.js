@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { WhatsAppGateway } = require('./whatsapp');
 const { refreshOwnNumber } = require('./ownNumbers');
+const { flushAuthWrites } = require('./authState');
 
 /**
  * Gerencia VÁRIAS sessões de WhatsApp — uma por usuário do Bitrix.
@@ -75,10 +76,11 @@ class SessionManager {
     this.minPairingGapMs = Number(pairingGapMs ?? process.env.PAIRING_MIN_GAP_MS ?? 5000);
     this.lastPairingStartAt = 0;
     this.pairingTimer = null;
+    this.stopping = false; // true depois de shutdown(): não inicia mais nenhuma sessão
   }
 
   _runPairingQueue() {
-    if (this.pairingTimer || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
+    if (this.stopping || this.pairingTimer || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
     const wait = Math.max(0, this.lastPairingStartAt + this.minPairingGapMs - Date.now());
     this.pairingTimer = setTimeout(() => {
       this.pairingTimer = null;
@@ -115,6 +117,7 @@ class SessionManager {
   }
 
   _enqueuePairing(gateway) {
+    if (this.stopping) return;
     if (this._isUnpaired(gateway)) {
       gateway.status = 'connecting';
       gateway.start().catch((err) => console.error(`[whatsapp:${gateway.sessionId}] falha ao iniciar sessão:`, err.message));
@@ -262,12 +265,32 @@ class SessionManager {
     }
     console.log(`[sessions] retomando ${pending.length} sessão(ões) salva(s), escalonado a cada ${STAGGER_MS}ms`);
     for (const entry of pending) {
+      if (this.stopping) return;
       console.log(`[sessions] retomando sessão salva: ${entry.name}`);
       this.get(entry.name, { boot: true });
       if (entry !== pending[pending.length - 1]) {
         await new Promise((resolve) => setTimeout(resolve, STAGGER_MS));
       }
     }
+  }
+
+  /**
+   * Desligamento limpo (SIGTERM do deploy/Swarm): para de iniciar sessões, fecha os
+   * sockets SEM deslogar (as sessões continuam válidas e voltam no próximo boot) e
+   * espera as gravações de credenciais em andamento terminarem — assim o processo
+   * não é morto com um arquivo pela metade.
+   */
+  async shutdown(flushMs = 5000) {
+    this.stopping = true;
+    if (this.pairingTimer) {
+      clearTimeout(this.pairingTimer);
+      this.pairingTimer = null;
+    }
+    this.pairingQueue.length = 0;
+    for (const gateway of this.sessions.values()) {
+      try { gateway.shutdown(); } catch (err) { console.error(`[whatsapp:${gateway.sessionId}] erro ao desligar:`, err.message); }
+    }
+    await flushAuthWrites(flushMs);
   }
 
   /**

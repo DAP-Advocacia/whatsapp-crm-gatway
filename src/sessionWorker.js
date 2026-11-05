@@ -31,6 +31,26 @@ process.on('unhandledRejection', (err) => console.error(`[worker ${INDEX}] unhan
 // Se o processo principal morrer, não fica órfão segurando as sessões.
 process.on('disconnect', () => process.exit(0));
 
+// Desligamento limpo (deploy): o processo principal manda 'shutdown' (ou o worker recebe
+// SIGTERM direto). Fecha os sockets sem deslogar e espera as gravações de credenciais
+// terminarem antes de sair — sem isso o Swarm mata o processo no meio de um writeFile.
+let shuttingDown = false;
+async function gracefulExit(why) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[worker ${INDEX}] desligando (${why})`);
+  // Trava de segurança: se algo pendurar, sai mesmo assim antes do Swarm dar SIGKILL.
+  setTimeout(() => process.exit(0), Number(process.env.WORKER_SHUTDOWN_MS || 6000)).unref();
+  try {
+    await manager.shutdown(Number(process.env.WORKER_FLUSH_MS || 4000));
+  } catch (err) {
+    console.error(`[worker ${INDEX}] erro ao desligar:`, err.message);
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', () => gracefulExit('SIGTERM'));
+process.on('SIGINT', () => gracefulExit('SIGINT'));
+
 const send = (msg) => {
   if (process.connected) process.send(msg);
 };
@@ -42,6 +62,7 @@ function snapshot(id, gw) {
     status: gw.getStatus(),
     loggedOut: !!gw.loggedOut,
     needsAttention: !!gw.needsAttention,
+    consecutiveFailures: gw.consecutiveFailures || 0,
     lastDisconnectReason: gw.lastDisconnectReason || null,
     qr: gw.getLastQr() || null,
     contactCount: gw.getContactCount(),
@@ -99,7 +120,7 @@ setInterval(() => {
 const METHODS = new Set([
   'sendMessage', 'sendReaction', 'editMessage', 'deleteMessage', 'sendPresence', 'subscribePresence', 'sendMedia',
   'createGroup', 'promoteParticipant', 'getGroupParticipantPhones', 'getProfilePicture',
-  'resolveLidToPhone', 'getGroupCount', 'retryManually', 'requestFreshQr', 'syncConversation',
+  'resolveLidToPhone', 'getGroupCount', 'retryManually', 'requestFreshQr', 'forceFreshQr', 'syncConversation',
 ]);
 
 async function handleCall({ rid, id, method, args }) {
@@ -123,7 +144,10 @@ async function handleCall({ rid, id, method, args }) {
 
 process.on('message', (msg) => {
   if (!msg || typeof msg !== 'object') return;
-  if (msg.t === 'call') {
+  if (shuttingDown) return;
+  if (msg.t === 'shutdown') {
+    gracefulExit('pedido do processo principal');
+  } else if (msg.t === 'call') {
     handleCall(msg);
   } else if (msg.t === 'ensure') {
     const id = sanitize(msg.id);

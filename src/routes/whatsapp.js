@@ -25,6 +25,11 @@ const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
 const { buildPhoneAudit, buildPhoneAuditWorkbook } = require('../phoneAudit');
 const actionLog = require('../actionLog');
+const { refreshOwnNumber } = require('../ownNumbers');
+
+// Tentativas de reconexão seguidas depois das quais o card libera "Reconectar com QR Code"
+// (a sessão continua tentando sozinha até MAX_RECONNECT_ATTEMPTS).
+const QR_UNLOCK_ATTEMPTS = Number(process.env.QR_UNLOCK_ATTEMPTS || 10);
 const webpush = require('../webpush');
 
 // Cache simples em memória (por processo — reseta num restart, tudo bem):
@@ -417,6 +422,23 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // visível (não é só "desconectada", como uma queda de rede comum).
         const needsAttention = gateway?.needsAttention || false;
         const lastDisconnectReason = gateway?.lastDisconnectReason || null;
+        const loggedOut = gateway?.loggedOut || false;
+        // Estado de conexão pra tela (2026-11-05). `status` cru ('queued', 'connecting',
+        // 'offline') não diz o que a pessoa precisa saber: se está voltando sozinha ou se
+        // precisa fazer algo. 'down' = o gateway desistiu (passou do limite de tentativas,
+        // WhatsApp recusou ou deslogou pelo celular) — só aí vale oferecer o QR.
+        // 'reconnecting' = sessão já pareada voltando sozinha (fila, tentativa ou espera
+        // do próximo backoff) — escanear QR agora só atrapalha. 'unpaired' = nunca pareou.
+        let connState;
+        if (status === 'online') connState = 'online';
+        else if (needsAttention || loggedOut) connState = 'down';
+        else if (!ownNumbers[i.id] || gateway?.getLastQr?.()) connState = 'unpaired';
+        else connState = 'reconnecting';
+        // Botão "Reconectar com QR Code": depois de QR_UNLOCK_ATTEMPTS quedas seguidas (a
+        // sessão continua tentando sozinha até o teto), ou quando o gateway já desistiu
+        // por recusa/teto (needsAttention). Deslogada pelo celular usa o fluxo normal de QR.
+        const canReconnectWithQr = (connState === 'reconnecting' && (gateway?.consecutiveFailures || 0) >= QR_UNLOCK_ATTEMPTS)
+          || (connState === 'down' && !loggedOut);
         // Alerta de instância caída (ver src/instanceHealthStore.js) — a
         // queda em aberto AGORA, se houver, alimenta o indicador de duração
         // no card ("fora do ar há Xh") sem precisar de uma 2ª chamada por
@@ -425,7 +447,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
         const ownerName = i.delegated ? (nameByOwnerId.get(i.ownerId) || null) : null;
         const hasHistory = sessionsWithHistory ? sessionsWithHistory.has(i.id) : undefined;
         const banned = bannedSet.has(i.id);
-        return { ...i, status, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, banned, openConnectionEvent, ownerName, hasHistory };
+        return { ...i, status, connState, canReconnectWithQr, loggedOut, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, banned, openConnectionEvent, ownerName, hasHistory };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {
@@ -585,6 +607,41 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ ok: true, status: gateway.getStatus() });
     } catch (err) {
       console.error('[instances] falha ao reconectar manualmente:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // POST /instances/:id/reconnect-qr?owner=...
+  // Botão "Reconectar com QR Code": descarta a sessão caída (apaga as credenciais) e
+  // gera um QR novo. Só vale se a sessão já passou de QR_UNLOCK_ATTEMPTS quedas seguidas
+  // ou parou de tentar (needsAttention) — com a sessão saudável ou ainda nas primeiras
+  // tentativas, responde 409 (o front nem mostra o botão nesses casos). Depois disso o
+  // front abre a janela de QR (GET /qr acompanha o pareamento).
+  // ---------------------------------------------------------------
+  router.post('/instances/:id/reconnect-qr', requireOwnerMatch((req) => req.query.owner), async (req, res) => {
+    const owner = req.query.owner;
+    try {
+      const inst = await instancesStore.get(req.params.id);
+      if (!inst || inst.ownerId !== owner) {
+        return res.status(404).json({ error: 'instância não encontrada' });
+      }
+      const gateway = sessions.getActiveGateway(req.params.id);
+      if (!gateway) {
+        return res.status(404).json({ error: 'sessão não está ativa neste processo' });
+      }
+      if (gateway.getStatus() === 'online') {
+        return res.status(409).json({ error: 'a instância já está conectada' });
+      }
+      if (!gateway.needsAttention && (gateway.consecutiveFailures || 0) < QR_UNLOCK_ATTEMPTS) {
+        return res.status(409).json({ error: 'a instância ainda está reconectando sozinha' });
+      }
+      await gateway.forceFreshQr();
+      refreshOwnNumber(req.params.id); // a pasta de credenciais foi apagada: o número some do cache
+      actionLog.logAction(owner, 'instance_reconnect_qr', inst.label || req.params.id);
+      res.json({ ok: true, status: gateway.getStatus() });
+    } catch (err) {
+      console.error('[instances] falha ao reconectar com QR:', err.message);
       res.status(502).json({ error: err.message });
     }
   });
