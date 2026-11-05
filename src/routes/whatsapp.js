@@ -2,7 +2,7 @@ const express = require('express');
 const PDFDocument = require('pdfkit');
 const store = require('../store');
 const { logMessageToTimeline, logConversationSummaryToTimeline } = require('../bitrix');
-const { saveMedia, downloadMediaByFilename } = require('../media');
+const { saveMedia, downloadMediaByFilename, downloadMedia } = require('../media');
 const { computeMetrics, computeTeamMetrics, getOwnNumbersBySession } = require('../metrics');
 const { createCampaign, getCampaign, runCampaign } = require('../campaigns');
 const { computeCampaignMetrics } = require('../campaignStore');
@@ -36,6 +36,15 @@ const SEND_ID_RE = /^3EB0[0-9A-F]{18}$/;
 const sendsInFlight = new Map(); // `${session}|${id}` -> Promise<message>
 const sendsDone = new Map(); // `${session}|${id}` -> message (os mais recentes)
 const SENDS_DONE_MAX = 5000;
+
+// Rejeita se `promise` não resolver em `ms` (a promise original segue rodando).
+function withTimeout(promise, ms) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('tempo esgotado')), ms); }),
+  ]).finally(() => clearTimeout(timer));
+}
 const LINK_PREVIEW_TTL_MS = 60 * 60 * 1000;
 
 // Cards de "Insights de IA" do Dashboard (ver GET /insights) — cache em
@@ -395,7 +404,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
         } catch {
           // sessão ainda não foi iniciada nesse processo — status fica offline
         }
-        const groupCount = gateway ? await gateway.getGroupCount() : null;
+        // Contagem de grupos é só enfeite do card e depende do worker responder
+        // (às vezes consulta o WhatsApp). Com um worker sobrecarregado, UMA instância
+        // lenta segurava a lista inteira por 120 s e terminava em 502 — Chat e
+        // Conexões ficavam em "Carregando instâncias..." (2026-11-05). Espera no
+        // máximo 2 s; sem resposta, o card sai sem a contagem.
+        const groupCount = gateway ? await withTimeout(gateway.getGroupCount(), 2000).catch(() => null) : null;
         const contactCount = gateway ? gateway.getContactCount() : null;
         // needsAttention (HANDOFF Parte CQ): true quando o WhatsApp recusou a
         // conexão de forma que parece permanente (403/440/500) — o gateway já
@@ -1999,6 +2013,118 @@ function createWhatsappRouter({ sessions, broadcast }) {
       res.json({ ok: true });
     } catch (err) {
       console.error('[react] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // Editar / apagar para todos / encaminhar (2026-11-05). Só mensagem NOSSA
+  // pode ser editada ou apagada, e dentro do prazo que o WhatsApp aceita
+  // (editar: 15 min; apagar: ~2 dias). O eco que volta do WhatsApp também
+  // atualiza o banco (ver onMessageChange em server.js) — gravar aqui deixa a
+  // tela certa na hora, sem depender dele.
+  // ---------------------------------------------------------------
+  const EDIT_WINDOW_MS = 15 * 60 * 1000;
+  const DELETE_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+  // POST /messages/edit  { session, phone, messageId, text }
+  router.post('/messages/edit', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone, messageId } = req.body || {};
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    if (!phone || !messageId || !text) return res.status(400).json({ error: 'phone, messageId e text são obrigatórios' });
+    try {
+      const target = await store.getMessageForAction(session, phone, messageId);
+      if (!target) return res.status(404).json({ error: 'mensagem não encontrada' });
+      if (target.direction !== 'out') return res.status(400).json({ error: 'só dá pra editar mensagem enviada por nós' });
+      if (target.type !== 'text') return res.status(400).json({ error: 'só dá pra editar mensagem de texto' });
+      if (Date.now() - new Date(target.createdAt).getTime() > EDIT_WINDOW_MS) {
+        return res.status(400).json({ error: 'o WhatsApp só deixa editar até 15 minutos depois do envio' });
+      }
+      if (target.text === text) return res.json({ ok: true, unchanged: true });
+      await sessions.get(session).editMessage(phone, messageId, text);
+      await store.setMessageEdited(session, phone, messageId, text);
+      const editedAt = new Date().toISOString();
+      broadcast(session, phone, { type: 'messageEdited', messageId, text, editedAt });
+      res.json({ ok: true, text, editedAt });
+    } catch (err) {
+      console.error('[messages/edit] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // POST /messages/delete  { session, phone, messageId }
+  router.post('/messages/delete', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone, messageId } = req.body || {};
+    if (!phone || !messageId) return res.status(400).json({ error: 'phone e messageId são obrigatórios' });
+    try {
+      const target = await store.getMessageForAction(session, phone, messageId);
+      if (!target) return res.status(404).json({ error: 'mensagem não encontrada' });
+      if (target.direction !== 'out') return res.status(400).json({ error: 'só dá pra apagar para todos mensagem enviada por nós' });
+      if (Date.now() - new Date(target.createdAt).getTime() > DELETE_WINDOW_MS) {
+        return res.status(400).json({ error: 'o WhatsApp só deixa apagar para todos até 2 dias depois do envio' });
+      }
+      await sessions.get(session).deleteMessage(phone, messageId);
+      await store.setMessageDeleted(session, phone, messageId);
+      const deletedAt = new Date().toISOString();
+      broadcast(session, phone, { type: 'messageDeleted', messageId, deletedAt });
+      res.json({ ok: true, deletedAt });
+    } catch (err) {
+      console.error('[messages/delete] erro:', err.message);
+      res.status(502).json({ error: err.message });
+    }
+  });
+
+  // POST /messages/forward  { session, phone, messageId, targets: [phone, ...], senderName? }
+  // Reenvia o conteúdo (texto ou arquivo) para outras conversas DA MESMA
+  // instância, com a marca "Encaminhada". Um destino por vez, com 1,5 s entre
+  // eles (não parecer disparo em massa). Devolve o resultado de cada destino.
+  router.post('/messages/forward', requireSession((req) => req.body?.session), async (req, res) => {
+    const { session, phone, messageId, senderName } = req.body || {};
+    const targets = [...new Set((Array.isArray(req.body?.targets) ? req.body.targets : []).map(String).filter(Boolean))];
+    if (!phone || !messageId || !targets.length) return res.status(400).json({ error: 'phone, messageId e targets são obrigatórios' });
+    if (targets.length > 10) return res.status(400).json({ error: 'encaminhe para no máximo 10 conversas por vez' });
+    try {
+      const src = await store.getMessageForAction(session, phone, messageId);
+      if (!src) return res.status(404).json({ error: 'mensagem não encontrada' });
+      const isMedia = ['image', 'audio', 'video', 'document'].includes(src.type) && src.mediaUrl;
+      if (!isMedia && !src.text) return res.status(400).json({ error: 'mensagem sem conteúdo para encaminhar' });
+      const buffer = isMedia ? await downloadMedia(src.mediaUrl) : null;
+      const gateway = sessions.get(session);
+
+      const results = [];
+      for (let i = 0; i < targets.length; i++) {
+        const to = targets[i];
+        if (i > 0) await new Promise((r) => setTimeout(r, 1500));
+        try {
+          let message;
+          if (isMedia) {
+            const { buffer: sentBuffer, mimetype: sentMimetype, ...sent } = await gateway.sendMedia(to, {
+              type: src.type, buffer, mimetype: src.mimetype, caption: src.text || undefined,
+              fileName: src.fileName || undefined, forwarded: true,
+            });
+            const mediaUrl = await saveMedia(session, sent.id, sentBuffer, sentMimetype);
+            message = { ...sent, type: src.type, text: src.text || null, mediaUrl, mimetype: sentMimetype, fileName: src.type === 'document' ? src.fileName : null };
+          } else {
+            message = await gateway.sendMessage(to, src.text, null, undefined, { forwarded: true });
+          }
+          message.sentBy = req.ownerId;
+          message.sentByName = senderName || null;
+          const dealId = await store.getDealForPhone(session, to);
+          await store.addMessage(session, to, message, dealId);
+          broadcast(session, to, { type: 'message', message });
+          if (dealId) {
+            const label = isMedia ? `[${src.type}]${src.text ? ' ' + src.text : ''}` : src.text;
+            logMessageToTimeline(dealId, `(encaminhada) ${label}`, 'out').catch(() => {});
+          }
+          results.push({ phone: to, ok: true });
+        } catch (err) {
+          console.error(`[messages/forward] falha para ${to}:`, err.message);
+          results.push({ phone: to, ok: false, error: err.message });
+        }
+      }
+      res.json({ ok: results.some((r) => r.ok), results });
+    } catch (err) {
+      console.error('[messages/forward] erro:', err.message);
       res.status(502).json({ error: err.message });
     }
   });

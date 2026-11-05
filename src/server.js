@@ -868,6 +868,24 @@ const sessions = new SessionsImpl({
       console.error('[server] falha ao processar reação:', err.message);
     }
   },
+  // Mensagem editada ou apagada para todos, vinda do WhatsApp (contato, ou nós
+  // pelo celular). Também chega o eco do que foi editado/apagado pelo próprio
+  // Chat — gravar de novo é inofensivo.
+  onMessageChange: async (sessionId, { phone, messageId, kind, text }) => {
+    try {
+      if (kind === 'edit') {
+        if (await store.setMessageEdited(sessionId, phone, messageId, text)) {
+          broadcast(sessionId, phone, { type: 'messageEdited', messageId, text, editedAt: new Date().toISOString() });
+        }
+      } else if (kind === 'revoke') {
+        if (await store.setMessageDeleted(sessionId, phone, messageId)) {
+          broadcast(sessionId, phone, { type: 'messageDeleted', messageId, deletedAt: new Date().toISOString() });
+        }
+      }
+    } catch (err) {
+      console.error('[server] falha ao processar edição/exclusão de mensagem:', err.message);
+    }
+  },
   onMessageStatus: async (sessionId, phone, messageId, status) => {
     try {
       await store.updateMessageStatus(sessionId, phone, messageId, status);

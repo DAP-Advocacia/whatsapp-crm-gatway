@@ -122,6 +122,7 @@ async function addMessage(sessionId, phone, message, dealId, pushName, { cacheCo
 
 // Últimas 500 mensagens da conversa, em ordem cronológica (mais antiga primeiro).
 async function getHistory(sessionId, phone) {
+  const editCols = await editColumnsSelect();
   const { rows } = await pool.query(
     `select * from (
        select
@@ -140,6 +141,7 @@ async function getHistory(sessionId, phone) {
          m.sent_by_name as "sentByName",
          m.group_sender_phone as "groupSenderPhone",
          m.group_sender_name as "groupSenderName",
+         ${editCols}
          m.created_at as "createdAt"
        from messages m
        join conversations c on c.id = m.conversation_id
@@ -167,6 +169,7 @@ async function getHistory(sessionId, phone) {
 // `limit` pedido só pra essa checagem, sem devolvê-la).
 async function getHistoryPage(sessionId, phone, { before, limit = 50 } = {}) {
   const cappedLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
+  const editCols = await editColumnsSelect();
   const { rows } = await pool.query(
     `select
        m.wa_message_id as id,
@@ -184,6 +187,7 @@ async function getHistoryPage(sessionId, phone, { before, limit = 50 } = {}) {
        m.sent_by_name as "sentByName",
        m.group_sender_phone as "groupSenderPhone",
        m.group_sender_name as "groupSenderName",
+       ${editCols}
        m.created_at as "createdAt"
      from messages m
      join conversations c on c.id = m.conversation_id
@@ -243,6 +247,70 @@ async function updateMessageText(sessionId, phone, waMessageId, text) {
        and m.wa_message_id = $4`,
     [text, sessionId, phone, waMessageId]
   );
+}
+
+// Editar/apagar mensagem (2026-11-05) usa messages.edited_at/deleted_at (ver
+// db/schema.sql). Se a migração ainda não rodou, o Chat continua funcionando sem
+// esses campos em vez de quebrar (checado uma vez; sem as colunas, confere de novo
+// em 5 min, pra pegar a migração rodada sem reiniciar).
+let editColumnsCheck = null;
+function hasEditColumns() {
+  if (!editColumnsCheck) {
+    editColumnsCheck = pool.query(
+      `select count(*)::int as n from information_schema.columns
+       where table_schema = current_schema() and table_name = 'messages' and column_name in ('edited_at', 'deleted_at')`
+    ).then(({ rows }) => rows[0].n === 2).catch(() => false);
+    editColumnsCheck.then((ok) => {
+      if (!ok) setTimeout(() => { editColumnsCheck = null; }, 5 * 60 * 1000).unref();
+    });
+  }
+  return editColumnsCheck;
+}
+
+async function editColumnsSelect() {
+  return (await hasEditColumns())
+    ? `m.edited_at as "editedAt", m.deleted_at as "deletedAt",`
+    : `null::timestamptz as "editedAt", null::timestamptz as "deletedAt",`;
+}
+
+// Texto novo de uma mensagem editada (por nós ou pelo contato). Devolve false se a
+// mensagem não está no banco.
+async function setMessageEdited(sessionId, phone, waMessageId, text) {
+  const editedCol = (await hasEditColumns()) ? ', edited_at = now()' : '';
+  const { rowCount } = await pool.query(
+    `update messages m set text = $1${editedCol}
+     from conversations c
+     where m.conversation_id = c.id and c.session_id = $2 and c.phone = $3 and m.wa_message_id = $4`,
+    [text, sessionId, phone, waMessageId]
+  );
+  return rowCount > 0;
+}
+
+// Mensagem apagada para todos. O conteúdo continua no banco (registro do
+// escritório); a tela mostra que foi apagada.
+async function setMessageDeleted(sessionId, phone, waMessageId) {
+  if (!(await hasEditColumns())) return false;
+  const { rowCount } = await pool.query(
+    `update messages m set deleted_at = coalesce(m.deleted_at, now())
+     from conversations c
+     where m.conversation_id = c.id and c.session_id = $1 and c.phone = $2 and m.wa_message_id = $3`,
+    [sessionId, phone, waMessageId]
+  );
+  return rowCount > 0;
+}
+
+// Tudo que é preciso pra editar/apagar/encaminhar uma mensagem do Chat.
+async function getMessageForAction(sessionId, phone, waMessageId) {
+  const { rows } = await pool.query(
+    `select m.wa_message_id as id, m.direction, m.type, m.text, m.media_url as "mediaUrl",
+            m.mimetype, m.file_name as "fileName", m.created_at as "createdAt"
+     from messages m
+     join conversations c on c.id = m.conversation_id
+     where c.session_id = $1 and c.phone = $2 and m.wa_message_id = $3
+     limit 1`,
+    [sessionId, phone, waMessageId]
+  );
+  return rows[0] || null;
 }
 
 // `emoji` vazio/null = reação removida (o WhatsApp manda reactionMessage com
@@ -839,11 +907,18 @@ async function listConversations(sessionIds, search, { archived = false } = {}) 
        where ctag.conversation_id = c.id
      ) tg on true
      left join lateral (
-       select count(*)::int as count
-       from notifications n
-       where n.read = false
-         and n.target->>'sessionId' = c.session_id
-         and n.target->>'phone' = c.phone
+       -- Cada mensagem gera UMA notificação por pessoa (dono + delegados), então
+       -- contar tudo multiplicava o número de não lidas. Conta por pessoa e fica
+       -- com o maior.
+       select max(per_owner.count)::int as count
+       from (
+         select count(*) as count
+         from notifications n
+         where n.read = false
+           and n.target->>'sessionId' = c.session_id
+           and n.target->>'phone' = c.phone
+         group by n.owner_id
+       ) per_owner
      ) un on true
      where c.session_id = any($1::text[]) and c.archived = $2
      ${searchClause}
@@ -1198,6 +1273,9 @@ async function countConversations(sessionId) {
 }
 
 module.exports = {
+  setMessageEdited,
+  setMessageDeleted,
+  getMessageForAction,
   addMessage,
   getHistory,
   getHistoryPage,

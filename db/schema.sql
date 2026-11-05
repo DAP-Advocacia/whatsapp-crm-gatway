@@ -860,6 +860,13 @@ alter table user_palette add column if not exists bg_color_light text;
 alter table messages add column if not exists group_sender_phone text;
 alter table messages add column if not exists group_sender_name text;
 
+-- Mensagem editada / apagada para todos (2026-11-05) — por nós (Chat ou celular)
+-- ou pelo contato. Ao editar, `text` passa a ser o texto novo. Ao apagar, o
+-- conteúdo continua aqui (registro do escritório) e o Chat mostra "apagada".
+-- Colunas sem default: adicionar é instantâneo, mesmo com a tabela grande.
+alter table messages add column if not exists edited_at timestamptz;
+alter table messages add column if not exists deleted_at timestamptz;
+
 -- Nota interna — mensagem visível SÓ para internos (Responsável,
 -- Verificação, atendente), NUNCA para o cliente, mesmo estando todos no
 -- mesmo grupo de WhatsApp (feature de "Criar grupo" do card). Serve tanto

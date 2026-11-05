@@ -648,6 +648,16 @@
   /* Indicador de notificação(ões) não lida(s) — some ao abrir a conversa
      (POST /conversations/mark-read, ver openConversation). */
   .conv-item-unread-dot{ width:8px; height:8px; border-radius:50%; background:var(--gold); flex-shrink:0; }
+  /* Não lidas na lista (2026-11-05): contador verde + nome e prévia em destaque,
+     no lugar da bolinha discreta. */
+  .conv-item-unread-badge{
+    min-width:18px; height:18px; padding:0 5px; border-radius:9px; flex-shrink:0;
+    display:inline-flex; align-items:center; justify-content:center;
+    background:var(--green); color:#fff; font-size:10.5px; font-weight:700; line-height:1;
+  }
+  .conv-item--unread .conv-item-name{ font-weight:800; }
+  .conv-item--unread .conv-item-snippet{ color:var(--text); font-weight:600; }
+  .conv-item--unread .conv-item-time{ color:var(--green); font-weight:600; }
   .conv-item-time{ font-size:10.5px; color:var(--text-faint); flex-shrink:0; }
   .conv-item-snippet{ font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
   .conv-item-tags{ display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
@@ -658,10 +668,9 @@
   .conv-item:hover .conv-item-action-btn{ opacity:1; }
   .conv-item-action-btn:hover{ background:var(--surface); color:var(--text); }
   .conv-item-action-btn.muted{ opacity:1; color:var(--text-muted); }
-  /* Pendente MANUAL (ver db/schema.sql, pending_manual) — cor dourada
-     pra diferenciar do badge automático abaixo (.conv-item-pending, sem
-     --manual, vermelho — deriva de mensagem não lida, não é setável). */
-  .conv-item-action-btn.pending-active{ opacity:1; color:var(--gold); }
+  /* Pendente (bandeirinha, ver db/schema.sql pending_manual) — mesma cor da
+     etiqueta vermelha "Pendente" que ela liga. */
+  .conv-item-action-btn.pending-active{ opacity:1; color:var(--red); }
   .conv-item-action-btn svg{ width:14px; height:14px; display:block; }
 
   .tag-chip{
@@ -685,13 +694,6 @@
     font-size:10.5px; padding:2px 8px; border-radius:100px;
     border:1px solid var(--red); color:var(--red); background:rgba(var(--red-rgb),.1);
     white-space:nowrap;
-  }
-  /* Pendente MANUAL — mesmo formato do badge automático acima, cor
-     dourada (mesmo tom de "marcação manual do atendente" já usado em
-     nota interna/Dapinho neste projeto) pra nunca ser confundido com o
-     indicador automático de não-lida. */
-  .conv-item-pending--manual{
-    border-color: var(--gold); color: var(--gold); background: rgba(var(--gold-rgb),.1);
   }
 
   .assignee-filter{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
@@ -1145,6 +1147,28 @@
   }
   .bubble-action-btn:hover{ background: var(--text-faint); color: var(--bg); }
   .emoji-picker{ display: flex; align-items: center; gap: 2px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 100px; padding: 3px; }
+  /* Menu "⋯" da mensagem: encaminhar / editar / apagar para todos (2026-11-05). */
+  .msg-menu{ display:flex; flex-direction:column; background:var(--surface-2); border:1px solid var(--border); border-radius:10px; padding:4px; min-width:150px; }
+  .msg-menu button{ background:none; border:none; color:var(--text); text-align:left; padding:6px 10px; border-radius:6px; font-size:12.5px; cursor:pointer; }
+  .msg-menu button:hover{ background:var(--surface); }
+  .msg-menu button.danger{ color:var(--red); }
+  .bubble-edited{ font-size:10.5px; opacity:.65; font-style:italic; margin-right:4px; }
+  .bubble--deleted .deleted-head{ font-size:12px; font-style:italic; opacity:.75; margin-bottom:4px; }
+  .bubble--deleted .deleted-body{ opacity:.5; text-decoration:line-through; }
+  .bubble-edit-input{ width:100%; min-width:220px; min-height:60px; resize:vertical; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px; font:inherit; font-size:13px; }
+  .bubble-edit-actions{ display:flex; justify-content:flex-end; gap:6px; margin-top:6px; }
+  .bubble-edit-actions .btn{ padding:4px 10px; font-size:12px; }
+  /* Cartão de contato compartilhado */
+  .contact-card{ display:flex; flex-direction:column; gap:6px; min-width:200px; }
+  .contact-card-row{ display:flex; align-items:center; gap:8px; }
+  .contact-card-name{ font-weight:600; font-size:13.5px; }
+  .contact-card-phone{ font-size:12px; opacity:.8; }
+  .contact-card-btn{ background:none; border:1px solid currentColor; color:inherit; opacity:.85; border-radius:8px; padding:4px 8px; font-size:12px; cursor:pointer; align-self:flex-start; }
+  .contact-card-btn:hover{ opacity:1; }
+  .forward-list{ max-height:320px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; margin-bottom:8px; }
+  .forward-item{ display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .forward-item:hover{ background:var(--surface-2); }
+  .forward-item small{ color:var(--text-faint); margin-left:auto; }
   .emoji-opt{ width: 25px; height: 25px; border: none; background: none; font-size: 15px; cursor: pointer; border-radius: 50%; }
   .emoji-opt:hover{ background: var(--surface); transform: scale(1.15); }
 
@@ -1537,7 +1561,8 @@
         <!-- Independente de Ativas/Arquivadas (mesma barra visual, mas não faz
              parte do grupo mutuamente exclusivo acima — combina com qualquer
              um dos dois, ver pendingFilterBtn.addEventListener abaixo). -->
-        <button type="button" id="pendingFilterBtn" class="archive-filter-standalone" title="Mostrar só conversas com mensagem não lida">Pendentes</button>
+        <button type="button" id="pendingFilterBtn" class="archive-filter-standalone" title="Mostrar só conversas marcadas como pendente (bandeirinha)">Pendentes</button>
+        <button type="button" id="unreadFilterBtn" class="archive-filter-standalone" title="Mostrar só conversas com mensagem não lida">Não lidas</button>
         <!-- Também independente — mostra só conversas cujo phone está
              registrado em wa_groups (ver groupsFilterBtn.addEventListener
              abaixo). Grupo pode estar arquivado ou não, então este filtro
@@ -1618,6 +1643,21 @@
     <div class="modal-actions">
       <button class="btn secondary" id="newChatModalCancel">Cancelar</button>
       <button class="btn" id="newChatModalStart">Iniciar conversa</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="forwardModal">
+  <div class="modal">
+    <h3>Encaminhar mensagem</h3>
+    <p class="howto-hint" style="margin:0 0 8px;">Escolha até 10 conversas desta instância.</p>
+    <div class="field">
+      <input type="text" id="forwardSearchInput" placeholder="Buscar conversa…">
+    </div>
+    <div class="forward-list" id="forwardList"></div>
+    <div class="modal-actions">
+      <button class="btn secondary" id="forwardModalCancel">Cancelar</button>
+      <button class="btn" id="forwardModalSend" disabled>Encaminhar</button>
     </div>
   </div>
 </div>
@@ -1909,8 +1949,13 @@
       },
       {
         selector: '#pendingFilterBtn',
-        title: 'Veja só o que falta responder',
-        desc: 'Este filtro mostra só as conversas com mensagem nova que ainda não foi lida — útil pra não deixar ninguém esperando.',
+        title: 'Suas pendências',
+        desc: 'Marque uma conversa com a bandeirinha pra ela ganhar a etiqueta "Pendente". Este filtro mostra só as marcadas.',
+      },
+      {
+        selector: '#unreadFilterBtn',
+        title: 'Veja só o que falta ler',
+        desc: 'Mostra só as conversas com mensagem nova que ainda não foi lida — o número verde na lista diz quantas.',
       },
       {
         selector: '#newChatBtn',
@@ -3257,7 +3302,7 @@
   }
 
   function mediaLabel(type) {
-    return type === 'image' ? 'imagem' : type === 'audio' ? 'áudio' : type === 'video' ? 'vídeo' : type === 'document' ? 'documento' : type;
+    return type === 'image' ? 'imagem' : type === 'audio' ? 'áudio' : type === 'video' ? 'vídeo' : type === 'document' ? 'documento' : type === 'contact' ? 'contato' : type;
   }
 
   // =========================================================
@@ -3292,6 +3337,9 @@
   // sistema, ex: nome da LP de origem do lead — ver src/routes/leads.js)
   // nunca mostram o botão de remover — só tags criadas à mão pelo atendente.
   function tagChip(tag, removable) {
+    // Interno/Externo não aparecem mais como etiqueta (pedido 2026-11-05: poluíam a
+    // lista sem ajudar). Continuam no filtro de tags.
+    if (tag.system && (tag.name === 'Interno' || tag.name === 'Externo')) return '';
     const color = tag.color || '#d8ab4f';
     return `<span class="tag-chip" style="border-color:${color};color:${color};background:${color}22">${escapeHtml(tag.name)}${
       removable && !tag.system && !tag.fixed ? `<button class="tag-remove" data-tag-id="${tag.id}" title="Remover tag" type="button">×</button>` : ''
@@ -3304,6 +3352,7 @@
   const tagFilterSelect = document.getElementById('tagFilterSelect');
   const assigneeFilterEl = document.getElementById('assigneeFilter');
   const pendingFilterBtn = document.getElementById('pendingFilterBtn');
+  const unreadFilterBtn = document.getElementById('unreadFilterBtn');
   const groupsFilterBtn = document.getElementById('groupsFilterBtn');
   const convList = document.getElementById('convList');
   const convView = document.getElementById('convView');
@@ -3317,7 +3366,8 @@
     tags: [],
     tagFilter: '',
     assigneeFilter: '', // '' = todos; caso contrário, ownerId de quem está atendendo
-    pendingFilter: false, // true = só conversas com unreadCount > 0 — independente de Ativas/Arquivadas
+    pendingFilter: false, // true = só conversas marcadas como pendente (bandeirinha) — independente de Ativas/Arquivadas
+    unreadFilter: false, // true = só conversas com unreadCount > 0
     groupsFilter: false, // true = só conversas cujo phone está em groupIds — independente de Ativas/Arquivadas
     groupIds: new Set(), // phones (JID) registrados em wa_groups desta instância — populado por loadGroups()
     search: '',
@@ -3357,6 +3407,29 @@
   // do próprio re-render da lista de mensagens).
   let openReactionPickerId = null;
   const QUICK_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+
+  // Menu "⋯" da mensagem e mensagem em edição (2026-11-05). Prazos iguais aos do
+  // WhatsApp (a rota confere de novo): editar até 15 min, apagar até 2 dias.
+  let openMsgMenuId = null;
+  let editingMsgId = null;
+  const EDIT_WINDOW_MS = 15 * 60 * 1000;
+  const DELETE_WINDOW_MS = 48 * 60 * 60 * 1000;
+  function isSentMessage(msg) {
+    return !msg._optimistic && msg.status !== 'failed' && !String(msg.id).startsWith('tmp-') && !msg.deletedAt;
+  }
+  function msgAgeMs(msg) {
+    return Date.now() - new Date(msg.createdAt).getTime();
+  }
+  function canEdit(msg) {
+    return msg.direction === 'out' && msg.type === 'text' && isSentMessage(msg) && msgAgeMs(msg) < EDIT_WINDOW_MS;
+  }
+  function canDelete(msg) {
+    return msg.direction === 'out' && isSentMessage(msg) && msgAgeMs(msg) < DELETE_WINDOW_MS;
+  }
+  function canForward(msg) {
+    if (!isSentMessage(msg)) return false;
+    return !!(msg.mediaUrl || msg.text);
+  }
 
   // Gravação de áudio em andamento, se houver — referência de módulo
   // (não local a bindComposer()) pra poder cancelar de fora, ao trocar
@@ -3668,6 +3741,12 @@
   pendingFilterBtn.addEventListener('click', () => {
     state.pendingFilter = !state.pendingFilter;
     pendingFilterBtn.classList.toggle('active', state.pendingFilter);
+    renderConvList();
+  });
+
+  unreadFilterBtn.addEventListener('click', () => {
+    state.unreadFilter = !state.unreadFilter;
+    unreadFilterBtn.classList.toggle('active', state.unreadFilter);
     renderConvList();
   });
 
@@ -4025,8 +4104,15 @@
   // unreadCount que decide a tag "Pendente" na lista (ver conv-item-pending,
   // HANDOFF Parte CV), então "ligado" mostra exatamente as conversas com a
   // tag visível, nunca uma contagem diferente por acaso.
+  // Pendentes = conversas marcadas na bandeirinha (pending_manual), a mesma marca
+  // que vira a etiqueta vermelha "Pendente". Não lidas tem filtro próprio.
   function passesPendingFilter(conv) {
     if (!state.pendingFilter) return true;
+    return !!conv.pendingManual;
+  }
+
+  function passesUnreadFilter(conv) {
+    if (!state.unreadFilter) return true;
     return (conv.unreadCount || 0) > 0;
   }
 
@@ -4117,7 +4203,7 @@
   }
 
   function renderConvList() {
-    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c) && passesGroupsFilter(c));
+    const list = state.conversations.filter((c) => passesTagFilter(c) && passesAssigneeFilter(c) && passesPendingFilter(c) && passesUnreadFilter(c) && passesGroupsFilter(c));
     const dapinhoHtml = renderDapinhoItem();
     if (!list.length) {
       convList.innerHTML = dapinhoHtml || `<p class="empty">${state.conversations.length ? 'Nenhuma conversa encontrada.' : 'Nenhuma conversa ainda.'}</p>`;
@@ -4134,15 +4220,17 @@
       const muted = c.notificationsEnabled === false;
       const instStatus = state.instanceStatus[c.sessionId] || 'unknown';
       const instStatusLabel = instStatus === 'online' ? 'Instância conectada' : instStatus === 'offline' ? 'Instância desconectada' : 'Status da instância desconhecido';
+      const unread = c.unreadCount || 0;
+      const visibleTags = (c.tags || []).map((t) => tagChip(t, false)).join('');
       return `
-        <div class="conv-item ${isActive ? 'active' : ''}" data-session="${escapeHtml(c.sessionId)}" data-phone="${escapeHtml(c.phone)}">
+        <div class="conv-item ${isActive ? 'active' : ''} ${unread > 0 ? 'conv-item--unread' : ''}" data-session="${escapeHtml(c.sessionId)}" data-phone="${escapeHtml(c.phone)}">
           <div class="avatar sm">${avatarInner(name, c.avatarUrl)}<span class="avatar-status ${instStatus}" title="${instStatusLabel}"></span></div>
           <div class="conv-item-body">
             <div class="conv-item-top">
               <span class="conv-item-name">${escapeHtml(name)}</span>
               <span class="conv-item-top-right">
-                ${c.unreadCount > 0 ? `<span class="conv-item-unread-dot" title="${c.unreadCount} notificação(ões) não lida(s)"></span>` : ''}
                 <span class="conv-item-time">${formatListTime(c.lastAt)}</span>
+                ${unread > 0 ? `<span class="conv-item-unread-badge" title="${unread} mensagem(ns) não lida(s)">${unread > 99 ? '99+' : unread}</span>` : ''}
                 <button class="conv-item-action-btn ${muted ? 'muted' : ''}" data-mute-toggle title="${muted ? 'Ativar notificações' : 'Silenciar notificações'}" type="button">
                   ${muted
                     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.7 3A6 6 0 0 1 18 8c0 2 .3 3.4.8 4.4"/><path d="M17 17H3s3-2 3-9c0-.3 0-.6.1-.9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="M2 2l20 20"/></svg>'
@@ -4159,11 +4247,10 @@
               </span>
             </div>
             <div class="conv-item-snippet">${mine ? 'Você: ' : ''}${escapeHtml(snippet)}</div>
-            ${(c.tags && c.tags.length) || c.assignedToName || c.unreadCount > 0 || c.pendingManual ? `<div class="conv-item-tags">
-              ${c.unreadCount > 0 ? `<span class="conv-item-pending" title="${c.unreadCount} mensagem(ns) não lida(s)">Pendente</span>` : ''}
-              ${c.pendingManual ? `<span class="conv-item-pending conv-item-pending--manual" title="Marcada manualmente como pendente">Marcada como pendente</span>` : ''}
+            ${visibleTags || c.assignedToName || c.pendingManual ? `<div class="conv-item-tags">
+              ${c.pendingManual ? `<span class="conv-item-pending" title="Marcada como pendente (bandeirinha)">Pendente</span>` : ''}
               ${c.assignedToName ? `<span class="conv-item-assignee" title="Atendida por ${escapeHtml(c.assignedToName)}"><span class="avatar xs">${escapeHtml(initials(c.assignedToName))}</span>${escapeHtml(c.assignedToName)}</span>` : ''}
-              ${(c.tags || []).map((t) => tagChip(t, false)).join('')}
+              ${visibleTags}
             </div>` : ''}
           </div>
         </div>
@@ -5272,12 +5359,23 @@
       // autor. Só em mensagem recebida (as nossas já têm o avatar do atendente).
       const groupWho = !mine ? (msg.groupSenderName || (msg.groupSenderPhone ? '+' + msg.groupSenderPhone : '')) : '';
       const groupSenderHtml = groupWho ? `<span class="bubble-group-sender">${escapeHtml(groupWho)}</span>` : '';
+      // Apagada para todos: o conteúdo continua visível (riscado) só aqui dentro,
+      // como registro; no WhatsApp do outro lado aparece "mensagem apagada".
+      const bodyHtml = editingMsgId === msg.id
+        ? `<textarea class="bubble-edit-input" data-edit-msg-textarea="${escapeHtml(msg.id)}">${escapeHtml(msg.text || '')}</textarea>
+           <div class="bubble-edit-actions">
+             <button type="button" class="btn secondary" data-cancel-edit-msg="1">Cancelar</button>
+             <button type="button" class="btn" data-save-edit-msg-id="${escapeHtml(msg.id)}">Salvar</button>
+           </div>`
+        : msg.deletedAt
+          ? `<div class="deleted-head">🚫 ${mine ? 'Você apagou esta mensagem' : 'O contato apagou esta mensagem'}</div><div class="deleted-body">${renderBubbleBody(msg, mine)}</div>`
+          : renderBubbleBody(msg, mine);
       const bubbleHtml = `
-        <div class="bubble ${bubbleClass}">
+        <div class="bubble ${bubbleClass}${msg.deletedAt ? ' bubble--deleted' : ''}">
           ${groupSenderHtml}
           ${quotedHtml}
-          ${renderBubbleBody(msg, mine)}
-          <span class="timestamp">${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
+          ${bodyHtml}
+          <span class="timestamp">${msg.editedAt && !msg.deletedAt ? '<span class="bubble-edited">editada</span>' : ''}${formatTime(msg.createdAt)}${mine ? tickIcon(msg.status) : ''}</span>
           ${mine && msg.status === 'failed' && msg.text && !msg.mediaUrl ? `<button type="button" class="resend-btn" data-resend-id="${escapeHtml(String(msg.id))}">Não enviada · Reenviar</button>` : ''}
           ${msg.reaction ? `<span class="reaction-badge${reactionMine ? ' reaction-badge--mine' : ''}" title="${reactionMine ? 'Clique pra remover sua reação' : 'Reação'}" data-msg-id="${escapeHtml(msg.id)}" data-reaction-mine="${reactionMine ? '1' : ''}">${escapeHtml(msg.reaction)}</span>` : ''}
         </div>
@@ -5301,7 +5399,7 @@
   }
 
   function typeLabel(type) {
-    return type === 'image' ? 'Foto' : type === 'video' ? 'Vídeo' : type === 'audio' ? 'Áudio' : type === 'document' ? 'Documento' : 'Mensagem';
+    return type === 'image' ? 'Foto' : type === 'video' ? 'Vídeo' : type === 'audio' ? 'Áudio' : type === 'document' ? 'Documento' : type === 'contact' ? 'Contato' : 'Mensagem';
   }
 
   // ---------- Exportar conversa (TXT no client, PDF via rota no backend) ----------
@@ -5380,8 +5478,21 @@
       const opts = QUICK_EMOJIS.map((e) => `<button class="emoji-opt" data-emoji-msg-id="${escapeHtml(msg.id)}" data-from-me="${mine ? '1' : ''}" data-emoji="${e}" title="Reagir com ${e}">${e}</button>`).join('');
       return `<div class="bubble-actions-wrap picker-open"><div class="emoji-picker">${opts}<button class="bubble-action-btn" data-close-picker="1" title="Fechar">✕</button></div></div>`;
     }
+    if (openMsgMenuId === msg.id) {
+      const id = escapeHtml(msg.id);
+      const items = [
+        canForward(msg) ? `<button type="button" data-forward-msg-id="${id}">Encaminhar</button>` : '',
+        canEdit(msg) ? `<button type="button" data-edit-msg-id="${id}">Editar</button>` : '',
+        canDelete(msg) ? `<button type="button" class="danger" data-delete-msg-id="${id}">Apagar para todos</button>` : '',
+        `<button type="button" data-close-picker="1">Fechar</button>`,
+      ].join('');
+      return `<div class="bubble-actions-wrap picker-open"><div class="msg-menu">${items}</div></div>`;
+    }
+    if (msg.deletedAt) return '';
+    const hasMenu = canForward(msg) || canEdit(msg) || canDelete(msg);
     return `
       <div class="bubble-actions-wrap">
+        ${hasMenu ? `<button class="bubble-action-btn" data-msg-menu-id="${escapeHtml(msg.id)}" title="Mais opções">⋯</button>` : ''}
         <button class="bubble-action-btn" data-react-msg-id="${escapeHtml(msg.id)}" title="Reagir">🙂</button>
         <button class="bubble-action-btn" data-reply-msg-id="${escapeHtml(msg.id)}" title="Responder">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
@@ -5419,7 +5530,57 @@
       const closeBtn = e.target.closest('[data-close-picker]');
       if (closeBtn) {
         openReactionPickerId = null;
-        renderMessages();
+        openMsgMenuId = null;
+        renderMessages({ preserveScrollFromBottom: true });
+        return;
+      }
+      // ---------- Menu "⋯": encaminhar / editar / apagar ----------
+      const menuBtn = e.target.closest('[data-msg-menu-id]');
+      if (menuBtn) {
+        openMsgMenuId = menuBtn.getAttribute('data-msg-menu-id');
+        openReactionPickerId = null;
+        renderMessages({ preserveScrollFromBottom: true });
+        return;
+      }
+      const fwdBtn = e.target.closest('[data-forward-msg-id]');
+      if (fwdBtn) {
+        openMsgMenuId = null;
+        renderMessages({ preserveScrollFromBottom: true });
+        openForwardModal(fwdBtn.getAttribute('data-forward-msg-id'));
+        return;
+      }
+      const editBtn = e.target.closest('[data-edit-msg-id]');
+      if (editBtn) {
+        openMsgMenuId = null;
+        editingMsgId = editBtn.getAttribute('data-edit-msg-id');
+        renderMessages({ preserveScrollFromBottom: true });
+        const ta = el.querySelector(`[data-edit-msg-textarea="${CSS.escape(editingMsgId)}"]`);
+        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+        return;
+      }
+      if (e.target.closest('[data-cancel-edit-msg]')) {
+        editingMsgId = null;
+        renderMessages({ preserveScrollFromBottom: true });
+        return;
+      }
+      const saveEditBtn = e.target.closest('[data-save-edit-msg-id]');
+      if (saveEditBtn) {
+        saveEditedMessage(saveEditBtn.getAttribute('data-save-edit-msg-id'));
+        return;
+      }
+      const delBtn = e.target.closest('[data-delete-msg-id]');
+      if (delBtn) {
+        openMsgMenuId = null;
+        renderMessages({ preserveScrollFromBottom: true });
+        deleteMessageForAll(delBtn.getAttribute('data-delete-msg-id'));
+        return;
+      }
+      const contactChatBtn = e.target.closest('[data-contact-chat]');
+      if (contactChatBtn && state.active) {
+        const phone = contactChatBtn.getAttribute('data-contact-chat');
+        const sessionId = state.active.sessionId;
+        const existing = state.conversations.find((c) => c.sessionId === sessionId && c.phone === phone);
+        openConversation(existing || { sessionId, phone, contactName: contactChatBtn.getAttribute('data-contact-name') || null, dealId: null });
         return;
       }
       const emojiOpt = e.target.closest('[data-emoji-msg-id]');
@@ -5509,6 +5670,136 @@
   // (rotas novas, backend já exige ser o autor original; a UI só espelha
   // essa regra escondendo os botões pra quem não é, ver renderMessages).
   // ---------------------------------------------------------
+  // ---------------------------------------------------------
+  // Editar / apagar para todos / encaminhar mensagem do WhatsApp (2026-11-05)
+  // — rotas POST /messages/edit|delete|forward. A tela já atualiza aqui; as
+  // outras abas recebem messageEdited/messageDeleted pelo socket.
+  // ---------------------------------------------------------
+  async function saveEditedMessage(msgId) {
+    const a = state.active;
+    const ta = document.querySelector(`[data-edit-msg-textarea="${CSS.escape(msgId)}"]`);
+    const text = ta ? ta.value.trim() : '';
+    if (!a || !text) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/messages/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, messageId: msgId, text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'falha ao editar');
+      const m = state.messages.find((x) => x.id === msgId);
+      if (m && !data.unchanged) { m.text = data.text; m.editedAt = data.editedAt; }
+      editingMsgId = null;
+      renderMessages({ preserveScrollFromBottom: true });
+    } catch (err) {
+      if (window.showToast) window.showToast('Não deu pra editar: ' + err.message, 'error');
+    }
+  }
+
+  async function deleteMessageForAll(msgId) {
+    const a = state.active;
+    if (!a) return;
+    const ok = await window.confirmDialog('Apagar esta mensagem para todos? O contato verá "mensagem apagada".');
+    if (!ok) return;
+    try {
+      const res = await apiFetch(`${API_BASE}/messages/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: a.sessionId, phone: a.phone, messageId: msgId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'falha ao apagar');
+      const m = state.messages.find((x) => x.id === msgId);
+      if (m) m.deletedAt = data.deletedAt;
+      renderMessages({ preserveScrollFromBottom: true });
+    } catch (err) {
+      if (window.showToast) window.showToast('Não deu pra apagar: ' + err.message, 'error');
+    }
+  }
+
+  const forwardModal = document.getElementById('forwardModal');
+  const forwardList = document.getElementById('forwardList');
+  const forwardSearchInput = document.getElementById('forwardSearchInput');
+  const forwardSendBtn = document.getElementById('forwardModalSend');
+  const FORWARD_MAX = 10;
+  let forwardState = null; // { sessionId, phone, messageId, selected: Set<phone> }
+
+  function openForwardModal(msgId) {
+    const a = state.active;
+    if (!a) return;
+    forwardState = { sessionId: a.sessionId, phone: a.phone, messageId: msgId, selected: new Set() };
+    forwardSearchInput.value = '';
+    renderForwardList();
+    forwardModal.classList.add('open');
+    setTimeout(() => forwardSearchInput.focus(), 50);
+  }
+
+  function closeForwardModal() {
+    forwardModal.classList.remove('open');
+    forwardState = null;
+  }
+
+  function renderForwardList() {
+    if (!forwardState) return;
+    const term = forwardSearchInput.value.trim().toLowerCase();
+    const digits = term.replace(/\D/g, '');
+    // Só conversas da MESMA instância (o encaminhamento sai pelo mesmo número).
+    const convs = state.conversations.filter((c) => c.sessionId === forwardState.sessionId && c.phone !== forwardState.phone);
+    const match = convs.filter((c) => !term
+      || (c.contactName || '').toLowerCase().includes(term)
+      || (digits.length >= 3 && String(c.phone).includes(digits)));
+    forwardList.innerHTML = match.slice(0, 80).map((c) => {
+      const checked = forwardState.selected.has(c.phone);
+      const disabled = !checked && forwardState.selected.size >= FORWARD_MAX;
+      return `
+        <label class="forward-item">
+          <input type="checkbox" data-forward-phone="${escapeHtml(c.phone)}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''}>
+          <span>${escapeHtml(c.contactName || c.phone)}</span>
+          <small>${String(c.phone).endsWith('@g.us') ? 'grupo' : escapeHtml(c.phone)}</small>
+        </label>`;
+    }).join('') || '<p class="empty">Nenhuma conversa encontrada.</p>';
+    const n = forwardState.selected.size;
+    forwardSendBtn.disabled = n === 0;
+    forwardSendBtn.textContent = n ? `Encaminhar (${n})` : 'Encaminhar';
+  }
+
+  forwardSearchInput.addEventListener('input', renderForwardList);
+  forwardList.addEventListener('change', (e) => {
+    const cb = e.target.closest('[data-forward-phone]');
+    if (!cb || !forwardState) return;
+    const phone = cb.getAttribute('data-forward-phone');
+    if (cb.checked) forwardState.selected.add(phone);
+    else forwardState.selected.delete(phone);
+    renderForwardList();
+  });
+  document.getElementById('forwardModalCancel').addEventListener('click', closeForwardModal);
+  forwardSendBtn.addEventListener('click', async () => {
+    if (!forwardState || !forwardState.selected.size) return;
+    const { sessionId, phone, messageId } = forwardState;
+    const targets = [...forwardState.selected];
+    forwardSendBtn.disabled = true;
+    forwardSendBtn.textContent = 'Encaminhando…';
+    try {
+      const res = await apiFetch(`${API_BASE}/messages/forward`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session: sessionId, phone, messageId, targets, senderName: myBitrixName }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok && !data.results) throw new Error(data.error || 'falha ao encaminhar');
+      const failed = (data.results || []).filter((r) => !r.ok);
+      closeForwardModal();
+      if (window.showToast) {
+        if (!failed.length) window.showToast(`Encaminhada para ${targets.length} conversa(s).`, 'success');
+        else window.showToast(`Não foi para ${failed.length} de ${targets.length} conversa(s): ${failed[0].error}`, 'error');
+      }
+    } catch (err) {
+      if (window.showToast) window.showToast('Não deu pra encaminhar: ' + err.message, 'error');
+      renderForwardList();
+    }
+  });
+
   async function saveEditedNote(noteId) {
     const el = document.querySelector(`[data-edit-textarea-id="${CSS.escape(noteId)}"]`);
     if (!el) return;
@@ -5785,6 +6076,19 @@
             <span class="doc-hint">Toque para abrir</span>
           </span>
         </a>${caption}`;
+    }
+    if (msg.type === 'contact' && msg.text) {
+      // Texto salvo como "Nome\n+55...\n\nOutro nome\n+55..." (ver
+      // WhatsAppGateway._extractContactCard).
+      return `<div class="contact-card">${msg.text.split(/\n\n+/).map((block) => {
+        const [name, ...phones] = block.split('\n');
+        return `
+          <div class="contact-card-row">
+            <span class="avatar xs">${escapeHtml(initials(name))}</span>
+            <div><div class="contact-card-name">${escapeHtml(name)}</div>${phones.map((p) => `<div class="contact-card-phone">${escapeHtml(p)}</div>`).join('')}</div>
+          </div>
+          ${phones.length ? `<button type="button" class="contact-card-btn" data-contact-chat="${escapeHtml(phones[0].replace(/\D/g, ''))}" data-contact-name="${escapeHtml(name)}">Conversar</button>` : ''}`;
+      }).join('')}</div>`;
     }
     const url = firstUrl(msg.text);
     return linkify(msg.text) + (url ? `<div class="link-preview" data-preview-url="${escapeHtml(url)}"><span class="link-preview-loading">Carregando prévia…</span></div>` : '');
@@ -6502,6 +6806,20 @@
         if (state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
           const m = state.messages.find((x) => x.id === payload.messageId);
           if (m) { m.text = payload.text; renderMessages(); }
+        }
+        return;
+      }
+
+      // Mensagem editada / apagada para todos (pelo contato, pelo celular ou por
+      // outra aba) — ver onMessageChange em server.js e /messages/edit|delete.
+      if (payload.type === 'messageEdited' || payload.type === 'messageDeleted') {
+        if (state.active && state.active.sessionId === id && state.active.phone === payload.phone) {
+          const m = state.messages.find((x) => x.id === payload.messageId);
+          if (m) {
+            if (payload.type === 'messageEdited') { m.text = payload.text; m.editedAt = payload.editedAt; }
+            else m.deletedAt = payload.deletedAt;
+            if (editingMsgId !== m.id) renderMessages({ preserveScrollFromBottom: true });
+          }
         }
         return;
       }

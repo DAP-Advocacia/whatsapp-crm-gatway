@@ -17,7 +17,7 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
     this.onQr = onQr; // (sessionId) => void — só o worker usa (repassa o QR novo ao processo principal)
@@ -29,6 +29,7 @@ class SessionManager {
     this.shardFilter = shardFilter;
     this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
+    this.onMessageChange = onMessageChange; // (sessionId, { phone, messageId, kind: 'edit'|'revoke', text? }) => void
     this.onMessageStatus = onMessageStatus; // (sessionId, phone, messageId, status) => void
     this.onPresence = onPresence; // (sessionId, phone, state) => void
     // Nome de contato vindo direto da agenda do WhatsApp (contacts.upsert/
@@ -172,6 +173,7 @@ class SessionManager {
       this.onMessage(id, phone, message, pushName, isHistory, senderPhone, senderName)
     );
     gateway.on('reaction', ({ phone, targetId, emoji, direction }) => this.onReaction?.(id, phone, targetId, emoji, direction));
+    gateway.on('messageChange', (change) => this.onMessageChange?.(id, change));
     gateway.on('messageStatus', ({ phone, messageId, status }) => this.onMessageStatus?.(id, phone, messageId, status));
     gateway.on('presence', ({ phone, state }) => this.onPresence?.(id, phone, state));
     gateway.on('contact', ({ phone, name }) => this.onContact?.(id, phone, name));

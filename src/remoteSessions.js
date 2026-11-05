@@ -65,6 +65,8 @@ class RemoteGateway extends EventEmitter {
 
   sendMessage(...a) { return this._call('sendMessage', ...a); }
   sendReaction(...a) { return this._call('sendReaction', ...a); }
+  editMessage(...a) { return this._call('editMessage', ...a); }
+  deleteMessage(...a) { return this._call('deleteMessage', ...a); }
   sendPresence(...a) { return this._call('sendPresence', ...a); }
   subscribePresence(...a) { return this._call('subscribePresence', ...a); }
   sendMedia(...a) { return this._call('sendMedia', ...a); }
@@ -83,10 +85,10 @@ class RemoteGateway extends EventEmitter {
 }
 
 class RemoteSessionManager {
-  constructor({ baseFolder, workers, onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onCall }) {
+  constructor({ baseFolder, workers, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onCall }) {
     this.baseFolder = baseFolder;
     this.count = Math.max(1, Number(workers) || 1);
-    this.cb = { onStatus, onMessage, onReaction, onMessageStatus, onPresence, onContact, onCall };
+    this.cb = { onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onCall };
     this.sessions = new Map(); // sessionId -> RemoteGateway
     this.nextRid = 1;
     this.heapMb = Number(process.env.WORKER_HEAP_MB || 2048);
@@ -172,6 +174,7 @@ class RemoteSessionManager {
       }
       case 'message': this.cb.onMessage?.(msg.id, ...msg.args); break;
       case 'reaction': this.cb.onReaction?.(msg.id, ...msg.args); break;
+      case 'messageChange': this.cb.onMessageChange?.(msg.id, ...msg.args); break;
       case 'messageStatus': this.cb.onMessageStatus?.(msg.id, ...msg.args); break;
       case 'presence': this.cb.onPresence?.(msg.id, ...msg.args); break;
       case 'contact': this.cb.onContact?.(msg.id, ...msg.args); break;

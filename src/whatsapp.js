@@ -9,6 +9,7 @@ const {
   downloadMediaMessage,
   isJidBroadcast,
   isJidNewsletter,
+  normalizeMessageContent,
   proto,
 } = require('@whiskeysockets/baileys');
 const QRCode = require('qrcode');
@@ -75,6 +76,13 @@ for (const level of ['info', 'warn']) {
 // "foi enviada", mas no WhatsApp do cliente fica "aguardando a mensagem" ou
 // nunca aparece. Guardamos só as últimas SENT_CACHE_MAX por sessão.
 const SENT_CACHE_MAX = 300;
+
+// Limite de arquivo recebido que o DapZap baixa e guarda (o bucket "media" do
+// Supabase aceita até 25 MB, ver db/create-bucket.js).
+const MEDIA_MAX_BYTES = Number(process.env.MEDIA_MAX_MB || 25) * 1024 * 1024;
+
+// Marca de "Encaminhada" que o WhatsApp mostra em cima da mensagem.
+const FORWARDED_CONTEXT = { isForwarded: true, forwardingScore: 1 };
 
 /**
  * Encapsula UMA sessão de WhatsApp pessoal (um número).
@@ -651,6 +659,21 @@ class WhatsAppGateway extends EventEmitter {
     // errado — o "✓✓ visualizado" nunca chegava na tela. Ver _resolveLidPhone.
     this.sock.ev.on('messages.update', async (updates) => {
       for (const u of updates) {
+        // Mensagem editada ou apagada para todos (pelo contato, ou por nós no
+        // celular). O Baileys traduz o protocolMessage nisto (ver process-message.js).
+        try {
+          const change = this._extractMessageChange(u);
+          if (change) {
+            const jid = u.key.remoteJid || '';
+            const phone = jid.endsWith('@g.us')
+              ? jid
+              : await this._resolveLidPhone(u.key.remoteJidAlt || u.key.participantAlt || jid);
+            if (phone) this.emit('messageChange', { phone, messageId: u.key.id, ...change });
+            continue;
+          }
+        } catch (err) {
+          console.error(`[whatsapp:${this.sessionId}] falha ao processar edição/exclusão:`, err.message);
+        }
         const status = this._mapStatus(u.update?.status);
         if (!status || !u.key?.id) continue;
         const phoneSource =
@@ -709,6 +732,22 @@ class WhatsAppGateway extends EventEmitter {
   // ficava invisível pro sistema inteiro — Campanha marcava sucesso mesmo
   // sem a mensagem nunca chegar de verdade (bug real, achado via log de
   // produção: msgId+telefone bateram exatos com os do "error 463").
+  // messages.update -> { kind: 'edit', text } | { kind: 'revoke' } | null.
+  _extractMessageChange(u) {
+    if (!u?.key?.id || !u.update) return null;
+    if ('message' in u.update && u.update.message === null && u.update.messageStubType === proto.WebMessageInfo.StubType.REVOKE) {
+      return { kind: 'revoke' };
+    }
+    const edited = u.update.message?.editedMessage;
+    if (edited) {
+      const c = normalizeMessageContent(u.update.message) || {};
+      const text = this._extractText(c)
+        || c.imageMessage?.caption || c.videoMessage?.caption || c.documentMessage?.caption || null;
+      if (text != null) return { kind: 'edit', text };
+    }
+    return null;
+  }
+
   _mapStatus(code) {
     if (code == null) return null;
     if (code === 0) return 'failed';
@@ -784,7 +823,7 @@ class WhatsAppGateway extends EventEmitter {
    * Baileys montar o "balão citado": não guardamos a mensagem original do
    * WhatsApp (protobuf completo), só os campos que já persistimos mesmo.
    */
-  async sendMessage(phone, text, replyTo, messageId) {
+  async sendMessage(phone, text, replyTo, messageId, { forwarded = false } = {}) {
     // `messageId` vem do Chat (mesmo id em toda tentativa de envio da mesma
     // mensagem — ver newMessageId em chat.html). Se já foi enviada (ou está
     // sendo) com esse id, devolve o mesmo resultado em vez de mandar de novo:
@@ -803,7 +842,8 @@ class WhatsAppGateway extends EventEmitter {
       const options = {};
       if (replyTo) options.quoted = this._buildQuoted(jid, replyTo);
       if (messageId) options.messageId = messageId;
-      const result = await this.sock.sendMessage(jid, { text }, options);
+      const content = forwarded ? { text, contextInfo: FORWARDED_CONTEXT } : { text };
+      const result = await this.sock.sendMessage(jid, content, options);
       return {
         id: result.key.id,
         text,
@@ -874,6 +914,30 @@ class WhatsAppGateway extends EventEmitter {
   }
 
   /**
+   * Edita o texto de uma mensagem NOSSA já enviada (o WhatsApp só aceita até 15
+   * min depois do envio — a rota confere antes). Quem recebe vê "Editada".
+   */
+  async editMessage(phone, messageId, text) {
+    if (this.status !== 'online') {
+      throw new Error('WhatsApp não está conectado no momento');
+    }
+    const jid = this._phoneToJid(phone);
+    await this.sock.sendMessage(jid, { text, edit: { remoteJid: jid, id: messageId, fromMe: true } });
+  }
+
+  /**
+   * Apaga para todos uma mensagem NOSSA (o WhatsApp aceita até ~2 dias depois do
+   * envio). Quem recebe vê "Mensagem apagada".
+   */
+  async deleteMessage(phone, messageId) {
+    if (this.status !== 'online') {
+      throw new Error('WhatsApp não está conectado no momento');
+    }
+    const jid = this._phoneToJid(phone);
+    await this.sock.sendMessage(jid, { delete: { remoteJid: jid, id: messageId, fromMe: true } });
+  }
+
+  /**
    * Avisa o contato que a empresa está "digitando…" (`state: 'composing'`),
    * "gravando áudio…" (`'recording'`) ou parou (`'paused'`) — o mesmo
    * indicador que aparece quando uma pessoa de verdade está escrevendo no
@@ -920,7 +984,7 @@ class WhatsAppGateway extends EventEmitter {
    * áudio abaixo) para quem chamou salvar exatamente os bytes que foram
    * realmente enviados.
    */
-  async sendMedia(phone, { type, buffer, mimetype, caption, fileName, replyTo }) {
+  async sendMedia(phone, { type, buffer, mimetype, caption, fileName, replyTo, forwarded = false }) {
     if (this.status !== 'online') {
       throw new Error('WhatsApp não está conectado no momento');
     }
@@ -949,6 +1013,7 @@ class WhatsAppGateway extends EventEmitter {
         // OGG/Opus). Como "arquivo de áudio" (ptt: false) parte dos celulares não
         // consegue baixar/abrir o OGG. Duração e forma de onda o Baileys calcula.
         : { audio: outBuffer, mimetype: outMimetype, ptt: true };
+    if (forwarded) content.contextInfo = FORWARDED_CONTEXT;
     const options = replyTo ? { quoted: this._buildQuoted(jid, replyTo) } : undefined;
     const result = await this.sock.sendMessage(jid, content, options);
     return {
@@ -1208,11 +1273,20 @@ class WhatsAppGateway extends EventEmitter {
     const SYSTEM_MESSAGE_IDS = new Set(['1484720636734891-1', '785376054348615-1']);
     if (SYSTEM_MESSAGE_IDS.has(m.key.id)) return null;
 
+    // Conteúdo "de verdade" da mensagem. O WhatsApp embrulha muita coisa:
+    // documento com legenda (documentWithCaptionMessage), conversa com mensagens
+    // temporárias (ephemeralMessage), visualização única (viewOnceMessage*). Sem
+    // desembrulhar, essas mensagens não tinham texto nem mídia e sumiam (2026-11-05).
+    // Status postado em grupo continua de fora, como o Status comum (acima).
+    if (m.message.groupStatusMessage || m.message.groupStatusMessageV2) return null;
+    const content = normalizeMessageContent(m.message);
+    if (!content) return null;
+
     // Reação (emoji) a uma mensagem existente — não é uma mensagem nova,
     // é um "ponteiro" pra mensagem original (reactionMessage.key.id).
     // `text` vazio significa que a reação foi removida.
-    if (m.message.reactionMessage) {
-      const r = m.message.reactionMessage;
+    if (content.reactionMessage) {
+      const r = content.reactionMessage;
       if (!r.key?.id) return null;
       const phoneSource = m.key.participantAlt || m.key.remoteJidAlt || m.key.participant || m.key.remoteJid;
       this.emit('reaction', {
@@ -1294,17 +1368,22 @@ class WhatsAppGateway extends EventEmitter {
     // resolver depois, a PRÓXIMA mensagem dessa conversa já vem certa.
     if (!phone) return null;
 
-    const media = this._extractMediaInfo(m.message);
-    let text = media ? media.caption : this._extractText(m.message);
+    const media = this._extractMediaInfo(content);
+    // Cartão de contato compartilhado (vCard) — vira type 'contact', com o texto
+    // "Nome\n+55..." (uma linha por telefone). Texto legível de propósito: prévia,
+    // notificação, exportação e IA continuam funcionando sem tratamento especial.
+    const contactText = media ? null : this._extractContactCard(content);
+    let text = media ? media.caption : contactText || this._extractText(content);
     let mediaUrl = null;
     let mimetype = null;
 
     // Grupo comum: guarda só o texto/legenda, com um marcador do tipo ("[vídeo]"),
     // sem baixar o arquivo — grupo movimentado geraria milhares de downloads e
     // uploads pro Storage (CPU, banda, custo) e, no histórico, centenas de uma
-    // vez. Imagem e áudio ao VIVO continuam sendo baixados (são pequenos e é o
-    // que as pessoas esperam ver); GROUP_MEDIA_TYPES ajusta (ex: "image,audio,video").
-    const groupMediaTypes = (process.env.GROUP_MEDIA_TYPES || 'image,audio').split(',').map((t) => t.trim()).filter(Boolean);
+    // vez. Imagem, áudio e documento ao VIVO continuam sendo baixados (é o que as
+    // pessoas esperam ver; documento entrou em 2026-11-05 — aparecia só "[document]");
+    // GROUP_MEDIA_TYPES ajusta (ex: "image,audio,document,video").
+    const groupMediaTypes = (process.env.GROUP_MEDIA_TYPES || 'image,audio,document').split(',').map((t) => t.trim()).filter(Boolean);
     const skipMedia = isPlainGroup && media && (isHistory || !groupMediaTypes.includes(media.type));
     // Mídia de HISTÓRICO (qualquer conversa): só baixa se for recente
     // (HISTORY_MEDIA_MAX_AGE_DAYS, padrão 2 — o link do CDN do WhatsApp de
@@ -1321,9 +1400,16 @@ class WhatsAppGateway extends EventEmitter {
       else if (mediaBudget) mediaBudget.left--;
     }
     if (skipMedia) {
-      text = `[${media.type}]${media.caption ? ' ' + media.caption : ''}`;
+      const label = { audio: 'áudio', image: 'imagem', video: 'vídeo', document: 'documento' }[media.type] || media.type;
+      text = [`[${label}]`, media.fileName, media.caption].filter(Boolean).join(' ');
     } else if (skipOldHistoryMedia) {
       // sem download: fica só a legenda (se não tiver, a mensagem é descartada abaixo, como já era)
+    } else if (media && media.fileLength > MEDIA_MAX_BYTES) {
+      // Acima do limite do Storage (25 MB): o upload falharia de qualquer jeito, e
+      // baixar o arquivo inteiro pra memória do worker é caro. Fica o aviso na conversa.
+      const label = { audio: 'áudio', image: 'imagem', video: 'vídeo', document: 'documento' }[media.type] || media.type;
+      const mb = Math.round(media.fileLength / 1024 / 1024);
+      text = [`[${label} de ${mb} MB, grande demais para o DapZap — abra no celular]`, media.fileName, media.caption].filter(Boolean).join(' ');
     } else if (media) {
       try {
         const buffer = await downloadMediaMessage(m, 'buffer', {});
@@ -1331,13 +1417,17 @@ class WhatsAppGateway extends EventEmitter {
         mimetype = media.mimetype;
       } catch (err) {
         if (!isHistory) {
-          console.error('[whatsapp] falha ao baixar mídia recebida:', err.message);
-          return null;
+          // Antes a mensagem AO VIVO inteira era descartada aqui (sumia da conversa,
+          // inclusive a legenda). Agora fica um marcador com o nome do arquivo.
+          console.error(`[whatsapp:${this.sessionId}] falha ao baixar/salvar mídia recebida (${media.type} ${media.mimetype || '?'}, id ${m.key.id}):`, err.message);
+          const label = { audio: 'áudio', image: 'imagem', video: 'vídeo', document: 'documento' }[media.type] || media.type;
+          text = [`[${label} não disponível — abra no celular]`, media.fileName, media.caption].filter(Boolean).join(' ');
+        } else {
+          console.warn(
+            '[whatsapp] mídia histórica indisponível (link do WhatsApp provavelmente expirado), salvando só o texto/legenda:',
+            err.message
+          );
         }
-        console.warn(
-          '[whatsapp] mídia histórica indisponível (link do WhatsApp provavelmente expirado), salvando só o texto/legenda:',
-          err.message
-        );
       }
     }
 
@@ -1348,7 +1438,7 @@ class WhatsAppGateway extends EventEmitter {
     // marcador, e a ordem da conversa se mantém.
     if (!mediaUrl && !text && media) {
       const label = { audio: 'áudio', image: 'imagem', video: 'vídeo', document: 'documento' }[media.type] || media.type;
-      text = `[${label} não disponível]`;
+      text = `[${label} não disponível]${media.fileName ? ' ' + media.fileName : ''}`;
     }
 
     if (!mediaUrl && !text) return null;
@@ -1379,21 +1469,52 @@ class WhatsAppGateway extends EventEmitter {
       isHistory,
       message: {
         id: m.key.id,
-        type: mediaUrl ? media.type : 'text',
+        type: mediaUrl ? media.type : contactText ? 'contact' : 'text',
         text,
         mediaUrl,
         mimetype: mediaUrl ? mimetype : null,
         direction: m.key.fromMe ? 'out' : 'in',
         status: m.key.fromMe ? 'sent' : 'delivered',
         createdAt: new Date((m.messageTimestamp || Date.now() / 1000) * 1000).toISOString(),
-        replyToId: this._extractReplyToId(m.message),
+        replyToId: this._extractReplyToId(content),
         fileName: media?.fileName || null,
       },
     };
   }
 
   _extractText(message) {
-    return message.conversation || message.extendedTextMessage?.text || null;
+    const text = message.conversation || message.extendedTextMessage?.text;
+    if (text) return text;
+    // Localização: vira texto com link do mapa (antes a mensagem sumia).
+    const loc = message.locationMessage || message.liveLocationMessage;
+    if (loc && loc.degreesLatitude != null && loc.degreesLongitude != null) {
+      const where = [loc.name, loc.address].filter(Boolean).join(' — ');
+      return `📍 Localização${where ? ': ' + where : ''}\nhttps://maps.google.com/?q=${loc.degreesLatitude},${loc.degreesLongitude}`;
+    }
+    return null;
+  }
+
+  // Cartão de contato (um ou vários) -> "Nome\n+5521999999999" por contato, ou null.
+  // O telefone vem do vCard: o campo waid (número no WhatsApp) quando existe, senão
+  // o número do TEL só com dígitos.
+  _extractContactCard(message) {
+    const cards = message.contactMessage
+      ? [message.contactMessage]
+      : message.contactsArrayMessage?.contacts || [];
+    if (!cards.length) return null;
+    const blocks = cards.slice(0, 10).map((c) => {
+      const vcard = String(c.vcard || '');
+      const name = c.displayName || (vcard.match(/^FN[^:]*:(.*)$/m) || [])[1]?.trim() || 'Contato';
+      const phones = [];
+      for (const line of vcard.split(/\r?\n/)) {
+        if (!/^(item\d+\.)?TEL/i.test(line)) continue;
+        const waid = (line.match(/waid=(\d+)/i) || [])[1];
+        const digits = waid || line.slice(line.lastIndexOf(':') + 1).replace(/\D/g, '');
+        if (digits && !phones.includes(digits)) phones.push(digits);
+      }
+      return [name, ...phones.map((p) => '+' + p)].join('\n');
+    });
+    return blocks.join('\n\n');
   }
 
   // Id da mensagem original quando esta é uma resposta ("reply") a outra —
@@ -1405,40 +1526,55 @@ class WhatsAppGateway extends EventEmitter {
       message.extendedTextMessage?.contextInfo ||
       message.imageMessage?.contextInfo ||
       message.videoMessage?.contextInfo ||
-      message.audioMessage?.contextInfo;
+      message.audioMessage?.contextInfo ||
+      message.documentMessage?.contextInfo ||
+      message.contactMessage?.contextInfo ||
+      message.stickerMessage?.contextInfo;
     return ctx?.stanzaId || null;
   }
 
-  // Mensagem de imagem, áudio ou vídeo -> { type, mimetype, caption } | null.
-  // (Documento ainda não é tratado.)
+  // Mensagem de imagem, áudio, vídeo ou documento -> { type, mimetype, caption,
+  // fileName?, fileLength } | null. Recebe o conteúdo já desembrulhado
+  // (normalizeMessageContent), então documento com legenda cai em documentMessage.
   _extractMediaInfo(message) {
+    const info = this._mediaInfoWithoutSize(message);
+    if (!info) return null;
+    // Tamanho declarado pelo WhatsApp (pode vir como Long do protobuf) — usado pra
+    // não baixar arquivo acima do limite do Storage (MEDIA_MAX_BYTES).
+    const raw = info.raw.fileLength;
+    const fileLength = Number(raw?.toNumber?.() ?? raw ?? 0) || 0;
+    const { raw: _raw, ...rest } = info;
+    return { ...rest, fileLength };
+  }
+
+  _mediaInfoWithoutSize(message) {
     if (message.imageMessage) {
       return {
         type: 'image',
         mimetype: message.imageMessage.mimetype,
         caption: message.imageMessage.caption || null,
+        raw: message.imageMessage,
       };
     }
-    if (message.videoMessage) {
-      return {
-        type: 'video',
-        mimetype: message.videoMessage.mimetype,
-        caption: message.videoMessage.caption || null,
-      };
+    // Figurinha: imagem webp, que o navegador mostra como imagem.
+    if (message.stickerMessage) {
+      return { type: 'image', mimetype: message.stickerMessage.mimetype || 'image/webp', caption: null, raw: message.stickerMessage };
+    }
+    if (message.videoMessage || message.ptvMessage) {
+      // ptvMessage = vídeo redondo (recado de vídeo).
+      const v = message.videoMessage || message.ptvMessage;
+      return { type: 'video', mimetype: v.mimetype || 'video/mp4', caption: v.caption || null, raw: v };
     }
     if (message.audioMessage) {
-      return {
-        type: 'audio',
-        mimetype: message.audioMessage.mimetype,
-        caption: null,
-      };
+      return { type: 'audio', mimetype: message.audioMessage.mimetype, caption: null, raw: message.audioMessage };
     }
     if (message.documentMessage) {
       return {
         type: 'document',
-        mimetype: message.documentMessage.mimetype,
+        mimetype: message.documentMessage.mimetype || 'application/octet-stream',
         caption: message.documentMessage.caption || null,
         fileName: message.documentMessage.fileName || null,
+        raw: message.documentMessage,
       };
     }
     return null;

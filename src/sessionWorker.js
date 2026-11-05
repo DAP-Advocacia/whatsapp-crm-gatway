@@ -79,6 +79,7 @@ const manager = new SessionManager({
   onMessage: (id, phone, message, pushName, isHistory, senderPhone, senderName) =>
     send({ t: 'message', id, args: [phone, message, pushName, isHistory, senderPhone, senderName] }),
   onReaction: (id, phone, targetId, emoji, direction) => send({ t: 'reaction', id, args: [phone, targetId, emoji, direction] }),
+  onMessageChange: (id, change) => send({ t: 'messageChange', id, args: [change] }),
   onMessageStatus: (id, phone, messageId, status) => send({ t: 'messageStatus', id, args: [phone, messageId, status] }),
   onPresence: (id, phone, state) => send({ t: 'presence', id, args: [phone, state] }),
   onContact: (id, phone, name) => send({ t: 'contact', id, args: [phone, name] }),
@@ -96,7 +97,7 @@ setInterval(() => {
 
 // Métodos do WhatsAppGateway que o processo principal pode chamar.
 const METHODS = new Set([
-  'sendMessage', 'sendReaction', 'sendPresence', 'subscribePresence', 'sendMedia',
+  'sendMessage', 'sendReaction', 'editMessage', 'deleteMessage', 'sendPresence', 'subscribePresence', 'sendMedia',
   'createGroup', 'promoteParticipant', 'getGroupParticipantPhones', 'getProfilePicture',
   'resolveLidToPhone', 'getGroupCount', 'retryManually', 'requestFreshQr', 'syncConversation',
 ]);
