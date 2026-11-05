@@ -784,20 +784,41 @@ class WhatsAppGateway extends EventEmitter {
    * Baileys montar o "balão citado": não guardamos a mensagem original do
    * WhatsApp (protobuf completo), só os campos que já persistimos mesmo.
    */
-  async sendMessage(phone, text, replyTo) {
-    if (this.status !== 'online') {
-      throw new Error('WhatsApp não está conectado no momento');
+  async sendMessage(phone, text, replyTo, messageId) {
+    // `messageId` vem do Chat (mesmo id em toda tentativa de envio da mesma
+    // mensagem — ver newMessageId em chat.html). Se já foi enviada (ou está
+    // sendo) com esse id, devolve o mesmo resultado em vez de mandar de novo:
+    // cobre o caso do pedido que estourou o tempo no processo principal
+    // enquanto este worker ainda enviava, e o reenvio chega depois (2026-11-04,
+    // mensagens duplicadas no reenvio).
+    if (messageId) {
+      const prev = this._sendsById?.get(messageId);
+      if (prev) return prev;
     }
-    const jid = this._phoneToJid(phone);
-    const options = replyTo ? { quoted: this._buildQuoted(jid, replyTo) } : undefined;
-    const result = await this.sock.sendMessage(jid, { text }, options);
-    return {
-      id: result.key.id,
-      text,
-      direction: 'out',
-      status: 'sent',
-      createdAt: new Date().toISOString(),
-    };
+    const run = (async () => {
+      if (this.status !== 'online') {
+        throw new Error('WhatsApp não está conectado no momento');
+      }
+      const jid = this._phoneToJid(phone);
+      const options = {};
+      if (replyTo) options.quoted = this._buildQuoted(jid, replyTo);
+      if (messageId) options.messageId = messageId;
+      const result = await this.sock.sendMessage(jid, { text }, options);
+      return {
+        id: result.key.id,
+        text,
+        direction: 'out',
+        status: 'sent',
+        createdAt: new Date().toISOString(),
+      };
+    })();
+    if (messageId) {
+      if (!this._sendsById) this._sendsById = new Map();
+      if (this._sendsById.size >= 500) this._sendsById.delete(this._sendsById.keys().next().value);
+      this._sendsById.set(messageId, run);
+      run.catch(() => this._sendsById.delete(messageId)); // falhou antes de enviar: pode tentar de novo
+    }
+    return run;
   }
 
   /**

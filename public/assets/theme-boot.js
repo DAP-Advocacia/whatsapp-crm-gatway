@@ -61,16 +61,32 @@ if (localStorage.getItem('theme') === 'light') {
   };
 
   // Versão do servidor: a 1ª resposta fixa a versão desta tela; se mudar, avisa.
+  // Só confia no cabeçalho depois de confirmar com um pedido sem cache
+  // (2026-11-04): o navegador guarda /avatar por até 1 h COM o X-App-Version
+  // antigo, e no deploy o container velho ainda responde por ~1 min — os dois
+  // davam aviso falso que nem o Ctrl + F5 tirava.
   var pageVersion = null;
+  var checking = false;
   var origFetch = window.fetch;
+  function freshVersion() {
+    return origFetch('/assets/theme-boot.js', { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) { return r.headers.get('X-App-Version'); });
+  }
   if (typeof origFetch === 'function') {
+    freshVersion().then(function (v) { if (v && !pageVersion) pageVersion = v; }).catch(function () {});
     window.fetch = function () {
       return origFetch.apply(this, arguments).then(function (res) {
         try {
           var v = res.headers && res.headers.get('X-App-Version');
-          if (v) {
-            if (!pageVersion) pageVersion = v;
-            else if (v !== pageVersion) window.showReloadBanner('update');
+          if (v && pageVersion && v !== pageVersion && !checking) {
+            checking = true;
+            // Confirma 2x com 20 s de intervalo: a 2ª pega o fim da troca de container.
+            freshVersion().then(function (f1) {
+              if (!f1 || f1 === pageVersion) return;
+              return new Promise(function (ok) { setTimeout(ok, 20000); })
+                .then(freshVersion)
+                .then(function (f2) { if (f2 && f2 !== pageVersion) window.showReloadBanner('update'); });
+            }).catch(function () {}).then(function () { checking = false; });
           }
         } catch (e) { /* resposta opaca/sem cabeçalhos */ }
         return res;

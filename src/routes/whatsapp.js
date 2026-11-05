@@ -31,6 +31,11 @@ const webpush = require('../webpush');
 // metadados de uma página raramente mudam num intervalo curto, e evita
 // buscar a mesma URL de novo a cada vez que a mensagem é renderizada.
 const linkPreviewCache = new Map(); // url -> { data, expiresAt }
+// Deduplicação do POST /send pelo id gerado no Chat (clientMsgId) — ver a rota.
+const SEND_ID_RE = /^3EB0[0-9A-F]{18}$/;
+const sendsInFlight = new Map(); // `${session}|${id}` -> Promise<message>
+const sendsDone = new Map(); // `${session}|${id}` -> message (os mais recentes)
+const SENDS_DONE_MAX = 5000;
 const LINK_PREVIEW_TTL_MS = 60 * 60 * 1000;
 
 // Cards de "Insights de IA" do Dashboard (ver GET /insights) — cache em
@@ -1840,10 +1845,39 @@ function createWhatsappRouter({ sessions, broadcast }) {
       return res.status(400).json({ error: 'phone e text são obrigatórios' });
     }
 
+    // Id da mensagem gerado pelo Chat, igual em toda tentativa (2026-11-04).
+    // Mesmo id = mesma mensagem: se já foi enviada, devolve a mesma; se está
+    // sendo enviada agora (duplo clique, duas abas, reenvio automático junto
+    // com o clique), espera a primeira em vez de mandar outra. O worker também
+    // deduplica (ver WhatsAppGateway.sendMessage), pro caso de o pedido ter
+    // estourado o tempo aqui enquanto ele ainda enviava.
+    const clientMsgId = typeof req.body?.clientMsgId === 'string' && SEND_ID_RE.test(req.body.clientMsgId)
+      ? req.body.clientMsgId : null;
+    const sendKey = clientMsgId ? `${session}|${clientMsgId}` : null;
+    if (sendKey) {
+      const done = sendsDone.get(sendKey);
+      if (done) return res.json({ ok: true, message: done, duplicate: true });
+      const running = sendsInFlight.get(sendKey);
+      if (running) {
+        try {
+          return res.json({ ok: true, message: await running, duplicate: true });
+        } catch (err) {
+          return res.status(502).json({ error: err.message });
+        }
+      }
+    }
+
+    let finish;
+    if (sendKey) {
+      const p = new Promise((resolve, reject) => { finish = { resolve, reject }; });
+      p.catch(() => {});
+      sendsInFlight.set(sendKey, p);
+    }
+
     try {
       const gateway = sessions.get(session);
       const replyTo = await resolveReplyTo(session, phone, replyToId);
-      const message = await gateway.sendMessage(phone, text, replyTo);
+      const message = await gateway.sendMessage(phone, text, replyTo, clientMsgId || undefined);
       message.replyToId = replyTo ? replyToId : null;
       // sentBy é SEMPRE req.ownerId (quem autenticou esta requisição), nunca
       // um valor vindo do client — evita alguém se declarar outra pessoa.
@@ -1862,10 +1896,18 @@ function createWhatsappRouter({ sessions, broadcast }) {
         console.error('[bitrix] falha ao logar na timeline:', e.message)
       );
 
+      if (sendKey) {
+        if (sendsDone.size >= SENDS_DONE_MAX) sendsDone.delete(sendsDone.keys().next().value);
+        sendsDone.set(sendKey, message);
+        finish.resolve(message);
+      }
       res.json({ ok: true, message });
     } catch (err) {
       console.error('[send] erro:', err.message);
+      if (sendKey) finish.reject(err);
       res.status(502).json({ error: err.message });
+    } finally {
+      if (sendKey) sendsInFlight.delete(sendKey);
     }
   });
 
