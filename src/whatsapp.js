@@ -1072,6 +1072,9 @@ class WhatsAppGateway extends EventEmitter {
   async _resolveLidPhone(jid) {
     if (!jid) return null;
     if (!jid.endsWith('@lid')) return this._jidToPhone(jid) || null;
+    // Socket já fechado (a nova tentativa de 1,5 s/4 s caiu depois de uma queda):
+    // sem mapeamento disponível, não é erro — 81 logs/h em produção (2026-11-05).
+    if (!this.sock?.signalRepository?.lidMapping) return null;
     try {
       const pn = await this.sock.signalRepository.lidMapping.getPNForLID(jid);
       if (pn) return this._jidToPhone(pn) || null;
