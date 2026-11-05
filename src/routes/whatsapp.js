@@ -1720,6 +1720,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // erro aqui não afeta nada mais da conversa, só o resumo não é atualizado.
   // ---------------------------------------------------------------
   router.post('/conversations/summary', requireSession((req) => req.body?.session), async (req, res) => {
+    // Resumo com IA desligado (2026-11-05, decisão do Gabriel): sem OPENAI_API_KEY
+    // cada pedido lia as 500 últimas mensagens do banco antes de falhar — ~2.800
+    // por hora. Religar: AI_SUMMARY_ENABLED=true + OPENAI_API_KEY, e a flag em chat.html.
+    if (process.env.AI_SUMMARY_ENABLED !== 'true') {
+      return res.status(410).json({ error: 'resumo com IA desativado' });
+    }
     const { session, phone, contactName } = req.body || {};
     if (!phone) return res.status(400).json({ error: 'phone é obrigatório' });
     try {

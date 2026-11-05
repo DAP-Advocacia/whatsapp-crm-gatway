@@ -2666,9 +2666,12 @@
   // Grupos em comum (tudo que é "sobre a pessoa", não sobre o
   // atendimento em si); "photos"/"documents" são as duas categorias de
   // mídia trocada na conversa, cada uma com paginação própria.
+  // Resumo da conversa com IA desligado (2026-11-05, decisão do Gabriel — sem
+  // chave da OpenAI no servidor). A aba continua mostrando os Insights.
+  const AI_SUMMARY_ENABLED = false;
   const CONTACT_TABS = [
     { id: 'client', label: 'Dados do cliente' },
-    { id: 'summary', label: 'Resumo' },
+    { id: 'summary', label: AI_SUMMARY_ENABLED ? 'Resumo' : 'Insights' },
     { id: 'photos', label: 'Fotos' },
     { id: 'documents', label: 'Documentos' },
     { id: 'labels', label: 'Labels' },
@@ -2705,7 +2708,8 @@
       `;
     }
     // 'summary' (default)
-    return `${renderInsightsSection()}${renderSummarySection()}`;
+    const summaryHtml = `${renderInsightsSection()}${renderSummarySection()}`;
+    return summaryHtml || '<p class="contact-summary-text empty-summary" style="padding:14px">Nenhum insight nesta conversa.</p>';
   }
 
   // Reaplica os listeners que dependem do conteúdo da aba ativa (cada aba
@@ -2842,6 +2846,7 @@
   }
 
   function renderSummarySection() {
+    if (!AI_SUMMARY_ENABLED) return '';
     const isLoading = aiSummary === 'loading';
     const hasSummary = aiSummary && aiSummary !== 'loading';
     return `
@@ -2950,6 +2955,7 @@
   });
 
   async function generateConversationSummary(silent) {
+    if (!AI_SUMMARY_ENABLED) return;
     const a = state.active;
     if (!a || aiSummary === 'loading') return;
     // Se já tinha um resumo bom (não é a primeira geração, é uma atualização
@@ -2994,6 +3000,7 @@
   const SUMMARY_REFRESH_MIN_INTERVAL_MS = 60 * 60 * 1000;
   function scheduleSummaryRefresh() {
     clearTimeout(summaryRefreshTimer);
+    if (!AI_SUMMARY_ENABLED) return;
     const lastUpdate = aiSummaryUpdatedAt ? new Date(aiSummaryUpdatedAt).getTime() : 0;
     const elapsed = Date.now() - lastUpdate;
     if (elapsed >= SUMMARY_REFRESH_MIN_INTERVAL_MS) {
