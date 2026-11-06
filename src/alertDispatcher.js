@@ -19,14 +19,17 @@ const emailAlert = require('./emailAlert');
  * erro internamente (defesa em profundidade) — o allSettled aqui é uma
  * 2ª camada, não a única.
  */
-async function notifyAttention({ recipients, title, body, target, waSourceSessionId, sessions }) {
+// `channels` (opcional, usado pelo painel): subconjunto de ['app', 'push', 'whatsapp', 'email'];
+// sem ele, os 4 como sempre.
+async function notifyAttention({ recipients, title, body, target, waSourceSessionId, sessions, channels }) {
+  const on = (c) => !channels || channels.includes(c);
   await Promise.allSettled(
     recipients.map((ownerId) =>
       Promise.allSettled([
-        store.addNotification({ ownerId, title, body, target }),
-        webpush.notifyOwner(ownerId, { title, body, target }),
-        whatsappAlert.notifyOwner(ownerId, { text: `${title}\n\n${body}`, excludeSessionId: waSourceSessionId, sessions }),
-        emailAlert.notifyOwner(ownerId, { title, body }),
+        on('app') && store.addNotification({ ownerId, title, body, target }),
+        on('push') && webpush.notifyOwner(ownerId, { title, body, target }),
+        on('whatsapp') && whatsappAlert.notifyOwner(ownerId, { text: `${title}\n\n${body}`, excludeSessionId: waSourceSessionId, sessions }),
+        on('email') && emailAlert.notifyOwner(ownerId, { title, body }),
       ])
     )
   );

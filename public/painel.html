@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel de auditoria · DapZap</title>
+<style>
+  :root{
+    color-scheme: light dark;
+    --bg:#f4f4f2; --surface:#fcfcfb; --surface-2:#efefec; --border:#d9d8d3;
+    --text:#0b0b0b; --text-2:#52514e; --text-3:#7a7974; --accent:#2a78d6; --on-accent:#fff;
+    --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --serious:#ec835a; --neutral:#8a8a85;
+  }
+  @media (prefers-color-scheme: dark){ :root:where(:not([data-theme="light"])){
+    --bg:#121211; --surface:#1a1a19; --surface-2:#242423; --border:#363633;
+    --text:#f0efec; --text-2:#c3c2b7; --text-3:#8d8c85; --accent:#3987e5;
+  } }
+  :root[data-theme="dark"]{ --bg:#121211; --surface:#1a1a19; --surface-2:#242423; --border:#363633; --text:#f0efec; --text-2:#c3c2b7; --text-3:#8d8c85; --accent:#3987e5; }
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); }
+  h1{ font-size:18px; margin:0; } h2{ font-size:15px; margin:0 0 10px; } h3{ font-size:13px; margin:0 0 6px; color:var(--text-2); }
+  button,input,select,textarea{ font:inherit; color:inherit; }
+  button{ background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button:hover{ border-color:var(--accent); }
+  button.primary{ background:var(--accent); color:var(--on-accent); border-color:var(--accent); }
+  button.danger{ background:var(--crit); color:#fff; border-color:var(--crit); }
+  button:disabled{ opacity:.5; cursor:default; }
+  input[type=text],input[type=password],input[type=number],select,textarea{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:6px 9px; width:100%; }
+  textarea{ min-height:110px; resize:vertical; }
+  label{ display:block; font-size:12px; color:var(--text-2); margin:10px 0 4px; }
+  a{ color:var(--accent); }
+  [hidden]{ display:none !important; }
+  .muted{ color:var(--text-2); } .faint{ color:var(--text-3); font-size:12px; }
+
+  header{ display:flex; align-items:center; gap:12px; padding:10px 20px; background:var(--surface); border-bottom:1px solid var(--border); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header .grow{ flex:1; }
+  nav{ display:flex; gap:4px; padding:0 20px; background:var(--surface); border-bottom:1px solid var(--border); overflow-x:auto; }
+  nav button{ border:0; border-bottom:2px solid transparent; border-radius:0; background:none; padding:10px 14px; color:var(--text-2); white-space:nowrap; }
+  nav button.active{ color:var(--text); border-bottom-color:var(--accent); font-weight:600; }
+  main{ padding:20px; max-width:1500px; margin:0 auto; }
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .row{ display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+  .row > *{ flex:1; min-width:150px; } .row > .fit{ flex:0 0 auto; min-width:0; }
+  .banner{ border:1px solid var(--border); border-left:4px solid var(--warn); background:var(--surface); border-radius:8px; padding:10px 14px; margin-bottom:12px; }
+  .banner.crit{ border-left-color:var(--crit); } .banner.ok{ border-left-color:var(--good); }
+
+  .kpis{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin-bottom:16px; }
+  .kpi{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+  .kpi .n{ font-size:26px; font-weight:650; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .kpi .l{ color:var(--text-2); font-size:12px; margin-top:2px; display:flex; gap:6px; align-items:center; }
+  .kpi .sub{ color:var(--text-3); font-size:11px; margin-top:2px; }
+
+  table{ width:100%; border-collapse:collapse; }
+  th,td{ text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th{ font-size:12px; color:var(--text-2); font-weight:600; position:sticky; top:0; background:var(--surface); }
+  td.num,th.num{ text-align:right; font-variant-numeric:tabular-nums; }
+  tr.click{ cursor:pointer; } tr.click:hover td{ background:var(--surface-2); }
+  .scroll{ overflow:auto; max-height:70vh; }
+
+  .pill{ display:inline-flex; align-items:center; gap:5px; padding:1px 8px; border-radius:999px; border:1px solid var(--border); font-size:12px; white-space:nowrap; }
+  .pill i{ font-style:normal; font-weight:700; width:14px; height:14px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:10px; color:#fff; }
+  .dot{ width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .bar{ display:flex; gap:2px; height:14px; min-width:180px; border-radius:4px; overflow:hidden; background:var(--surface-2); }
+  .bar span{ display:block; height:100%; min-width:3px; }
+  .legend{ display:flex; gap:14px; flex-wrap:wrap; font-size:12px; color:var(--text-2); margin:0 0 10px; }
+  .legend span{ display:inline-flex; gap:6px; align-items:center; }
+  #tip{ position:fixed; pointer-events:none; background:var(--text); color:var(--bg); padding:4px 8px; border-radius:6px; font-size:12px; z-index:50; }
+  .members{ background:var(--surface-2); }
+  .tag{ font-size:11px; color:var(--text-2); border:1px solid var(--border); border-radius:4px; padding:0 5px; }
+  .picker{ position:relative; }
+  .picker .results{ position:absolute; left:0; right:0; top:100%; background:var(--surface); border:1px solid var(--border); border-radius:6px; z-index:10; max-height:220px; overflow:auto; }
+  .picker .results div{ padding:6px 10px; cursor:pointer; } .picker .results div:hover{ background:var(--surface-2); }
+  .toast{ position:fixed; right:16px; bottom:16px; background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--good); padding:10px 14px; border-radius:8px; z-index:60; max-width:420px; }
+  .toast.err{ border-left-color:var(--crit); }
+
+  #login{ max-width:340px; margin:12vh auto 0; }
+  .pager{ display:flex; gap:8px; align-items:center; justify-content:flex-end; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<section id="login" class="card" hidden>
+  <h1>Painel de auditoria · DapZap</h1>
+  <p class="muted">Acesso restrito.</p>
+  <form id="loginForm" autocomplete="on">
+    <label for="lu">Usuário</label><input type="text" id="lu" name="username" autocomplete="username" required>
+    <label for="lp">Senha</label><input type="password" id="lp" name="password" autocomplete="current-password" required>
+    <p id="loginErr" class="faint" style="color:var(--crit)" role="alert"></p>
+    <button class="primary" type="submit" style="width:100%">Entrar</button>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header>
+    <h1>Painel de auditoria · DapZap</h1>
+    <span class="faint" id="genAt"></span>
+    <span class="grow"></span>
+    <button id="btnRefresh" title="Recarrega os dados do servidor e do cadastro do Bitrix">Atualizar</button>
+    <button id="btnTheme" title="Alternar tema claro/escuro">◐</button>
+    <span class="muted" id="whoami"></span>
+    <button id="btnLogout">Sair</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="view"></main>
+</div>
+<div id="tip" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const STATES = {
+    conectado:      { label: 'Conectado',        icon: '✓', color: 'var(--good)',    help: 'Número pareado e sessão online agora.' },
+    nao_verificado: { label: 'Não verificado',   icon: '?', color: 'var(--warn)',    help: 'Já conectou, mas a sessão não está carregada no servidor (a pessoa ainda não abriu o DapZap desde o último deploy). Não dá para afirmar que desconectou.' },
+    offline:        { label: 'Offline (caiu)',   icon: '✕', color: 'var(--crit)',    help: 'Já conectou e a sessão está carregada, mas não está online.' },
+    nunca_conectou: { label: 'Nunca conectou',   icon: '○', color: 'var(--neutral)', help: 'Tem instância, mas nunca escaneou o QR.' },
+    sem_instancia:  { label: 'Sem instância',    icon: '–', color: 'var(--serious)', help: 'Não criou nenhuma conexão no DapZap.' },
+  };
+  const STATE_ORDER = ['conectado', 'nao_verificado', 'offline', 'nunca_conectou', 'sem_instancia'];
+  const KIND_LABEL = { deslogou_celular: 'Desconectou pelo celular', removida_dapzap: 'Removeu no DapZap', substituida: 'Outro aparelho assumiu', queda_prolongada: 'Queda prolongada', resumo: 'Resumo da equipe', manual: 'Disparo manual' };
+  const STATUS_LABEL = { enviado: 'Enviado', simulado: 'Simulado (monitor desligado)', sem_destinatario: 'Sem gestor definido', falhou: 'Falhou' };
+  const TABS = [['overview', 'Visão geral'], ['teams', 'Equipes'], ['people', 'Pessoas'], ['alerts', 'Alertas'], ['routes', 'Regras de gestor'], ['notify', 'Notificar'], ['settings', 'Configurações']];
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmtDate = (d) => d ? new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+  const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
+  const fmtPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 13 && d.startsWith('55') ? `+55 (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}` : d.length === 12 && d.startsWith('55') ? `+55 (${d.slice(2, 4)}) ${d.slice(4, 8)}-${d.slice(8)}` : d; };
+
+  const S = { data: null, settings: null, tab: 'overview', open: new Set(), selected: new Set(), pf: { q: '', state: '', dept: '', team: '', page: 0 }, tf: { q: '' }, af: { kind: '', status: '' }, nf: { states: new Set(['offline', 'nunca_conectou', 'sem_instancia']), team: '', dept: '' }, setupMissing: false };
+
+  // ---------- infra ----------
+  async function api(path, opts = {}) {
+    const res = await fetch('/api/panel' + path, {
+      method: opts.method || 'GET', credentials: 'same-origin',
+      headers: { 'X-Panel-CSRF': '1', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    let json = null;
+    try { json = await res.json(); } catch { /* sem corpo */ }
+    if (res.status === 401 && path !== '/login') { showLogin(); throw new Error('sessão expirada'); }
+    if (!res.ok) { if (json?.setup) S.setupMissing = true; throw new Error(json?.error || `erro ${res.status}`); }
+    return json;
+  }
+  let toastTimer;
+  function toast(msg, err) {
+    document.querySelectorAll('.toast').forEach((t) => t.remove());
+    const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg; document.body.append(t);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), err ? 7000 : 3500);
+  }
+  const tip = $('#tip');
+  document.addEventListener('mousemove', (e) => {
+    const el = e.target.closest?.('[data-tip]');
+    if (!el) { tip.hidden = true; return; }
+    tip.textContent = el.dataset.tip; tip.hidden = false;
+    tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+  });
+
+  // ---------- pedaços de UI ----------
+  const pill = (state) => { const s = STATES[state]; return s ? `<span class="pill" data-tip="${esc(s.help)}"><i style="background:${s.color}">${s.icon}</i>${s.label}</span>` : esc(state); };
+  const legend = () => `<div class="legend" aria-label="Legenda">${STATE_ORDER.map((k) => `<span><span class="dot" style="background:${STATES[k].color}"></span>${STATES[k].label}</span>`).join('')}</div>`;
+  function bar(counts) {
+    const total = counts.total || 1;
+    return `<div class="bar" role="img" aria-label="${STATE_ORDER.map((k) => `${STATES[k].label}: ${counts[k]}`).join(', ')}">${STATE_ORDER.filter((k) => counts[k]).map((k) =>
+      `<span style="width:${(counts[k] / total) * 100}%;background:${STATES[k].color}" data-tip="${esc(STATES[k].label)}: ${counts[k]} de ${counts.total} (${pct(counts[k], counts.total)}%)"></span>`).join('')}</div>`;
+  }
+  const kpi = (n, label, state, sub) => `<div class="kpi"><div class="n">${esc(n)}</div><div class="l">${state ? `<span class="dot" style="background:${STATES[state].color}"></span>` : ''}${esc(label)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>`;
+  function picker(id, placeholder) {
+    return `<div class="picker" data-picker="${id}"><input type="text" placeholder="${esc(placeholder)}" autocomplete="off"><input type="hidden"><div class="results" hidden></div></div>`;
+  }
+  function wirePickers(root) {
+    root.querySelectorAll('[data-picker]').forEach((box) => {
+      const input = box.querySelector('input[type=text]'), hidden = box.querySelector('input[type=hidden]'), results = box.querySelector('.results');
+      let timer;
+      input.addEventListener('input', () => {
+        hidden.value = ''; clearTimeout(timer);
+        const q = input.value.trim();
+        if (q.length < 2) { results.hidden = true; return; }
+        timer = setTimeout(async () => {
+          try {
+            const { employees } = await api('/employees?q=' + encodeURIComponent(q));
+            results.innerHTML = employees.length ? employees.map((e) => `<div data-id="${esc(e.id)}" data-name="${esc(e.name)}">${esc(e.name)} <span class="faint">${esc(e.department || '')}</span></div>`).join('') : '<div class="faint">Ninguém encontrado</div>';
+            results.hidden = false;
+          } catch { /* sessão expirada já tratada */ }
+        }, 250);
+      });
+      results.addEventListener('click', (e) => { const d = e.target.closest('[data-id]'); if (!d) return; hidden.value = d.dataset.id; input.value = d.dataset.name; results.hidden = true; });
+      input.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 150));
+    });
+  }
+
+  // ---------- telas ----------
+  function viewOverview() {
+    const d = S.data, s = d.summary;
+    const top = d.teams.filter((t) => t.managerId).slice(0, 12);
+    const worst = [...d.teams].filter((t) => t.managerId && t.counts.total >= 3).sort((a, b) => (b.counts.offline + b.counts.nunca_conectou + b.counts.sem_instancia) / b.counts.total - (a.counts.offline + a.counts.nunca_conectou + a.counts.sem_instancia) / a.counts.total).slice(0, 5);
+    const monitorOn = S.settings?.monitor_enabled === 'true';
+    return `
+      ${S.setupMissing ? '<div class="banner crit"><b>Tabelas do painel não criadas.</b> Rode <code>db/painel.sql</code> no Supabase para liberar regras, alertas e configurações.</div>' : ''}
+      ${!d.hrConfigured ? '<div class="banner crit"><b>Cadastro do Bitrix indisponível.</b> Sem ele não há equipes nem gestores.</div>' : ''}
+      <div class="banner ${monitorOn ? 'ok' : ''}">${monitorOn ? '<b>Monitor ligado:</b> gestores são avisados quando alguém que estava conectado desconecta.' : '<b>Monitor desligado:</b> nenhum gestor está sendo avisado. Os casos são só registrados como "simulados" em Alertas — ligue em Configurações quando as regras estiverem certas.'}</div>
+      ${s.noManager ? `<div class="banner"><b>${s.noManager} pessoa(s) sem gestor definido</b> — o alerta delas não chegaria a ninguém. Veja em <a href="#" data-go="people" data-team="_none">Pessoas</a> e crie regras em <a href="#" data-go="routes">Regras de gestor</a>.</div>` : ''}
+      <div class="kpis">
+        ${kpi(s.employees, 'Colaboradores ativos', null, `${s.teams} equipes`)}
+        ${kpi(s.connected, 'Conectados agora', 'conectado', `${pct(s.connected, s.employees)}% do total`)}
+        ${kpi(s.offline, 'Offline (caíram)', 'offline')}
+        ${kpi(s.notVerified, 'Não verificados', 'nao_verificado', 'sessão não carregada')}
+        ${kpi(s.neverConnected, 'Nunca conectaram', 'nunca_conectou')}
+        ${kpi(s.noInstance, 'Sem instância', 'sem_instancia')}
+        ${kpi(s.distinctNumbers, 'Números distintos', null, `${s.repeatedNumbers} repetido(s)`)}
+        ${kpi(s.instances, 'Instâncias', null, `${s.instancesOnline} online · ${s.banned} banida(s)`)}
+      </div>
+      <div class="card"><h2>Situação por equipe</h2>${legend()}
+        <div class="scroll"><table><thead><tr><th>Equipe (gestor)</th><th>Situação</th><th class="num">Pessoas</th><th class="num">Conectados</th><th class="num">Sem conexão*</th></tr></thead><tbody>
+        ${top.map((t) => `<tr class="click" data-go="teams" data-open="${esc(t.key)}"><td>${esc(t.managerName)}</td><td>${bar(t.counts)}</td><td class="num">${t.counts.total}</td><td class="num">${t.counts.conectado}</td><td class="num">${t.counts.offline + t.counts.nunca_conectou + t.counts.sem_instancia}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sem equipes.</td></tr>'}
+        </tbody></table></div>
+        <p class="faint">* Offline + nunca conectaram + sem instância. Mostrando as 12 maiores equipes; todas em <a href="#" data-go="teams">Equipes</a>.</p>
+      </div>
+      ${worst.length ? `<div class="card"><h2>Equipes com maior proporção sem conexão</h2><table><tbody>${worst.map((t) => { const bad = t.counts.offline + t.counts.nunca_conectou + t.counts.sem_instancia; return `<tr class="click" data-go="teams" data-open="${esc(t.key)}"><td>${esc(t.managerName)}</td><td class="num">${bad} de ${t.counts.total} (${pct(bad, t.counts.total)}%)</td></tr>`; }).join('')}</tbody></table></div>` : ''}`;
+  }
+
+  function viewTeams() {
+    const q = S.tf.q.toLowerCase();
+    const teams = S.data.teams.filter((t) => !q || t.managerName.toLowerCase().includes(q) || t.departments.some((x) => x.toLowerCase().includes(q)));
+    const byKey = new Map(S.data.people.map((p) => [p.bitrixUserId || p.ownerId, p]));
+    return `<div class="card"><div class="row"><div><label>Buscar equipe, gestor ou departamento</label><input type="text" id="tq" value="${esc(S.tf.q)}"></div>
+      <div class="fit"><button data-act="export" data-fmt="xlsx">Exportar tudo (Excel)</button></div></div>
+      <div style="margin-top:12px">${legend()}</div>
+      <div class="scroll"><table><thead><tr><th>Equipe (gestor que recebe)</th><th>Departamentos</th><th>Situação</th><th class="num">Pessoas</th><th class="num">Sem conexão*</th><th></th></tr></thead><tbody>
+      ${teams.map((t) => { const bad = t.counts.offline + t.counts.nunca_conectou + t.counts.sem_instancia; const open = S.open.has(t.key);
+        return `<tr class="click" data-toggle="${esc(t.key)}"><td><b>${esc(t.managerName)}</b></td><td class="faint">${esc(t.departments.join(', '))}</td><td>${bar(t.counts)}</td><td class="num">${t.counts.total}</td><td class="num">${bad}</td>
+          <td class="fit"><button data-act="export" data-fmt="xlsx" data-team="${esc(t.key)}">Excel</button> ${t.managerId ? `<button data-act="notify-team" data-team="${esc(t.key)}">Notificar</button>` : ''}</td></tr>
+          ${open ? `<tr class="members"><td colspan="6"><table><tbody>${t.memberIds.map((id) => byKey.get(id)).filter(Boolean).sort((a, b) => STATE_ORDER.indexOf(b.state) - STATE_ORDER.indexOf(a.state) || String(a.name).localeCompare(String(b.name), 'pt-BR')).map((m) =>
+            `<tr><td>${esc(m.name || m.bitrixUserId)}</td><td class="faint">${esc(m.department || '')}</td><td>${pill(m.state)}</td><td class="faint">${esc(m.phones.map(fmtPhone).join(' · '))}</td><td class="faint">${esc(m.recipient?.source || '')}</td></tr>`).join('')}</tbody></table></td></tr>` : ''}`; }).join('') || '<tr><td colspan="6" class="muted">Nenhuma equipe.</td></tr>'}
+      </tbody></table></div><p class="faint">Clique numa equipe para ver as pessoas. Cada pessoa aparece na equipe de quem recebe o alerta dela (regras em "Regras de gestor").</p></div>`;
+  }
+
+  function filteredPeople() {
+    const f = S.pf, q = f.q.toLowerCase();
+    return S.data.people.filter((p) => p.activeInBitrix !== false
+      && (!f.state || p.state === f.state)
+      && (!f.dept || p.department === f.dept)
+      && (!f.team || (f.team === '_none' ? !p.recipient : p.recipient?.bitrixUserId === f.team))
+      && (!q || String(p.name || '').toLowerCase().includes(q) || p.phones.some((x) => x.includes(q.replace(/\D/g, '') || '@@'))));
+  }
+  const PAGE = 100;
+  function viewPeople() {
+    const list = filteredPeople(), pages = Math.max(1, Math.ceil(list.length / PAGE));
+    S.pf.page = Math.min(S.pf.page, pages - 1);
+    const rows = list.slice(S.pf.page * PAGE, (S.pf.page + 1) * PAGE);
+    const depts = [...new Set(S.data.people.map((p) => p.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const teams = S.data.teams.filter((t) => t.managerId);
+    return `<div class="card"><div class="row">
+      <div><label>Buscar nome ou número</label><input type="text" id="pq" value="${esc(S.pf.q)}"></div>
+      <div><label>Situação</label><select id="ps"><option value="">Todas</option>${STATE_ORDER.map((k) => `<option value="${k}" ${S.pf.state === k ? 'selected' : ''}>${STATES[k].label}</option>`).join('')}</select></div>
+      <div><label>Departamento</label><select id="pd"><option value="">Todos</option>${depts.map((x) => `<option ${S.pf.dept === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+      <div><label>Equipe (gestor)</label><select id="pt"><option value="">Todas</option><option value="_none" ${S.pf.team === '_none' ? 'selected' : ''}>Sem gestor definido</option>${teams.map((t) => `<option value="${esc(t.managerId)}" ${S.pf.team === t.managerId ? 'selected' : ''}>${esc(t.managerName)}</option>`).join('')}</select></div>
+    </div>
+    <div class="row" style="margin-top:10px;align-items:center"><span class="muted">${list.length} pessoa(s) · ${S.selected.size} selecionada(s)</span><span></span>
+      <div class="fit"><button data-act="select-all">Selecionar todas do filtro</button> <button data-act="clear-sel">Limpar</button> <button data-act="notify-sel" ${S.selected.size ? '' : 'disabled'}>Notificar selecionadas</button>
+      <button data-act="export" data-fmt="xlsx">Excel</button> <button data-act="export" data-fmt="csv">CSV</button></div></div>
+    <div style="margin-top:12px">${legend()}</div>
+    <div class="scroll"><table><thead><tr><th></th><th>Nome</th><th>Departamento</th><th>Situação</th><th>Números</th><th>Gestor que recebe</th></tr></thead><tbody>
+    ${rows.map((p) => { const id = p.bitrixUserId || p.ownerId; return `<tr><td><input type="checkbox" data-sel="${esc(id)}" ${S.selected.has(id) ? 'checked' : ''} aria-label="Selecionar ${esc(p.name)}"></td><td>${esc(p.name || id)}</td><td class="faint">${esc(p.department || '')}</td><td>${pill(p.state)}${p.instances.some((i) => i.banned) ? ' <span class="tag">banida</span>' : ''}</td><td class="faint">${esc(p.phones.map(fmtPhone).join(' · '))}</td><td class="faint">${esc(p.recipient?.name || '— sem gestor —')}</td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">Ninguém com esses filtros.</td></tr>'}
+    </tbody></table></div>
+    <div class="pager"><button data-act="prev" ${S.pf.page ? '' : 'disabled'}>‹</button><span class="muted">Página ${S.pf.page + 1} de ${pages}</span><button data-act="next" ${S.pf.page < pages - 1 ? '' : 'disabled'}>›</button></div></div>`;
+  }
+
+  async function viewAlerts(el) {
+    el.innerHTML = '<p class="muted">Carregando…</p>';
+    const q = new URLSearchParams(Object.entries(S.af).filter(([, v]) => v));
+    const { alerts } = await api('/alerts?limit=300&' + q);
+    el.innerHTML = `<div class="card"><div class="row"><div><label>Tipo</label><select id="ak"><option value="">Todos</option>${Object.entries(KIND_LABEL).map(([k, v]) => `<option value="${k}" ${S.af.kind === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div><label>Envio</label><select id="as"><option value="">Todos</option>${Object.entries(STATUS_LABEL).map(([k, v]) => `<option value="${k}" ${S.af.status === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+      <div class="fit"><button data-act="export" data-fmt="xlsx">Exportar (Excel, aba Alertas)</button></div></div>
+      <div class="scroll" style="margin-top:12px"><table><thead><tr><th>Quando</th><th>Tipo</th><th>Pessoa</th><th>Número</th><th>Gestor avisado</th><th>Envio</th><th>Detalhe</th></tr></thead><tbody>
+      ${alerts.map((a) => `<tr><td>${fmtDate(a.createdAt)}</td><td>${esc(KIND_LABEL[a.kind] || a.kind)}</td><td>${esc(a.personName || '')}</td><td class="faint">${esc(fmtPhone(a.phone))}</td><td>${esc(a.recipientName || '—')}<div class="faint">${esc(a.routeSource || '')}</div></td><td>${esc(STATUS_LABEL[a.status] || a.status)}</td><td class="faint">${esc(a.detail || '')}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">Nada registrado ainda.</td></tr>'}
+      </tbody></table></div>
+      <p class="faint">"Enviado" = o aviso foi disparado pelos canais do DapZap (sistema, push, WhatsApp, e-mail); cada canal é best-effort e não devolve confirmação de leitura.</p></div>`;
+  }
+
+  async function viewRoutes(el) {
+    el.innerHTML = '<p class="muted">Carregando…</p>';
+    const { routes, departments } = await api('/routes');
+    el.innerHTML = `<div class="card"><h2>Quem recebe o alerta de quem</h2>
+      <p class="muted">Ordem: <b>regra da pessoa</b> → <b>regra do departamento</b> → gestor do perfil no Bitrix ([GER] → [DIR] → chefe do departamento). Ninguém recebe o alerta de si mesmo. Exemplo: regra do departamento "Vendas Carol" → Carol faz o aviso de todas as vendedoras dali ir direto para a Carol, mesmo que a gerente delas seja outra pessoa.</p>
+      <form id="routeForm"><div class="row">
+        <div class="fit" style="min-width:150px"><label>Regra por</label><select id="rt"><option value="department">Departamento</option><option value="person">Pessoa</option></select></div>
+        <div id="rsWrap"><label>Departamento</label><select id="rdept">${departments.map((x) => `<option>${esc(x)}</option>`).join('')}</select></div>
+        <div id="rpWrap" hidden><label>Pessoa</label>${picker('person', 'Digite o nome…')}</div>
+        <div><label>Quem recebe o alerta</label>${picker('manager', 'Digite o nome do gestor…')}</div>
+        <div><label>Observação (opcional)</label><input type="text" id="rnote" maxlength="200"></div>
+        <div class="fit"><button class="primary" type="submit">Salvar regra</button></div></div></form></div>
+      <div class="card"><h2>Regras ativas (${routes.length})</h2><table><thead><tr><th>Tipo</th><th>Quem</th><th>Alerta vai para</th><th>Observação</th><th>Criada</th><th></th></tr></thead><tbody>
+      ${routes.map((r) => `<tr><td>${r.scopeType === 'person' ? 'Pessoa' : 'Departamento'}</td><td>${esc(r.scopeLabel || r.scopeValue)}</td><td><b>${esc(r.recipientName)}</b></td><td class="faint">${esc(r.note || '')}</td><td class="faint">${fmtDate(r.createdAt)} ${esc(r.createdBy || '')}</td><td><button class="danger" data-act="del-route" data-id="${r.id}">Remover</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhuma regra: valem só os gestores do perfil do Bitrix.</td></tr>'}
+      </tbody></table></div>`;
+    wirePickers(el);
+    $('#rt').addEventListener('change', (e) => { $('#rsWrap').hidden = e.target.value !== 'department'; $('#rpWrap').hidden = e.target.value !== 'person'; });
+    $('#routeForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const type = $('#rt').value;
+      const scopeValue = type === 'department' ? $('#rdept').value : $('[data-picker=person] input[type=hidden]').value;
+      const recipient = $('[data-picker=manager] input[type=hidden]').value;
+      if (!scopeValue || !recipient) return toast('Escolha na lista (digite e clique no nome).', true);
+      try { await api('/routes', { method: 'POST', body: { scopeType: type, scopeValue, recipientBitrixId: recipient, note: $('#rnote').value } }); toast('Regra salva.'); await loadData(true); render(); }
+      catch (err) { toast(err.message, true); }
+    });
+  }
+
+  function audience() {
+    const f = S.nf;
+    if (S.selected.size && f.fromSelection) return [...S.selected];
+    return S.data.people.filter((p) => p.activeInBitrix !== false && f.states.has(p.state) && (!f.team || p.recipient?.bitrixUserId === f.team) && (!f.dept || p.department === f.dept)).map((p) => p.bitrixUserId).filter(Boolean);
+  }
+  function viewNotify() {
+    const f = S.nf, ids = audience();
+    const depts = [...new Set(S.data.people.map((p) => p.department).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return `<div class="card"><h2>Disparar notificação</h2>
+      ${f.fromSelection ? `<div class="banner ok">Público: <b>${S.selected.size} pessoa(s) selecionada(s)</b> na tela Pessoas. <button data-act="drop-selection">Usar filtros em vez disso</button></div>` : `
+      <h3>Quem recebe</h3><div class="legend">${STATE_ORDER.map((k) => `<label style="display:inline-flex;gap:6px;margin:0"><input type="checkbox" data-nstate="${k}" ${f.states.has(k) ? 'checked' : ''}> ${STATES[k].label}</label>`).join('')}</div>
+      <div class="row"><div><label>Equipe (gestor)</label><select id="nt"><option value="">Todas</option>${S.data.teams.filter((t) => t.managerId).map((t) => `<option value="${esc(t.managerId)}" ${f.team === t.managerId ? 'selected' : ''}>${esc(t.managerName)}</option>`).join('')}</select></div>
+      <div><label>Departamento</label><select id="nd"><option value="">Todos</option>${depts.map((x) => `<option ${f.dept === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div></div>`}
+      <p><b>${ids.length}</b> pessoa(s) receberão a notificação.</p>
+      <label>Título</label><input type="text" id="ntitle" maxlength="120" value="Conecte seu WhatsApp no DapZap">
+      <label>Mensagem</label><textarea id="nbody" maxlength="2000">Seu WhatsApp não está conectado no DapZap. Abra Conexões e escaneie o QR Code para continuar usando o WhatsApp.</textarea>
+      <label>Canais</label><div class="legend">${[['app', 'Sistema (DapZap)'], ['push', 'Push do navegador'], ['whatsapp', 'WhatsApp (por outra instância online da pessoa)'], ['email', 'E-mail']].map(([k, l]) => `<label style="display:inline-flex;gap:6px;margin:0"><input type="checkbox" data-nch="${k}" ${k !== 'whatsapp' ? 'checked' : ''}> ${l}</label>`).join('')}</div>
+      <button class="primary" data-act="send-notify" ${ids.length ? '' : 'disabled'}>Enviar para ${ids.length} pessoa(s)</button></div>
+      <div class="card"><h2>Resumo para os gestores</h2><p class="muted">Cada gestor recebe a lista de quem, na equipe dele, está sem DapZap conectado (offline, nunca conectou ou sem instância). Um mesmo resumo não sai duas vezes no mesmo dia.</p>
+      <button data-act="digest-preview">Ver prévia</button> <button class="primary" data-act="digest-send">Enviar agora a todos os gestores</button><div id="digestOut" style="margin-top:12px"></div></div>`;
+  }
+
+  async function viewSettings(el) {
+    el.innerHTML = '<p class="muted">Carregando…</p>';
+    const [st, au] = await Promise.all([api('/settings'), api('/audit?limit=100')]);
+    S.settings = st;
+    const on = st.monitor_enabled === 'true';
+    el.innerHTML = `<div class="card"><h2>Monitor de desconexões</h2>
+      <div class="banner ${on ? 'ok' : ''}">${on ? `<b>LIGADO</b> desde ${fmtDate(st.monitor_enabled_at)}. Só desconexões a partir daí avisam gestores.` : '<b>Desligado.</b> Nada é enviado; os casos aparecem como "simulados" em Alertas.'}</div>
+      <p class="muted">Avisa o gestor <b>na hora</b> quando alguém que já esteve conectado: desvincula o aparelho no celular, remove a conexão no DapZap ou tem a sessão assumida por outro aparelho. Avisa <b>com espera</b> quando a conexão cai e não volta sozinha. <b>Não avisa</b>: quem nunca conectou, queda curta de rede, reinício do servidor (silêncio de 60 min depois de um deploy) nem recusa do WhatsApp (banimento, tratado à parte).</p>
+      <p class="muted"><b>Limite atual:</b> com o boot preguiçoso, uma sessão só é conferida depois que a pessoa abre o DapZap; quem desvincula o aparelho e não abre o app só é detectado quando a sessão voltar a subir.</p>
+      <button class="${on ? '' : 'primary'}" data-act="toggle-monitor" data-on="${on ? '0' : '1'}">${on ? 'Desligar monitor' : 'Ligar monitor'}</button>
+      <div class="row" style="margin-top:14px"><div><label>Espera para queda de conexão (minutos, 5–720)</label><input type="number" id="sgrace" min="5" max="720" value="${esc(st.grace_minutes)}"></div>
+      <div><label>Resumo diário aos gestores</label><select id="sdigest"><option value="false" ${st.digest_enabled !== 'true' ? 'selected' : ''}>Desligado</option><option value="true" ${st.digest_enabled === 'true' ? 'selected' : ''}>Ligado</option></select></div>
+      <div><label>Hora do resumo (Brasília)</label><input type="number" id="shour" min="0" max="23" value="${esc(st.digest_hour)}"></div>
+      <div class="fit"><button data-act="save-settings">Salvar</button></div></div></div>
+      <div class="card"><h2>Trocar minha senha</h2><div class="row"><div><label>Senha atual</label><input type="password" id="pwc" autocomplete="current-password"></div><div><label>Nova senha (mín. 10 caracteres)</label><input type="password" id="pwn" autocomplete="new-password"></div><div class="fit"><button data-act="change-pw">Trocar</button></div></div></div>
+      <div class="card"><h2>Histórico do painel</h2><div class="scroll"><table><thead><tr><th>Quando</th><th>Usuário</th><th>Ação</th><th>Detalhe</th></tr></thead><tbody>${au.entries.map((e) => `<tr><td>${fmtDate(e.createdAt)}</td><td>${esc(e.username)}</td><td>${esc(e.action)}</td><td class="faint">${esc(e.detail || '')}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">Vazio.</td></tr>'}</tbody></table></div></div>`;
+  }
+
+  // ---------- ações ----------
+  async function loadData(force) {
+    S.data = await api('/data' + (force ? '?force=1' : ''));
+    S.settings = await api('/settings').catch(() => S.settings);
+    $('#genAt').textContent = 'Dados de ' + fmtDate(S.data.generatedAt);
+  }
+  function go(tab, extra = {}) {
+    S.tab = tab;
+    if (extra.open) S.open.add(extra.open);
+    if (extra.team) { S.pf = { ...S.pf, team: extra.team, state: '', page: 0 }; }
+    render();
+  }
+  async function render() {
+    $('#tabs').innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? 'active' : ''}">${l}</button>`).join('');
+    const el = $('#view');
+    if (!S.data) { el.innerHTML = '<p class="muted">Carregando dados…</p>'; return; }
+    try {
+      if (S.tab === 'overview') el.innerHTML = viewOverview();
+      else if (S.tab === 'teams') el.innerHTML = viewTeams();
+      else if (S.tab === 'people') el.innerHTML = viewPeople();
+      else if (S.tab === 'notify') el.innerHTML = viewNotify();
+      else if (S.tab === 'alerts') await viewAlerts(el);
+      else if (S.tab === 'routes') await viewRoutes(el);
+      else if (S.tab === 'settings') await viewSettings(el);
+    } catch (err) { el.innerHTML = `<div class="banner crit">${esc(err.message)}</div>`; }
+  }
+  function download(path) { location.href = '/api/panel' + path; }
+
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-tab]'); if (t) { S.tab = t.dataset.tab; return render(); }
+    const g = e.target.closest('[data-go]'); if (g && g.tagName === 'A') { e.preventDefault(); return go(g.dataset.go, { team: g.dataset.team }); }
+    if (g) return go(g.dataset.go, { open: g.dataset.open });
+    const a = e.target.closest('[data-act]');
+    if (!a) { const row = e.target.closest('[data-toggle]'); if (row && !e.target.closest('button')) { const k = row.dataset.toggle; S.open.has(k) ? S.open.delete(k) : S.open.add(k); render(); } return; }
+    const act = a.dataset.act;
+    try {
+      if (act === 'export') return download(`/export?format=${a.dataset.fmt}${a.dataset.team ? '&team=' + encodeURIComponent(a.dataset.team) : ''}`);
+      if (act === 'prev') { S.pf.page--; return render(); } if (act === 'next') { S.pf.page++; return render(); }
+      if (act === 'select-all') { filteredPeople().forEach((p) => p.bitrixUserId && S.selected.add(p.bitrixUserId)); return render(); }
+      if (act === 'clear-sel') { S.selected.clear(); return render(); }
+      if (act === 'notify-sel') { S.nf.fromSelection = true; return go('notify'); }
+      if (act === 'drop-selection') { S.nf.fromSelection = false; return render(); }
+      if (act === 'notify-team') { S.selected.clear(); S.nf = { states: new Set(['offline', 'nunca_conectou', 'sem_instancia']), team: a.dataset.team, dept: '', fromSelection: false }; return go('notify'); }
+      if (act === 'del-route') { if (!confirm('Remover esta regra?')) return; await api('/routes/' + a.dataset.id, { method: 'DELETE' }); await loadData(true); return render(); }
+      if (act === 'send-notify') {
+        const ids = audience(), channels = [...document.querySelectorAll('[data-nch]:checked')].map((c) => c.dataset.nch);
+        if (!channels.length) return toast('Escolha pelo menos um canal.', true);
+        if (!confirm(`Enviar esta notificação para ${ids.length} pessoa(s) pelos canais: ${channels.join(', ')}?`)) return;
+        a.disabled = true;
+        const r = await api('/notify', { method: 'POST', body: { bitrixIds: ids, title: $('#ntitle').value, body: $('#nbody').value, channels } });
+        toast(`Disparado para ${r.sent} pessoa(s)${r.failed ? `, ${r.failed} falharam` : ''}.`); a.disabled = false; return;
+      }
+      if (act === 'digest-preview' || act === 'digest-send') {
+        const send = act === 'digest-send';
+        if (send && !confirm('Enviar o resumo agora a todos os gestores que têm gente sem conexão?')) return;
+        const { results } = await api('/digest', { method: 'POST', body: { dryRun: !send, channels: ['app', 'push', 'email'] } });
+        $('#digestOut').innerHTML = results.length ? `<table><thead><tr><th>Gestor</th><th class="num">Sem conexão</th><th>${send ? 'Envio' : 'Mensagem'}</th></tr></thead><tbody>${results.map((r) => `<tr><td>${esc(r.managerName)}</td><td class="num">${esc(r.badCount ?? '')}</td><td class="faint">${send ? esc(r.status) : esc(r.body).replace(/\n/g, '<br>')}</td></tr>`).join('')}</tbody></table>` : '<p class="muted">Nenhum gestor com gente sem conexão.</p>';
+        return;
+      }
+      if (act === 'toggle-monitor') {
+        const on = a.dataset.on === '1';
+        if (!confirm(on ? 'Ligar o monitor? A partir de agora gestores serão avisados quando alguém desconectar.' : 'Desligar o monitor?')) return;
+        await api('/settings', { method: 'PUT', body: { monitor_enabled: on } }); toast(on ? 'Monitor ligado.' : 'Monitor desligado.'); await loadData(); return render();
+      }
+      if (act === 'save-settings') { await api('/settings', { method: 'PUT', body: { grace_minutes: Number($('#sgrace').value), digest_enabled: $('#sdigest').value === 'true', digest_hour: Number($('#shour').value) } }); toast('Configurações salvas.'); return render(); }
+      if (act === 'change-pw') { await api('/password', { method: 'POST', body: { current: $('#pwc').value, next: $('#pwn').value } }); $('#pwc').value = $('#pwn').value = ''; return toast('Senha trocada.'); }
+    } catch (err) { toast(err.message, true); a.disabled = false; }
+  });
+
+  document.addEventListener('input', (e) => {
+    const id = e.target.id;
+    if (id === 'tq') { S.tf.q = e.target.value; render().then(() => { const i = $('#tq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }
+    if (id === 'pq') { S.pf.q = e.target.value; S.pf.page = 0; render().then(() => { const i = $('#pq'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }); }
+  });
+  document.addEventListener('change', (e) => {
+    const el = e.target, id = el.id;
+    if (el.dataset.sel) { el.checked ? S.selected.add(el.dataset.sel) : S.selected.delete(el.dataset.sel); return render(); }
+    if (el.dataset.nstate) { el.checked ? S.nf.states.add(el.dataset.nstate) : S.nf.states.delete(el.dataset.nstate); return render(); }
+    if (id === 'ps') { S.pf.state = el.value; S.pf.page = 0; render(); } else if (id === 'pd') { S.pf.dept = el.value; S.pf.page = 0; render(); } else if (id === 'pt') { S.pf.team = el.value; S.pf.page = 0; render(); }
+    else if (id === 'nt') { S.nf.team = el.value; render(); } else if (id === 'nd') { S.nf.dept = el.value; render(); }
+    else if (id === 'ak') { S.af.kind = el.value; render(); } else if (id === 'as') { S.af.status = el.value; render(); }
+  });
+
+  // ---------- login / início ----------
+  function showLogin() { $('#app').hidden = true; $('#login').hidden = false; S.data = null; }
+  async function start(user) {
+    $('#login').hidden = true; $('#app').hidden = false; $('#whoami').textContent = user.displayName;
+    S.data = null; render();
+    try { await loadData(); } catch (err) { $('#view').innerHTML = `<div class="banner crit">${esc(err.message)}${S.setupMissing ? ' — rode db/painel.sql no Supabase.' : ''}</div>`; return; }
+    render();
+  }
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault(); $('#loginErr').textContent = '';
+    try { const r = await api('/login', { method: 'POST', body: { username: $('#lu').value, password: $('#lp').value } }); $('#lp').value = ''; await start(r.user); }
+    catch (err) { $('#loginErr').textContent = err.message; }
+  });
+  $('#btnLogout').addEventListener('click', async () => { await api('/logout', { method: 'POST' }).catch(() => {}); showLogin(); });
+  $('#btnRefresh').addEventListener('click', async () => { $('#btnRefresh').disabled = true; try { await loadData(true); render(); toast('Dados atualizados.'); } catch (err) { toast(err.message, true); } $('#btnRefresh').disabled = false; });
+  $('#btnTheme').addEventListener('click', () => { const dark = matchMedia('(prefers-color-scheme: dark)').matches; const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light'); const next = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; localStorage.setItem('painelTheme', next); });
+  if (localStorage.getItem('painelTheme')) document.documentElement.dataset.theme = localStorage.getItem('painelTheme');
+
+  api('/me').then((r) => start(r.user)).catch(() => showLogin());
+})();
+</script>
+</body>
+</html>

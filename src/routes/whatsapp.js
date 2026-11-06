@@ -25,6 +25,7 @@ const conversationAnalysisGrants = require('../conversationAnalysisGrants');
 const { ownerIdFor } = require('../auth');
 const { buildPhoneAudit, buildPhoneAuditWorkbook } = require('../phoneAudit');
 const actionLog = require('../actionLog');
+const connectionMonitor = require('../connectionMonitor');
 const { refreshOwnNumber } = require('../ownNumbers');
 
 // Tentativas de reconexão seguidas depois das quais o card libera "Reconectar com QR Code"
@@ -574,6 +575,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
       if (!inst || inst.ownerId !== owner) {
         return res.status(404).json({ error: 'instância não encontrada' });
       }
+      // Monitor de desconexões: a pessoa removeu uma conexão que já tinha sido pareada. O número
+      // é lido ANTES da remoção (ela apaga as credenciais). Não espera nem atrapalha a remoção.
+      connectionMonitor.handleDisconnect({
+        sessions, instanceId: req.params.id, kind: 'removida_dapzap', ownerId: owner,
+        phone: getOwnNumbersBySession()[req.params.id], reason: 'removida pelo usuário',
+      });
       await sessions.remove(req.params.id);
       await instancesStore.remove(req.params.id, owner);
       res.json({ ok: true });

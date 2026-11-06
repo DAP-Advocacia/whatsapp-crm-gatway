@@ -1,7 +1,7 @@
 const instancesStore = require('./instances');
 const instanceBanStore = require('./instanceBanStore');
 const { getOwnNumbersBySession } = require('./ownNumbers');
-const { listEmployeesForAudit } = require('./bitrixHierarchy');
+const { getEmployees } = require('./teamDirectory');
 const { ownerIdFor, bitrixUserIdFromOwnerId } = require('./auth');
 
 /**
@@ -48,10 +48,10 @@ function personSituation(counts) {
   return 'sem_instancia';
 }
 
-async function buildPhoneAudit(sessions) {
+async function buildPhoneAudit(sessions, { force = false } = {}) {
   const [allInstances, employees, banned] = await Promise.all([
     instancesStore.listAll(),
-    listEmployeesForAudit(),
+    getEmployees({ force }).then((d) => d.employees), // cadastro do Bitrix em cache (ver teamDirectory)
     instanceBanStore.listBannedNow(),
   ]);
   const hrConfigured = employees !== null;

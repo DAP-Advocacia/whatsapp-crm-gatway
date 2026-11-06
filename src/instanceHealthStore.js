@@ -146,7 +146,21 @@ async function listMetricsDaily(instanceId, days = 90) {
   return rows.map((r) => ({ ...r, snapshotDate: r.snapshotDate.toISOString().slice(0, 10) }));
 }
 
+// Quedas "temporárias" ainda em aberto há mais de `minutes` — o monitor de desconexões
+// (src/connectionMonitor.js) decide quais delas viram aviso ao gestor.
+async function listOpenTemporaryOlderThan(minutes, limit = 500) {
+  const { rows } = await pool.query(
+    `select id, instance_id as "instanceId", reason, started_at as "startedAt"
+     from instance_connection_events
+     where ended_at is null and kind = 'temporary' and started_at <= now() - ($1::int * interval '1 minute')
+     order by started_at limit $2`,
+    [Math.round(minutes), limit]
+  );
+  return rows;
+}
+
 module.exports = {
+  listOpenTemporaryOlderThan,
   openConnectionEvent,
   closeOpenConnectionEvent,
   getOpenConnectionEvent,

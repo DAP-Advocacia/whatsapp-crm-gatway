@@ -72,6 +72,8 @@ const agentRetryWorker = require('./agentRetryWorker');
 const insightGenerator = require('./insightGenerator');
 const dapinho = require('./dapinho');
 const alertDispatcher = require('./alertDispatcher');
+const connectionMonitor = require('./connectionMonitor');
+const { createPanelRouter } = require('./routes/panel');
 
 const PORT = process.env.PORT || 3333;
 const AUTH_FOLDER = process.env.AUTH_FOLDER || './auth_session';
@@ -414,7 +416,11 @@ async function handleStatusForHealth(sessionId, status) {
   // gateway agora leria os campos ainda com o valor da queda ANTERIOR.
   // setImmediate adia a leitura pro próximo tick, depois que o handler
   // síncrono do 'connection.update' já terminou de rodar por completo.
-  await new Promise((resolve) => setImmediate(resolve));
+  // Com workers (SESSION_WORKERS), o 'status' chega do worker ANTES do 'state' que traz
+  // loggedOut/needsAttention (são duas mensagens IPC); um setImmediate pode ler o espelho
+  // ainda desatualizado e perder a queda "precisa de atenção" (inclusive "deslogou pelo
+  // celular", que o monitor de desconexões usa). Uma folga curta deixa o estado chegar.
+  await new Promise((resolve) => (SESSION_WORKERS > 0 ? setTimeout(resolve, 400) : setImmediate(resolve)));
 
   const gateway = sessions.getActiveGateway(sessionId);
   if (!gateway) return; // sessão já não está mais em memória (ex: removida)
@@ -435,7 +441,19 @@ async function handleStatusForHealth(sessionId, status) {
     }
 
     const reason = gateway.loggedOut ? 'loggedOut' : gateway.lastDisconnectReason;
-    await instanceHealthStore.openConnectionEvent(sessionId, currentState, reason);
+    const openedEvent = await instanceHealthStore.openConnectionEvent(sessionId, currentState, reason);
+
+    // Monitor de desconexões (avisa o gestor, ver src/connectionMonitor.js). Só desconexão
+    // de pessoa: deslogou pelo celular, outro aparelho assumiu, ou parou de reconectar.
+    // Recusa do WhatsApp (403) fica de fora — é banimento, tratado em outro alerta.
+    if (currentState === 'attention' && previousState !== 'attention') {
+      const monitorKind = gateway.loggedOut ? 'deslogou_celular'
+        : gateway.lastDisconnectReason === 'connectionReplaced' ? 'substituida'
+        : gateway.lastDisconnectReason === 'timeout persistente' ? 'queda_prolongada' : null;
+      if (monitorKind) {
+        connectionMonitor.handleDisconnect({ sessions, instanceId: sessionId, kind: monitorKind, reason, eventAt: openedEvent?.startedAt });
+      }
+    }
 
     // Notifica só ao ENTRAR em 'attention' vindo de um estado que não era
     // 'attention' (evita notificar de novo numa escalada dentro da mesma
@@ -1331,6 +1349,15 @@ app.use(createDemoFixturesRouter());
 // emitido só depois de confirmar a identidade com o Bitrix) que pertence a
 // quem está fazendo a requisição.
 // ---------------------------------------------------------------
+// Painel de auditoria (/painel): login e senha próprios, fora do Bitrix (src/panelAuth.js). Montado
+// ANTES do requireAuth do Bitrix abaixo, que barraria qualquer rota /api sem o token do app.
+app.use('/api/panel', createPanelRouter({ sessions }));
+app.get(['/painel', '/painel/'], (req, res) => {
+  // Não pode abrir dentro de iframe (clickjacking) nem ficar em cache.
+  res.set({ 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY', 'Content-Security-Policy': "frame-ancestors 'none'", 'X-Robots-Tag': 'noindex, nofollow' });
+  res.sendFile('painel.html', { root: 'public' });
+});
+
 app.use('/api/whatsapp', requireAuth, createWhatsappRouter({ sessions, broadcast }));
 app.use('/api', requireAuth, createCrmRouter());
 app.use('/api/lead-forms', requireAuth, createLeadFormsRouter());
@@ -1437,6 +1464,7 @@ app.use((err, req, res, next) => {
 });
 
 server.listen(PORT, () => {
+  connectionMonitor.start(sessions);
   console.log(`[server] gateway multi-sessão rodando na porta ${PORT}`);
   console.log(`[server] o QR Code de cada usuário aparece dentro da aba "WhatsApp" do card de Negócio`);
 });

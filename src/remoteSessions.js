@@ -128,6 +128,7 @@ class RemoteSessionManager {
     w.child = null;
     w.ready = false;
     if (this.stopping) return; // desligamento pedido: sem recriar nem marcar as sessões como caídas
+    this.lastWorkerRestartAt = Date.now(); // o monitor de desconexões fica quieto um tempo depois disto (todas as sessões do worker caem juntas)
     console.error(`[sessions] worker ${w.index} encerrou (code=${code} signal=${signal}) — recriando; só as sessões dele ficam offline`);
     for (const { reject, timer } of w.pending.values()) {
       clearTimeout(timer);
