@@ -1358,6 +1358,16 @@ app.get(['/painel', '/painel/'], (req, res) => {
   res.sendFile('painel.html', { root: 'public' });
 });
 
+// Mesmo painel, para abrir DENTRO do Bitrix como app incorporado (OAuth do BX24 identifica quem é e o
+// servidor filtra o que ele vê, ver src/panelScope.js). O Bitrix abre o handler do app por POST, por isso
+// app.all. Só o portal configurado pode enquadrar a página.
+app.all(['/painel/app', '/painel/app/'], (req, res) => {
+  const portal = process.env.BITRIX_PORTAL_DOMAIN;
+  res.set({ 'Cache-Control': 'no-store', 'Content-Security-Policy': `frame-ancestors ${portal ? `https://${portal}` : "'none'"}`, 'X-Robots-Tag': 'noindex, nofollow' });
+  res.removeHeader('X-Frame-Options');
+  res.sendFile('painel.html', { root: 'public' });
+});
+
 app.use('/api/whatsapp', requireAuth, createWhatsappRouter({ sessions, broadcast }));
 app.use('/api', requireAuth, createCrmRouter());
 app.use('/api/lead-forms', requireAuth, createLeadFormsRouter());

@@ -43,7 +43,7 @@ Sem nada configurado o app roda como antes (`SESSION_WORKERS=0`, tudo num proces
 | `WORKER_HEAP_MB` | `2048` | Limite de heap de CADA worker (sobrepõe `NODE_OPTIONS`). |
 | `WORKER_DB_POOL_MAX` | `4` | Conexões de banco por worker. |
 | `WORKER_CALL_TIMEOUT_MS` | `120000` | Tempo máximo de uma chamada (envio de mídia, grupo...). |
-| `SESSION_BOOT_MODE` | `lazy` | `all` reconecta todas as sessões salvas no boot. |
+| `SESSION_BOOT_MODE` | `lazy` | `all` reconecta todas as sessões salvas no boot. **Produção usa `all` desde 2026-11-06** (ver `DEPLOY.md` 4.1). |
 | `SESSION_STAGGER_MS` | `15000` | Intervalo entre sessões no boot completo (total, dividido entre workers). |
 | `PAIRING_MIN_GAP_MS` | `5000` | Intervalo mínimo entre logins (total). |
 | `AI_FEATURES` | desligado | `true` religa a IA (precisa de `OPENAI_API_KEY`). |

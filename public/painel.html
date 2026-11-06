@@ -128,18 +128,19 @@
   const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
   const fmtPhone = (p) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 13 && d.startsWith('55') ? `+55 (${d.slice(2, 4)}) ${d.slice(4, 9)}-${d.slice(9)}` : d.length === 12 && d.startsWith('55') ? `+55 (${d.slice(2, 4)}) ${d.slice(4, 8)}-${d.slice(8)}` : d; };
 
-  const S = { data: null, settings: null, tab: 'overview', open: new Set(), selected: new Set(), pf: { q: '', state: '', dept: '', team: '', page: 0 }, tf: { q: '' }, af: { kind: '', status: '' }, nf: { states: new Set(['offline', 'nunca_conectou', 'sem_instancia']), team: '', dept: '' }, setupMissing: false };
+  const EMBED = window.self !== window.top || /\/painel\/app\/?$/.test(location.pathname); // aberto dentro do Bitrix
+  const S = { token: null, scoped: false, data: null, settings: null, tab: 'overview', open: new Set(), selected: new Set(), pf: { q: '', state: '', dept: '', team: '', page: 0 }, tf: { q: '' }, af: { kind: '', status: '' }, nf: { states: new Set(['offline', 'nunca_conectou', 'sem_instancia']), team: '', dept: '' }, setupMissing: false };
 
   // ---------- infra ----------
   async function api(path, opts = {}) {
     const res = await fetch('/api/panel' + path, {
       method: opts.method || 'GET', credentials: 'same-origin',
-      headers: { 'X-Panel-CSRF': '1', ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: { 'X-Panel-CSRF': '1', ...(S.token ? { Authorization: 'Bearer ' + S.token } : {}), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
       body: opts.body ? JSON.stringify(opts.body) : undefined,
     });
     let json = null;
     try { json = await res.json(); } catch { /* sem corpo */ }
-    if (res.status === 401 && path !== '/login') { showLogin(); throw new Error('sessão expirada'); }
+    if (res.status === 401 && path !== '/login' && path !== '/bitrix-login') { if (EMBED) { S.token = null; embeddedStart(); } else showLogin(); throw new Error('sessão expirada'); }
     if (!res.ok) { if (json?.setup) S.setupMissing = true; throw new Error(json?.error || `erro ${res.status}`); }
     return json;
   }
@@ -230,9 +231,10 @@
       <div class="scroll"><table><thead><tr><th>Equipe (gestor que recebe)</th><th>Departamentos</th><th>Situação</th><th class="num">Pessoas</th><th class="num">Sem conexão*</th><th></th></tr></thead><tbody>
       ${teams.map((t) => { const bad = t.counts.offline + t.counts.nunca_conectou + t.counts.sem_instancia; const open = S.open.has(t.key);
         return `<tr class="click" data-toggle="${esc(t.key)}"><td><b>${esc(t.managerName)}</b></td><td class="faint">${esc(t.departments.join(', '))}</td><td>${bar(t.counts)}</td><td class="num">${t.counts.total}</td><td class="num">${bad}</td>
-          <td class="fit"><button data-act="export" data-fmt="xlsx" data-team="${esc(t.key)}">Excel</button> ${t.managerId ? `<button data-act="notify-team" data-team="${esc(t.key)}">Notificar</button>` : ''}</td></tr>
+          <td class="fit"><button data-act="export" data-fmt="xlsx" data-team="${esc(t.key)}">Excel</button> ${t.managerId && !S.scoped ? `<button data-act="notify-team" data-team="${esc(t.key)}">Notificar</button>` : ''}</td></tr>
           ${open ? `<tr class="members"><td colspan="6"><table><tbody>${t.memberIds.map((id) => byKey.get(id)).filter(Boolean).sort((a, b) => STATE_ORDER.indexOf(b.state) - STATE_ORDER.indexOf(a.state) || String(a.name).localeCompare(String(b.name), 'pt-BR')).map((m) =>
-            `<tr><td>${esc(m.name || m.bitrixUserId)}</td><td class="faint">${esc(m.department || '')}</td><td>${pill(m.state)}</td><td class="faint">${esc(m.phones.map(fmtPhone).join(' · '))}</td><td class="faint">${esc(m.recipient?.source || '')}</td></tr>`).join('')}</tbody></table></td></tr>` : ''}`; }).join('') || '<tr><td colspan="6" class="muted">Nenhuma equipe.</td></tr>'}
+            { const mk = 'p:' + (m.bitrixUserId || m.ownerId), mo = S.open.has(mk);
+              return `<tr class="click" data-toggle="${esc(mk)}"><td>${mo ? '▾' : '▸'} ${esc(m.name || m.bitrixUserId)}</td><td class="faint">${esc(m.department || '')}</td><td>${pill(m.state)}${partialTag(m)}</td><td class="faint">${phonesCell(m)}</td><td class="faint">${esc(m.recipient?.source || '')}</td></tr>${mo ? `<tr class="members"><td colspan="5"><table><thead><tr><th>Número</th><th>Instância</th><th>Situação</th><th>Motivo da queda</th></tr></thead><tbody>${phoneDetail(m)}</tbody></table></td></tr>` : ''}`; }).join('')}</tbody></table></td></tr>` : ''}`; }).join('') || '<tr><td colspan="6" class="muted">Nenhuma equipe.</td></tr>'}
       </tbody></table></div><p class="faint">Clique numa equipe para ver as pessoas. Cada pessoa aparece na equipe de quem recebe o alerta dela (regras em "Regras de gestor").</p></div>`;
   }
 
@@ -243,6 +245,20 @@
       && (!f.dept || p.department === f.dept)
       && (!f.team || (f.team === '_none' ? !p.recipient : p.recipient?.bitrixUserId === f.team))
       && (!q || String(p.name || '').toLowerCase().includes(q) || p.phones.some((x) => x.includes(q.replace(/\D/g, '') || '@@'))));
+  }
+  const partialTag = (p) => p.state === 'conectado' && p.downPhones?.length ? ` <span class="tag" style="color:var(--crit);border-color:currentColor" title="Pessoa conectada, mas com número fora do ar">parcial · ${p.downPhones.length} de ${p.phones.length} caído(s)</span>` : '';
+  const phonesCell = (p) => p.phones.map((x) => p.downPhones?.includes(x) ? `<span style="color:var(--crit)" title="Fora do ar (deslogado ou caiu)">${esc(fmtPhone(x))} ✕</span>` : esc(fmtPhone(x))).join(' · ');
+  const LIVE = { online: ['ok', 'Conectado'], offline: ['crit', 'Fora do ar'], connecting: ['warn', 'Reconectando'], queued: ['warn', 'Na fila'], sem_sessao: ['faint', 'Sessão não carregada'] };
+  function phoneDetail(p) {
+    const byPhone = new Map(), noPhone = [];
+    for (const i of p.instances) { if (!i.phone) { noPhone.push(i); continue; } if (!byPhone.has(i.phone)) byPhone.set(i.phone, []); byPhone.get(i.phone).push(i); }
+    const rows = [...byPhone].map(([ph, list]) => {
+      const best = list.find((i) => i.liveStatus === 'online') || list[0];
+      const st = best.banned ? ['crit', 'Banida'] : LIVE[best.liveStatus] || ['faint', best.liveStatus || '—'];
+      return `<tr><td>${esc(fmtPhone(ph))}</td><td class="faint">${esc(list.map((i) => i.label).filter(Boolean).join(', '))}</td><td><span class="tag" style="color:var(--${st[0] === 'ok' ? 'good' : st[0] === 'crit' ? 'crit' : st[0] === 'warn' ? 'warn' : 'text-2'})">${st[1]}</span></td><td class="faint">${best.liveStatus === 'online' ? '' : esc(best.lastDisconnectReason || '')}</td></tr>`;
+    });
+    for (const i of noPhone) rows.push(`<tr><td class="faint">sem número</td><td class="faint">${esc(i.label || '')}</td><td><span class="tag">Aguardando QR Code</span></td><td></td></tr>`);
+    return rows.join('') || '<tr><td colspan="4" class="muted">Sem instâncias.</td></tr>';
   }
   const PAGE = 100;
   function viewPeople() {
@@ -259,10 +275,10 @@
     </div>
     <div class="row" style="margin-top:10px;align-items:center"><span class="muted">${list.length} pessoa(s) · ${S.selected.size} selecionada(s)</span><span></span>
       <div class="fit"><button data-act="select-all">Selecionar todas do filtro</button> <button data-act="clear-sel">Limpar</button> <button data-act="notify-sel" ${S.selected.size ? '' : 'disabled'}>Notificar selecionadas</button>
-      <button data-act="export" data-fmt="xlsx">Excel</button> <button data-act="export" data-fmt="csv">CSV</button></div></div>
+      <button data-act="export" data-fmt="xlsx" ${S.selected.size ? 'data-onlysel="1"' : ''}>Excel${S.selected.size ? ` (${S.selected.size})` : ''}</button> <button data-act="export" data-fmt="csv" ${S.selected.size ? 'data-onlysel="1"' : ''}>CSV${S.selected.size ? ` (${S.selected.size})` : ''}</button></div></div>
     <div style="margin-top:12px">${legend()}</div>
     <div class="scroll"><table><thead><tr><th></th><th>Nome</th><th>Departamento</th><th>Situação</th><th>Números</th><th>Gestor que recebe</th></tr></thead><tbody>
-    ${rows.map((p) => { const id = p.bitrixUserId || p.ownerId; return `<tr><td><input type="checkbox" data-sel="${esc(id)}" ${S.selected.has(id) ? 'checked' : ''} aria-label="Selecionar ${esc(p.name)}"></td><td>${esc(p.name || id)}</td><td class="faint">${esc(p.department || '')}</td><td>${pill(p.state)}${p.instances.some((i) => i.banned) ? ' <span class="tag">banida</span>' : ''}</td><td class="faint">${esc(p.phones.map(fmtPhone).join(' · '))}</td><td class="faint">${esc(p.recipient?.name || '— sem gestor —')}</td></tr>`; }).join('') || '<tr><td colspan="6" class="muted">Ninguém com esses filtros.</td></tr>'}
+    ${rows.map((p) => { const id = p.bitrixUserId || p.ownerId; const ok = 'p:' + id, open = S.open.has(ok); return `<tr class="click" data-toggle="${esc(ok)}"><td><input type="checkbox" data-sel="${esc(id)}" ${S.selected.has(id) ? 'checked' : ''} aria-label="Selecionar ${esc(p.name)}"></td><td>${open ? '▾' : '▸'} ${esc(p.name || id)}</td><td class="faint">${esc(p.department || '')}</td><td>${pill(p.state)}${p.instances.some((i) => i.banned) ? ' <span class="tag">banida</span>' : ''}${partialTag(p)}</td><td class="faint">${phonesCell(p)}</td><td class="faint">${esc(p.recipient?.name || '— sem gestor —')}</td></tr>${open ? `<tr class="members"><td></td><td colspan="5"><table><thead><tr><th>Número</th><th>Instância</th><th>Situação</th><th>Motivo da queda</th></tr></thead><tbody>${phoneDetail(p)}</tbody></table></td></tr>` : ''}`; }).join('') || '<tr><td colspan="6" class="muted">Ninguém com esses filtros.</td></tr>'}
     </tbody></table></div>
     <div class="pager"><button data-act="prev" ${S.pf.page ? '' : 'disabled'}>‹</button><span class="muted">Página ${S.pf.page + 1} de ${pages}</span><button data-act="next" ${S.pf.page < pages - 1 ? '' : 'disabled'}>›</button></div></div>`;
   }
@@ -295,6 +311,26 @@
       <div class="card"><h2>Regras ativas (${routes.length})</h2><table><thead><tr><th>Tipo</th><th>Quem</th><th>Alerta vai para</th><th>Observação</th><th>Criada</th><th></th></tr></thead><tbody>
       ${routes.map((r) => `<tr><td>${r.scopeType === 'person' ? 'Pessoa' : 'Departamento'}</td><td>${esc(r.scopeLabel || r.scopeValue)}</td><td><b>${esc(r.recipientName)}</b></td><td class="faint">${esc(r.note || '')}</td><td class="faint">${fmtDate(r.createdAt)} ${esc(r.createdBy || '')}</td><td><button class="danger" data-act="del-route" data-id="${r.id}">Remover</button></td></tr>`).join('') || '<tr><td colspan="6" class="muted">Nenhuma regra: valem só os gestores do perfil do Bitrix.</td></tr>'}
       </tbody></table></div>`;
+    try {
+      const { grants, departments: gd } = await api('/access');
+      el.insertAdjacentHTML('beforeend', `<div class="card"><h2>Acesso por hierarquia (auxiliares e exceções)</h2>
+        <p class="muted">Quem <b>chefia</b> um departamento [CEO] ou [DIR] já vê esse departamento e todos abaixo, sem cadastro (abrindo o painel pelo Bitrix). Aqui entram os que o Bitrix não informa, como o supervisor adjunto, e exceções.</p>
+        <form id="grantForm"><div class="row">
+          <div><label>Pessoa</label>${picker('gperson', 'Digite o nome…')}</div>
+          <div><label>Passa a ver o departamento (e todos abaixo)</label><select id="gdept">${gd.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('')}</select></div>
+          <div><label>Observação</label><input type="text" id="gnote" maxlength="200" placeholder="ex.: adjunta da Ana Caroline"></div>
+          <div class="fit"><button class="primary" type="submit">Conceder</button></div></div></form>
+        <table><thead><tr><th>Pessoa</th><th>Departamento</th><th>Observação</th><th></th></tr></thead><tbody>
+        ${grants.map((g) => `<tr><td><b>${esc(g.userLabel || g.bitrixUserId)}</b></td><td>${esc(g.departmentLabel || g.departmentId)}</td><td class="faint">${esc(g.note || '')}</td><td><button class="danger" data-act="del-grant" data-id="${g.id}">Remover</button></td></tr>`).join('') || '<tr><td colspan="4" class="muted">Nenhuma concessão (rode db/painel_acesso.sql no Supabase se for a primeira vez).</td></tr>'}
+        </tbody></table></div>`);
+      $('#grantForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const bitrixUserId = $('[data-picker=gperson] input[type=hidden]').value;
+        if (!bitrixUserId) return toast('Escolha a pessoa na lista (digite e clique no nome).', true);
+        try { await api('/access', { method: 'POST', body: { bitrixUserId, departmentId: $('#gdept').value, note: $('#gnote').value } }); toast('Acesso concedido.'); render(); }
+        catch (err) { toast(err.message, true); }
+      });
+    } catch (err) { el.insertAdjacentHTML('beforeend', `<div class="banner warn">Acessos por hierarquia indisponíveis: ${esc(err.message)}</div>`); }
     wirePickers(el);
     $('#rt').addEventListener('change', (e) => { $('#rsWrap').hidden = e.target.value !== 'department'; $('#rpWrap').hidden = e.target.value !== 'person'; });
     $('#routeForm').addEventListener('submit', async (e) => {
@@ -360,8 +396,12 @@
     if (extra.team) { S.pf = { ...S.pf, team: extra.team, state: '', page: 0 }; }
     render();
   }
+  let lastTab = null;
   async function render() {
-    $('#tabs').innerHTML = TABS.map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? 'active' : ''}">${l}</button>`).join('');
+    // redesenhar a aba zera a rolagem: guarda e devolve (só se continua na mesma aba)
+    const keep = lastTab === S.tab ? { y: window.scrollY, box: document.querySelector('#view .scroll')?.scrollTop || 0 } : null;
+    lastTab = S.tab;
+    $('#tabs').innerHTML = (S.scoped ? TABS.filter(([k]) => k === 'teams') : TABS).map(([k, l]) => `<button data-tab="${k}" class="${S.tab === k ? 'active' : ''}">${l}</button>`).join('');
     const el = $('#view');
     if (!S.data) { el.innerHTML = '<p class="muted">Carregando dados…</p>'; return; }
     try {
@@ -373,24 +413,36 @@
       else if (S.tab === 'routes') await viewRoutes(el);
       else if (S.tab === 'settings') await viewSettings(el);
     } catch (err) { el.innerHTML = `<div class="banner crit">${esc(err.message)}</div>`; }
+    if (keep) { const box = el.querySelector('.scroll'); if (box) box.scrollTop = keep.box; window.scrollTo(0, keep.y); }
   }
-  function download(path) { location.href = '/api/panel' + path; }
+  async function download(path) {
+    if (!S.token) { location.href = '/api/panel' + path; return; }
+    try {
+      const res = await fetch('/api/panel' + path, { headers: { Authorization: 'Bearer ' + S.token, 'X-Panel-CSRF': '1' } });
+      if (!res.ok) throw new Error(`erro ${res.status}`);
+      const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '')?.[1] || 'dapzap-painel';
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) { toast('Falha ao exportar: ' + err.message, true); }
+  }
 
   document.addEventListener('click', async (e) => {
     const t = e.target.closest('[data-tab]'); if (t) { S.tab = t.dataset.tab; return render(); }
     const g = e.target.closest('[data-go]'); if (g && g.tagName === 'A') { e.preventDefault(); return go(g.dataset.go, { team: g.dataset.team }); }
     if (g) return go(g.dataset.go, { open: g.dataset.open });
     const a = e.target.closest('[data-act]');
-    if (!a) { const row = e.target.closest('[data-toggle]'); if (row && !e.target.closest('button')) { const k = row.dataset.toggle; S.open.has(k) ? S.open.delete(k) : S.open.add(k); render(); } return; }
+    if (!a) { const row = e.target.closest('[data-toggle]'); if (row && !e.target.closest('button, input')) { const k = row.dataset.toggle; S.open.has(k) ? S.open.delete(k) : S.open.add(k); render(); } return; }
     const act = a.dataset.act;
     try {
-      if (act === 'export') return download(`/export?format=${a.dataset.fmt}${a.dataset.team ? '&team=' + encodeURIComponent(a.dataset.team) : ''}`);
+      if (act === 'export') return download(`/export?format=${a.dataset.fmt}${a.dataset.team ? '&team=' + encodeURIComponent(a.dataset.team) : ''}${a.dataset.onlysel ? '&ids=' + encodeURIComponent([...S.selected].join(',')) : ''}`);
       if (act === 'prev') { S.pf.page--; return render(); } if (act === 'next') { S.pf.page++; return render(); }
       if (act === 'select-all') { filteredPeople().forEach((p) => p.bitrixUserId && S.selected.add(p.bitrixUserId)); return render(); }
       if (act === 'clear-sel') { S.selected.clear(); return render(); }
       if (act === 'notify-sel') { S.nf.fromSelection = true; return go('notify'); }
       if (act === 'drop-selection') { S.nf.fromSelection = false; return render(); }
       if (act === 'notify-team') { S.selected.clear(); S.nf = { states: new Set(['offline', 'nunca_conectou', 'sem_instancia']), team: a.dataset.team, dept: '', fromSelection: false }; return go('notify'); }
+      if (act === 'del-grant') { if (!confirm('Remover este acesso?')) return; await api('/access/' + a.dataset.id, { method: 'DELETE' }); return render(); }
       if (act === 'del-route') { if (!confirm('Remover esta regra?')) return; await api('/routes/' + a.dataset.id, { method: 'DELETE' }); await loadData(true); return render(); }
       if (act === 'send-notify') {
         const ids = audience(), channels = [...document.querySelectorAll('[data-nch]:checked')].map((c) => c.dataset.nch);
@@ -434,6 +486,8 @@
   // ---------- login / início ----------
   function showLogin() { $('#app').hidden = true; $('#login').hidden = false; S.data = null; }
   async function start(user) {
+    S.scoped = !!user.scoped;
+    if (S.scoped) { S.tab = 'teams'; $('#btnLogout').hidden = true; }
     $('#login').hidden = true; $('#app').hidden = false; $('#whoami').textContent = user.displayName;
     S.data = null; render();
     try { await loadData(); } catch (err) { $('#view').innerHTML = `<div class="banner crit">${esc(err.message)}${S.setupMissing ? ' — rode db/painel.sql no Supabase.' : ''}</div>`; return; }
@@ -449,7 +503,35 @@
   $('#btnTheme').addEventListener('click', () => { const dark = matchMedia('(prefers-color-scheme: dark)').matches; const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light'); const next = cur === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; localStorage.setItem('painelTheme', next); });
   if (localStorage.getItem('painelTheme')) document.documentElement.dataset.theme = localStorage.getItem('painelTheme');
 
-  api('/me').then((r) => start(r.user)).catch(() => showLogin());
+  // Aberto dentro do Bitrix: usa o OAuth do app (BX24) para saber quem é, sem pedir senha.
+  function embeddedMsg(text, err) { $('#login').hidden = false; $('#app').hidden = true; $('#login').innerHTML = `<h1>Painel de auditoria · DapZap</h1><p class="${err ? '' : 'muted'}" ${err ? 'style="color:var(--crit)"' : ''}>${esc(text)}</p>`; }
+  function loadBx24() {
+    return new Promise((resolve, reject) => {
+      if (window.BX24) return resolve();
+      const s = document.createElement('script'); s.src = 'https://api.bitrix24.com/api/v1/'; s.onload = resolve; s.onerror = () => reject(new Error('não carregou o Bitrix'));
+      document.head.append(s);
+    });
+  }
+  let embeddedBusy = false;
+  async function embeddedStart() {
+    if (embeddedBusy) return; embeddedBusy = true;
+    try {
+      embeddedMsg('Entrando pelo Bitrix…');
+      await loadBx24();
+      await new Promise((ok) => BX24.init(ok));
+      const auth = BX24.getAuth && BX24.getAuth();
+      if (!auth?.access_token) throw new Error('abra o painel pelo menu do Bitrix');
+      const r = await api('/bitrix-login', { method: 'POST', body: { accessToken: auth.access_token } });
+      S.token = r.token;
+      $('#login').innerHTML = ''; // o formulário não é usado aqui
+      await start(r.user);
+      if (BX24.fitWindow) BX24.fitWindow();
+    } catch (err) { embeddedMsg(err.message, true); }
+    finally { embeddedBusy = false; }
+  }
+
+  if (EMBED) embeddedStart();
+  else api('/me').then((r) => start(r.user)).catch(() => showLogin());
 })();
 </script>
 </body>

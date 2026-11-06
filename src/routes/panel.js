@@ -2,6 +2,7 @@ const express = require('express');
 const panelAuth = require('../panelAuth');
 const panelStore = require('../panelStore');
 const panelService = require('../panelService');
+const panelScope = require('../panelScope');
 const { getEmployees } = require('../teamDirectory');
 const { buildPhoneAuditWorkbook } = require('../phoneAudit');
 
@@ -32,9 +33,18 @@ function createPanelRouter({ sessions }) {
   // ---- sessão ----
   router.post('/login', panelAuth.login);
   router.post('/logout', (req, res) => { panelAuth.clearSessionCookie(req, res); res.json({ ok: true }); });
-  router.get('/me', panelAuth.requirePanelAuth, (req, res) => res.json({ user: req.panelUser }));
+  router.post('/bitrix-login', panelAuth.bitrixLogin);
+  router.get('/me', panelAuth.requirePanelAuth, (req, res) => res.json({ user: panelAuth.publicUser(req.panelUser) }));
 
   router.use(panelAuth.requirePanelAuth);
+
+  // Quem entrou pelo Bitrix (acesso por hierarquia) só lê a própria equipe: situação e exportação.
+  // Todo o resto (alertas, regras, configurações, notificar, auditoria, senha) é só do admin.
+  router.use((req, res, next) => {
+    if (!req.panelUser.scoped) return next();
+    if (req.method === 'GET' && (req.path === '/data' || req.path === '/export')) return next();
+    res.status(403).json({ error: 'sem permissão' });
+  });
 
   router.post('/password', wrap(async (req, res) => {
     const { current, next } = req.body || {};
@@ -53,8 +63,11 @@ function createPanelRouter({ sessions }) {
 
   // ---- dados principais ----
   router.get('/data', wrap(async (req, res) => {
-    const force = req.query.force === '1';
-    const { audit, people, hrConfigured } = await panelService.getPeople(sessions, { force });
+    const scoped = req.panelUser.scoped;
+    const force = !scoped && req.query.force === '1';
+    const all = await panelService.getPeople(sessions, { force });
+    const { audit, hrConfigured } = all;
+    const people = scoped ? panelScope.filterPeople(all.people, req.panelUser.scope) : all.people;
     const teams = panelService.buildTeams(people).map((t) => ({
       key: t.key, managerId: t.managerId, managerName: t.managerName, departments: t.departments, counts: t.counts,
       memberIds: t.members.map((m) => m.bitrixUserId || m.ownerId),
@@ -65,21 +78,29 @@ function createPanelRouter({ sessions }) {
     res.json({
       generatedAt: s.generatedAt,
       hrConfigured,
-      sessionsInMemory: s.sessionsInMemory,
+      sessionsInMemory: scoped ? null : s.sessionsInMemory,
       summary: {
         employees: active.length,
         connected: count('conectado'), offline: count('offline'), notVerified: count('nao_verificado'),
         neverConnected: count('nunca_conectou'), noInstance: count('sem_instancia'),
-        distinctNumbers: s.phones.distinct, repeatedNumbers: s.phones.repeated, orphanNumbers: s.phones.orphanOrDiskOnly,
-        instances: s.instances.total, instancesOnline: s.instances.connectedNow, needsAttention: s.instances.needsAttention, banned: s.instances.banned,
-        ownersNotActive: s.people.ownersNotActiveInBitrix,
+        // Para quem vê só uma equipe, nada de números da base inteira (repetidos, órfãos, totais).
+        ...(scoped ? {
+          distinctNumbers: new Set(people.flatMap((p) => p.phones)).size, repeatedNumbers: 0, orphanNumbers: 0,
+          instances: people.reduce((n, p) => n + p.instances.length, 0),
+          instancesOnline: people.reduce((n, p) => n + p.instances.filter((i) => i.liveStatus === 'online').length, 0),
+          needsAttention: 0, banned: people.reduce((n, p) => n + p.instances.filter((i) => i.banned).length, 0), ownersNotActive: 0,
+        } : {
+          distinctNumbers: s.phones.distinct, repeatedNumbers: s.phones.repeated, orphanNumbers: s.phones.orphanOrDiskOnly,
+          instances: s.instances.total, instancesOnline: s.instances.connectedNow, needsAttention: s.instances.needsAttention, banned: s.instances.banned,
+          ownersNotActive: s.people.ownersNotActiveInBitrix,
+        }),
         teams: teams.filter((t) => t.managerId).length,
         noManager: (teams.find((t) => t.key === '_none')?.counts.total) || 0,
       },
       teams,
       people: people.map((p) => ({ ...p, bitrixUserId: p.bitrixUserId || null })),
-      repeatedPhones: audit.repeatedPhones,
-      orphanPhones: audit.orphanPhones,
+      repeatedPhones: scoped ? [] : audit.repeatedPhones,
+      orphanPhones: scoped ? [] : audit.orphanPhones,
     });
   }));
 
@@ -94,25 +115,30 @@ function createPanelRouter({ sessions }) {
   router.get('/export', wrap(async (req, res) => {
     const format = req.query.format === 'csv' ? 'csv' : 'xlsx';
     const team = req.query.team ? String(req.query.team) : null;
-    const { audit, people } = await panelService.getPeople(sessions, { force: req.query.force === '1' });
-    const teams = panelService.buildTeams(people);
+    const ids = req.query.ids ? new Set(String(req.query.ids).split(',').filter(Boolean)) : null;
+    const scoped = req.panelUser.scoped;
+    const { audit, people: allPeople } = await panelService.getPeople(sessions, { force: !scoped && req.query.force === '1' });
+    const people = scoped ? panelScope.filterPeople(allPeople, req.panelUser.scope) : allPeople;
+    const picked = ids ? people.filter((p) => ids.has(String(p.bitrixUserId || p.ownerId))) : people;
+    const teams = panelService.buildTeams(picked);
     const chosen = team ? teams.filter((t) => t.key === team) : teams;
     const members = chosen.flatMap((t) => t.members.map((m) => ({ ...m, team: t })));
     const day = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
-    await panelStore.logAudit(req.panelUser.username, 'exportacao', `${format}${team ? ` equipe ${team}` : ''} (${members.length} pessoas)`);
+    await panelStore.logAudit(req.panelUser.username, 'exportacao', `${format}${team ? ` equipe ${team}` : ''}${ids ? ' selecionadas' : ''} (${members.length} pessoas)`);
 
     if (format === 'csv') {
-      const header = ['Nome', 'ID Bitrix', 'Departamento', 'Gestor (recebe o alerta)', 'Origem do gestor', 'Situação', 'Números', 'Instâncias'];
+      const header = ['Nome', 'ID Bitrix', 'Departamento', 'Gestor (recebe o alerta)', 'Origem do gestor', 'Situação', 'Números', 'Números fora do ar', 'Instâncias'];
       const lines = [header.map(csvCell).join(';')];
       for (const m of members) {
-        lines.push([m.name, m.bitrixUserId, m.department, m.team.managerName, m.recipient?.source, SITUATION[m.state], m.phones.join(' / '), m.instances.length].map(csvCell).join(';'));
+        lines.push([m.name, m.bitrixUserId, m.department, m.team.managerName, m.recipient?.source, SITUATION[m.state], m.phones.join(' / '), (m.downPhones || []).join(' / '), m.instances.length].map(csvCell).join(';'));
       }
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="dapzap-painel-${day}.csv"`);
       return res.send('﻿' + lines.join('\r\n'));
     }
 
-    const wb = await buildPhoneAuditWorkbook(audit);
+    // Quem vê só uma equipe leva uma planilha sem as abas da base inteira (instâncias, repetidos, órfãos).
+    const wb = scoped ? new (require('exceljs').Workbook)() : await buildPhoneAuditWorkbook(audit);
     const head = (ws, widths) => {
       ws.columns.forEach((c, i) => { c.width = widths[i] || 16; });
       const r = ws.getRow(1);
@@ -126,13 +152,13 @@ function createPanelRouter({ sessions }) {
     for (const t of chosen) wsT.addRow([t.managerName, t.departments.join(', '), t.counts.total, t.counts.conectado, t.counts.offline, t.counts.nao_verificado, t.counts.nunca_conectou, t.counts.sem_instancia]);
     head(wsT, [32, 40, 10, 12, 14, 14, 14, 14]);
     const wsM = wb.addWorksheet('Membros por equipe');
-    wsM.addRow(['Gestor (recebe o alerta)', 'Origem', 'Nome', 'ID Bitrix', 'Departamento', 'Situação', 'Números']);
+    wsM.addRow(['Gestor (recebe o alerta)', 'Origem', 'Nome', 'ID Bitrix', 'Departamento', 'Situação', 'Números', 'Números fora do ar']);
     for (const m of members) {
-      const row = wsM.addRow([m.team.managerName, m.recipient?.source || '', m.name, m.bitrixUserId, m.department, SITUATION[m.state], m.phones.join('; ')]);
-      row.getCell(7).numFmt = '@';
+      const row = wsM.addRow([m.team.managerName, m.recipient?.source || '', m.name, m.bitrixUserId, m.department, SITUATION[m.state], m.phones.join('; '), (m.downPhones || []).join('; ')]);
+      row.getCell(7).numFmt = '@'; row.getCell(8).numFmt = '@';
     }
-    head(wsM, [32, 30, 32, 11, 24, 18, 34]);
-    const alerts = await panelStore.listAlerts({ limit: 2000 }).catch(() => []);
+    head(wsM, [32, 30, 32, 11, 24, 18, 34, 34]);
+    const alerts = scoped ? [] : await panelStore.listAlerts({ limit: 2000 }).catch(() => []);
     const wsA = wb.addWorksheet('Alertas');
     wsA.addRow(['Quando', 'Tipo', 'Pessoa', 'Número', 'Gestor avisado', 'Origem', 'Situação do envio', 'Detalhe']);
     for (const a of alerts) {
@@ -144,6 +170,30 @@ function createPanelRouter({ sessions }) {
     res.setHeader('Content-Disposition', `attachment; filename="dapzap-painel-${day}.xlsx"`);
     await wb.xlsx.write(res);
     res.end();
+  }));
+
+  // ---- acesso por hierarquia: auxiliares/adjuntos e exceções (só admin) ----
+  router.get('/access', wrap(async (req, res) => {
+    const [grants, departments] = await Promise.all([panelStore.listGrants({ fresh: true }), require('../bitrixHierarchy').listDepartments().catch(() => null)]);
+    res.json({ grants, departments: (departments || []).filter((d) => /^\s*\[(CEO|DIR|GER)\]/i.test(d.name)).map((d) => ({ id: d.id, name: d.name })) });
+  }));
+  router.post('/access', wrap(async (req, res) => {
+    const { bitrixUserId, departmentId, note } = req.body || {};
+    if (!isId(bitrixUserId) || !isId(departmentId)) return res.status(400).json({ error: 'usuário e departamento são obrigatórios' });
+    const dir = await getEmployees();
+    const person = dir.byId.get(String(bitrixUserId));
+    if (!person) return res.status(400).json({ error: 'usuário não encontrado entre os ativos do Bitrix' });
+    const dept = (await require('../bitrixHierarchy').listDepartments() || []).find((d) => d.id === String(departmentId));
+    if (!dept) return res.status(400).json({ error: 'departamento não encontrado' });
+    await panelStore.addGrant({ bitrixUserId, userLabel: person.name, departmentId, departmentLabel: dept.name, note: String(note || '').slice(0, 200), createdBy: req.panelUser.username });
+    await panelStore.logAudit(req.panelUser.username, 'acesso_concedido', `${person.name} -> ${dept.name}`);
+    res.json({ ok: true });
+  }));
+  router.delete('/access/:id', wrap(async (req, res) => {
+    if (!isId(req.params.id)) return res.status(400).json({ error: 'id inválido' });
+    await panelStore.removeGrant(req.params.id);
+    await panelStore.logAudit(req.panelUser.username, 'acesso_removido', `#${req.params.id}`);
+    res.json({ ok: true });
   }));
 
   // ---- configurações do monitor ----

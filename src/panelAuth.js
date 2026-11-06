@@ -1,5 +1,8 @@
 const crypto = require('crypto');
 const panelStore = require('./panelStore');
+const panelScope = require('./panelScope');
+const blockedOwners = require('./blockedOwners');
+const { verifyBitrixToken, ownerIdFor } = require('./auth');
 
 /**
  * Login do painel de auditoria (public/painel.html), SEPARADO do login do Bitrix: o painel
@@ -87,7 +90,14 @@ function issueToken(user) {
   return `${payload}.${sign(payload)}`;
 }
 
-function verifyToken(token) {
+// Token do usuário vindo do Bitrix (painel aberto dentro do app): { b: id do Bitrix }. Só vale no
+// cabeçalho Authorization, nunca por cookie (iframe de outro site não envia cookie SameSite=Strict).
+function issueBitrixToken(bitrixUserId) {
+  const payload = Buffer.from(JSON.stringify({ b: String(bitrixUserId), exp: Date.now() + SESSION_MS })).toString('base64url');
+  return `${payload}.${sign(payload)}`;
+}
+
+function readToken(token) {
   if (!token || typeof token !== 'string') return null;
   const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
@@ -95,11 +105,15 @@ function verifyToken(token) {
   const b = Buffer.from(sign(payload));
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
   try {
-    const { u, exp } = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    return u && exp && Date.now() < exp ? u : null;
+    const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    return data && data.exp && Date.now() < data.exp ? data : null;
   } catch {
     return null;
   }
+}
+
+function verifyToken(token) {
+  return readToken(token)?.u || null;
 }
 
 function readCookie(req, name) {
@@ -138,15 +152,30 @@ async function activeUser(username) {
   return ok;
 }
 
+function publicUser(u) {
+  return { username: u.username, displayName: u.displayName, scoped: !!u.scoped, roots: u.scope ? u.scope.roots : undefined };
+}
+
 async function requirePanelAuth(req, res, next) {
   try {
+    const bearer = String(req.headers.authorization || '').startsWith('Bearer ') ? req.headers.authorization.slice(7) : null;
+    const bitrixId = bearer ? readToken(bearer)?.b : null;
+    if (bitrixId) {
+      // Acesso por hierarquia: confere a cada requisição (escopo em cache curto) para que sair do
+      // cargo, ser desativado ou bloqueado corte o acesso logo.
+      if (await blockedOwners.isBlocked(ownerIdFor(bitrixId)).catch(() => false)) return res.status(403).json({ error: 'acesso revogado' });
+      const scope = await panelScope.resolveScope(bitrixId);
+      if (!scope) return res.status(403).json({ error: 'seu usuário não tem acesso ao painel' });
+      req.panelUser = { id: null, username: `bitrix:${bitrixId}`, displayName: scope.name || `Usuário ${bitrixId}`, scoped: true, scope };
+      return next();
+    }
     const username = verifyToken(readCookie(req, COOKIE));
     const user = username ? await activeUser(username) : null;
     if (!user) return res.status(401).json({ error: 'não autenticado' });
     if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-panel-csrf'] !== '1') {
       return res.status(403).json({ error: 'requisição recusada' });
     }
-    req.panelUser = { id: user.id, username: user.username, displayName: user.displayName || user.username };
+    req.panelUser = { id: user.id, username: user.username, displayName: user.displayName || user.username, scoped: false };
     next();
   } catch (err) {
     if (panelStore.tablesMissing(err)) return res.status(503).json({ error: 'tabelas do painel ainda não foram criadas (db/painel.sql)', setup: true });
@@ -178,7 +207,7 @@ async function login(req, res) {
     userCache.delete(user.username);
     await panelStore.touchLogin(user.id).catch(() => {});
     setSessionCookie(req, res, issueToken(user));
-    res.json({ ok: true, user: { username: user.username, displayName: user.displayName || user.username } });
+    res.json({ ok: true, user: { username: user.username, displayName: user.displayName || user.username, scoped: false } });
   } catch (err) {
     if (panelStore.tablesMissing(err)) return res.status(503).json({ error: 'tabelas do painel ainda não foram criadas (db/painel.sql)', setup: true });
     console.error('[panel] erro no login:', err.message);
@@ -186,9 +215,32 @@ async function login(req, res) {
   }
 }
 
+// Entrada pelo Bitrix (app incorporado): troca o access_token do BX24 por um token do painel. A
+// identidade é confirmada no próprio Bitrix (verifyBitrixToken), nunca pelo que o cliente afirma.
+async function bitrixLogin(req, res) {
+  if (req.headers['x-panel-csrf'] !== '1') return res.status(403).json({ error: 'requisição recusada' });
+  const ipKey = `ip:${req.ip}`;
+  const wait = lockedFor(ipKey);
+  if (wait) return res.status(429).json({ error: `muitas tentativas — tente de novo em ${Math.ceil(wait / 60)} min` });
+  const accessToken = String(req.body?.accessToken || '').slice(0, 600);
+  try {
+    const userId = accessToken ? await verifyBitrixToken(accessToken) : null;
+    if (!userId) { registerFail(ipKey); return res.status(401).json({ error: 'não foi possível confirmar seu usuário no Bitrix' }); }
+    if (await blockedOwners.isBlocked(ownerIdFor(userId)).catch(() => false)) return res.status(403).json({ error: 'acesso revogado' });
+    const scope = await panelScope.resolveScope(userId);
+    if (!scope) return res.status(403).json({ error: 'seu usuário não tem acesso ao painel' });
+    clearFails(ipKey);
+    console.log(`[panel] acesso pelo Bitrix: usuário ${userId}, ${scope.roots.length} raiz(es)`);
+    res.json({ ok: true, token: issueBitrixToken(userId), user: publicUser({ username: `bitrix:${userId}`, displayName: scope.name, scoped: true, scope }) });
+  } catch (err) {
+    console.error('[panel] erro no login pelo Bitrix:', err.message);
+    res.status(500).json({ error: 'erro interno' });
+  }
+}
+
 function forgetUser(username) { userCache.delete(username); }
 
 module.exports = {
-  hashPassword, verifyPassword, requirePanelAuth, login, setSessionCookie, clearSessionCookie, forgetUser,
+  hashPassword, verifyPassword, requirePanelAuth, login, bitrixLogin, publicUser, setSessionCookie, clearSessionCookie, forgetUser,
   MIN_PASSWORD_LENGTH: 10,
 };

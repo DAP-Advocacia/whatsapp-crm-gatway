@@ -485,6 +485,7 @@ async function listEmployeesForAudit() {
       name: fullName(u),
       department,
       departmentName: deptIds.length ? deptById.get(deptIds[0])?.NAME || null : null,
+      departmentIds: deptIds,
       supervisor,
       director: {
         name: nameFromChainField(directorRaw),
@@ -516,6 +517,7 @@ async function listDepartments() {
     id: String(d.ID),
     name: d.NAME || `Departamento ${d.ID}`,
     parent: d.PARENT ? String(d.PARENT) : null,
+    head: d.UF_HEAD ? String(d.UF_HEAD) : null,
   }));
 }
 

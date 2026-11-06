@@ -47,6 +47,20 @@ function classify(person, instances) {
   return loaded ? 'offline' : 'nao_verificado';
 }
 
+// Número "caído" = nenhuma instância dele está online e alguma está offline/conectando.
+// Não muda a classificação da pessoa nem o monitor: só informa quem está com número fora do ar.
+function downPhones(instances) {
+  const byPhone = new Map();
+  for (const i of instances) {
+    if (!i.phone) continue;
+    const s = byPhone.get(i.phone) || { online: false, off: false };
+    if (i.liveStatus === 'online') s.online = true;
+    else if (i.liveStatus === 'offline' || i.liveStatus === 'connecting') s.off = true;
+    byPhone.set(i.phone, s);
+  }
+  return [...byPhone].filter(([, s]) => !s.online && s.off).map(([ph]) => ph);
+}
+
 async function getPeople(sessions, opts = {}) {
   const [audit, dir, routes] = await Promise.all([getAudit(sessions, opts), getEmployees(opts), panelStore.listRoutes({ fresh: !!opts.force })]);
   const instByOwner = new Map();
@@ -61,8 +75,10 @@ async function getPeople(sessions, opts = {}) {
     return {
       ownerId: p.ownerId, bitrixUserId: p.bitrixUserId, name: p.name, department: p.department, departmentName: p.departmentName,
       activeInBitrix: p.activeInBitrix, state, stateLabel: SITUATION_LABEL[state],
+      departmentIds: dir.byId.get(String(p.bitrixUserId))?.departmentIds || [],
       instances: instances.map((i) => ({ id: i.id, label: i.label, phone: i.phone, liveStatus: i.liveStatus, needsAttention: i.needsAttention, banned: i.banned, lastDisconnectReason: i.lastDisconnectReason })),
       phones: [...new Set(instances.filter((i) => i.phone).map((i) => i.phone))],
+      downPhones: downPhones(instances),
       onlinePhones: p.onlinePhones, offlinePhones: p.offlinePhones,
       recipient: recipient ? { bitrixUserId: recipient.bitrixUserId, name: recipient.name, source: recipient.source } : null,
     };

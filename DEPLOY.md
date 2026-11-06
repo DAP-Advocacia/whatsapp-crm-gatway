@@ -160,6 +160,29 @@ docker service update --force whatsapp-gateway_gateway
 
 Nunca escale este serviço acima de 1 réplica, pelo mesmo motivo.
 
+### 4.1 Modo de boot das sessões (`SESSION_BOOT_MODE`)
+
+Desde 2026-11-06 produção roda com **`SESSION_BOOT_MODE=all`**: todo boot reconecta todas as sessões
+pareadas (`creds.me` presente; pastas de QR nunca escaneado são ignoradas). Antes era `lazy` (a sessão
+só subia quando o dono abria o app). Motivo: o WhatsApp foi liberado na rede e ninguém abriria o
+DapZap só para reconectar; o monitor de desconexões precisa das sessões ligadas.
+
+- **Tempo:** ~885 sessões pareadas, uma a cada 5 s no total (`SESSION_STAGGER_MS=5000`, dividido entre
+  os 4 workers) = **~75 min** até todas voltarem. Cada deploy/reinício repete isso, e o monitor fica
+  em silêncio por 60 min depois do boot. Prefira deploy fora do horário de pico.
+- **Não reduza o intervalo de 5 s:** login em massa derrubou sessões em 31/07 e 03/08.
+- **Memória:** com `lazy` a VPS usava ~3 GB de 32 GB; com 885 sockets vivos sobe bastante e nunca foi
+  medido. Nos primeiros boots, acompanhe a memória dos workers e o load. Se passar de ~24 GB, reduza
+  `WORKER_HEAP_MB` (não o intervalo entre logins).
+- **Deslogadas (401)** não voltam sozinhas: precisam de QR Code no DapZap.
+- **Rollback:** `SESSION_BOOT_MODE=lazy` (sem mudar código) e reiniciar.
+
+```bash
+# acompanhar a subida (só leitura)
+docker stats --no-stream
+docker service logs whatsapp-gateway_gateway --since 5m 2>&1 | grep -c "status: online"
+```
+
 ---
 
 ## 5. Variáveis de ambiente

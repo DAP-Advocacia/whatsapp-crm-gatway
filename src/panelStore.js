@@ -41,6 +41,43 @@ async function upsertUser({ username, displayName, passwordHash }) {
   return rows[0];
 }
 
+// ---- acesso por hierarquia (auxiliares/adjuntos e exceções) ----------------
+// Quem chefia um departamento [CEO]/[DIR] já enxerga a subárvore dele sem cadastro. Esta tabela
+// cobre o que o Bitrix não expõe: o "supervisor adjunto" (não existe na API) e exceções.
+
+let grantsCache = null; // { at, rows }
+async function listGrants({ fresh = false } = {}) {
+  if (!fresh && grantsCache && Date.now() - grantsCache.at < 30000) return grantsCache.rows;
+  let rows = [];
+  try {
+    ({ rows } = await pool.query(
+      `select id, bitrix_user_id as "bitrixUserId", user_label as "userLabel", department_id as "departmentId",
+              department_label as "departmentLabel", note, created_by as "createdBy", created_at as "createdAt"
+       from panel_access_grants order by user_label, department_id`
+    ));
+  } catch (err) {
+    if (!tablesMissing(err)) throw err; // sem a tabela: só vale a regra do chefe do departamento
+  }
+  grantsCache = { at: Date.now(), rows };
+  return rows;
+}
+
+async function addGrant({ bitrixUserId, userLabel, departmentId, departmentLabel, note, createdBy }) {
+  await pool.query(
+    `insert into panel_access_grants (bitrix_user_id, user_label, department_id, department_label, note, created_by)
+     values ($1, $2, $3, $4, $5, $6)
+     on conflict (bitrix_user_id, department_id) do update set user_label = excluded.user_label,
+       department_label = excluded.department_label, note = excluded.note`,
+    [String(bitrixUserId), userLabel || null, String(departmentId), departmentLabel || null, note || null, createdBy || null]
+  );
+  grantsCache = null;
+}
+
+async function removeGrant(id) {
+  await pool.query('delete from panel_access_grants where id = $1', [id]);
+  grantsCache = null;
+}
+
 // ---- configurações ---------------------------------------------------------
 
 const DEFAULT_SETTINGS = {
@@ -182,6 +219,7 @@ async function listAudit(limit = 200) {
 }
 
 module.exports = {
+  listGrants, addGrant, removeGrant,
   tablesMissing, getUserByName, touchLogin, setPassword, upsertUser,
   getSettings, setSetting, DEFAULT_SETTINGS,
   listRoutes, upsertRoute, deleteRoute,

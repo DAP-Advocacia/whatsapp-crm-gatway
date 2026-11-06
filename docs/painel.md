@@ -57,9 +57,35 @@ Ao ligar, só eventos *a partir daquele momento* avisam.
 ### Limite conhecido
 
 Com `SESSION_BOOT_MODE=lazy` a sessão só é conferida depois que a pessoa abre o DapZap. Quem
-desvincula o aparelho e não abre o app só é detectado quando a sessão voltar a subir. Para detectar
-na hora, as sessões das pessoas monitoradas teriam que subir no boot e ficar sempre ligadas
-(mais CPU e mais tempo de recuperação a cada deploy) — decisão a tomar com o Gabriel.
+desvincula o aparelho e não abre o app só é detectado quando a sessão voltar a subir.
+
+**Decisão (2026-11-06):** produção passou para `SESSION_BOOT_MODE=all`. Com o WhatsApp liberado na
+rede, ninguém abre o DapZap só para reconectar; com as sessões sempre ligadas o monitor enxerga a
+queda na hora. O custo é o tempo de recuperação a cada deploy/reinício (ver `DEPLOY.md`, seção 4.1).
+Sessão **deslogada** (401) não volta sozinha: continua exigindo QR Code, e o caminho para essas é o
+alerta ao gestor. Ligue o monitor em Configurações só depois que o boot terminar.
+
+## Acesso dos diretores (painel dentro do Bitrix)
+
+Além do login `gabriel` (admin, vê tudo), o painel abre **dentro do Bitrix** para CEO e diretores, sem
+criar conta: `https://whatsapp.bmdholding.com.br/painel/app`. O Bitrix identifica a pessoa (OAuth do
+BX24), o servidor confirma o usuário no próprio Bitrix e calcula o que ela pode ver.
+
+- **Regra:** quem chefia (`UF_HEAD`) um departamento marcado `[CEO]` ou `[DIR]` vê as pessoas desse
+  departamento **e de todos abaixo**. `[GER]` fica de fora por enquanto (decisão de 06/11/2026).
+- **O que o diretor vê:** só a aba **Equipes** (cada equipe e cada pessoa expandem, com número por número),
+  e exporta Excel/CSV só da própria equipe. Não vê Visão geral, Alertas, Regras, Notificar nem
+  Configurações. O filtro é **no servidor**: as outras rotas respondem 403 e os totais da base
+  (números repetidos, órfãos) não são enviados.
+- **Auxiliares/adjuntos e exceções:** o "supervisor adjunto" não existe na API do Bitrix, então entra na
+  tabela `panel_access_grants` (aba *Regras de gestor* → *Acesso por hierarquia*, só admin). A pessoa passa
+  a ver o departamento escolhido e todos abaixo. Criar a tabela: `db/painel_acesso.sql` (já traz Thais Maia →
+  Ana Caroline, Monalisa Figueiredo → Adriano, e Lorena Pontes tratada como diretora da equipe do Adriano).
+  Sem a tabela vale só a regra do chefe do departamento.
+- **Cortar acesso:** sair do cargo de chefe no Bitrix, ser desativado ou bloqueado no Admin do DapZap
+  corta o acesso (conferido a cada requisição, cache de até 10 min na árvore de departamentos).
+- **Cadastrar no Bitrix:** o app precisa de um item de menu/placement apontando para `/painel/app`
+  (a página só pode ser enquadrada pelo portal `BITRIX_PORTAL_DOMAIN`).
 
 ## Segurança
 
