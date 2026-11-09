@@ -1174,7 +1174,7 @@
       }
       instanceSelect.innerHTML = list.map((i) => `
         <option value="${escapeHtml(i.id)}">
-          ${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
+          ${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
         </option>
       `).join('');
       mySessionId = instanceSelect.value;

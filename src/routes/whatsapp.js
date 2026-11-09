@@ -14,7 +14,7 @@ const instanceBanStore = require('../instanceBanStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
 const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
-const { getSubordinates, listEmployees, listEmployeesWithDepartment, listDepartments, listEmployeesInDepartment } = require('../bitrixHierarchy');
+const { getSubordinates, getOwnerNames, listEmployees, listEmployeesWithDepartment, listDepartments, listEmployeesInDepartment } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 const presence = require('../presence');
 const pageSessions = require('../pageSessions');
@@ -44,6 +44,12 @@ const sendsDone = new Map(); // `${session}|${id}` -> message (os mais recentes)
 const SENDS_DONE_MAX = 5000;
 
 // Rejeita se `promise` não resolver em `ms` (a promise original segue rodando).
+// "Maria da Silva Souza" -> "Maria Souza": primeiro e último nome, pra caber nos seletores.
+function shortPersonName(name) {
+  const parts = String(name || '').trim().split(/s+/).filter(Boolean);
+  return parts.length > 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts.join(' ');
+}
+
 function withTimeout(promise, ms) {
   let timer;
   return Promise.race([
@@ -386,9 +392,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
       // nova pra quem está olhando; a própria instância já é óbvio de
       // quem é (best-effort: null se BITRIX_HR_WEBHOOK_URL não estiver
       // configurada, sem quebrar o resto da lista).
-      const needsOwnerName = list.some((i) => i.delegated);
-      const employees = needsOwnerName ? await listEmployees() : null;
-      const nameByOwnerId = employees ? new Map(employees.map((e) => [ownerIdFor(e.id), e.name])) : new Map();
+      const nameByOwnerId = await getOwnerNames(list.filter((i) => i.delegated).map((i) => i.ownerId));
       // Instâncias "banidas" (ver src/instanceBanStore.js: forbidden aberto
       // há mais de 24h) — 1 query pro lote inteiro, não 1 por instância.
       const bannedSet = new Set((await instanceBanStore.listBannedNow()).map((e) => e.instanceId));
@@ -446,9 +450,12 @@ function createWhatsappRouter({ sessions, broadcast }) {
         // instância visível na tela.
         const openConnectionEvent = await instanceHealthStore.getOpenConnectionEvent(i.id);
         const ownerName = i.delegated ? (nameByOwnerId.get(i.ownerId) || null) : null;
+        // Rótulo pronto pros seletores: nas compartilhadas o nome do dono vem ANTES ("Maria Souza — Principal"),
+        // senão várias "Principal"/"vendas" ficam indistinguíveis (2026-11-09). Só primeiro e último nome.
+        const displayLabel = ownerName ? `${shortPersonName(ownerName)} — ${i.label}` : i.label;
         const hasHistory = sessionsWithHistory ? sessionsWithHistory.has(i.id) : undefined;
         const banned = bannedSet.has(i.id);
-        return { ...i, status, connState, canReconnectWithQr, loggedOut, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, banned, openConnectionEvent, ownerName, hasHistory };
+        return { ...i, status, connState, canReconnectWithQr, loggedOut, phone: ownNumbers[i.id] || null, groupCount, contactCount, needsAttention, lastDisconnectReason, banned, openConnectionEvent, ownerName, displayLabel, hasHistory };
       }));
       res.json({ instances: withStatus, limit: MAX_INSTANCES_PER_OWNER });
     } catch (err) {

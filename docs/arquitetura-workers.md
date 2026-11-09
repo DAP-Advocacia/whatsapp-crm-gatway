@@ -46,11 +46,41 @@ Sem nada configurado o app roda como antes (`SESSION_WORKERS=0`, tudo num proces
 | `SESSION_BOOT_MODE` | `lazy` | `all` reconecta todas as sessões salvas no boot. **Produção usa `all` desde 2026-11-06** (ver `DEPLOY.md` 4.1). |
 | `SESSION_STAGGER_MS` | `15000` | Intervalo entre sessões no boot completo (total, dividido entre workers). |
 | `PAIRING_MIN_GAP_MS` | `5000` | Intervalo mínimo entre logins (total). |
+| `LOGIN_GATE` | ligado | Trava global de logins (ver abaixo). `off` volta ao intervalo N vezes maior por worker. |
+| `WORKER_RECYCLE` | ligado | Reciclagem de worker antes de estourar o heap (ver abaixo). `off` desliga. |
+| `WORKER_RECYCLE_SOFT_MB` / `_HARD_MB` | 70% / 88% do heap | Limites de heap usado. Acima do 1º só recicla de madrugada; acima do 2º recicla a qualquer hora. |
+| `WORKER_RECYCLE_HOUR_START` / `_END` | `2` / `5` | Janela da reciclagem (horário de Brasília, `[início, fim)`). |
+| `WORKER_RECYCLE_GAP_MS` | `1500000` | Intervalo mínimo entre duas reciclagens (25 min; religar um worker leva ~18 min). |
+| `WORKER_MEM_SAMPLE_MS` / `WORKER_MEM_LOG_EVERY` | `60000` / `5` | Amostra de memória de cada worker, e 1 linha de log a cada N amostras. |
 | `AI_FEATURES` | desligado | `true` religa a IA (precisa de `OPENAI_API_KEY`). |
 
 Sugestão para a KVM 4 (4 vCPU / 16 GB): `SESSION_WORKERS=2`, `WORKER_HEAP_MB=4096`,
 `NODE_OPTIONS=--max-old-space-size=2048` (o principal não segura mais os sockets).
 Para ~1.500 sessões: KVM 8 com `SESSION_WORKERS=4`, ou dois servidores (também dilui o risco de ban por IP).
+
+## Trava global de logins (2026-11-09)
+
+Antes, cada worker espaçava os próprios logins em `PAIRING_MIN_GAP_MS * N` (20 s com 4 workers). Isso só dava
+5 s no total quando os 4 subiam juntos: com UM worker religando (queda ou reciclagem) o ritmo era 1 login a
+cada 20 s, ~73 min para ~215 sessões. Agora cada login pede vaga ao processo principal (`loginReq`), que
+libera uma por vez, na ordem de chegada, com no mínimo `PAIRING_MIN_GAP_MS` (5 s) entre dois logins de QUALQUER
+worker (`loginGrant`). O ritmo total nunca passa de 1 login a cada 5 s; um worker sozinho usa o ritmo inteiro
+(~18 min para 215 sessões). Pedido de worker que caiu não gasta vaga. Sem resposta em 3 min o worker segue
+sozinho. As reconexões automáticas depois de uma queda de socket não passam pela fila (como antes).
+
+## Telemetria e reciclagem de memória (2026-11-09)
+
+Em 48 h de produção os 4 workers estouraram o heap de 7 GB 11 vezes (SIGABRT, ~20 h de uso cada), derrubando
+~1/4 das sessões por vez. Cada worker manda ao principal, a cada minuto, o heap usado, rss, sessões e
+tamanho dos caches em memória; 1 linha a cada 5 min vai pro log (`[worker N] memória: ...`), com o heap
+por espaço (`old_space`, `large_object_space`...) pra mostrar o que cresce.
+
+Quando o heap usado passa do limite por 3 amostras seguidas, o principal recicla o worker: desligamento limpo
+(o mesmo do deploy: fecha os sockets sem deslogar e grava as credenciais), recriação em 2 s e as sessões
+voltam pela trava de logins. Acima de `WORKER_RECYCLE_SOFT_MB` só dentro da janela da madrugada, um worker de
+cada vez e com intervalo mínimo; acima de `WORKER_RECYCLE_HARD_MB` a qualquer hora (melhor que o crash). Sem
+saída em 20 s, SIGKILL. O monitor de desconexões fica quieto, como em qualquer queda de worker.
+Isto CONTÉM o problema, não o corrige: a causa do crescimento de memória ainda é desconhecida (ver o log).
 
 ## Testado e não testado
 

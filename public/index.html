@@ -979,7 +979,7 @@
           ` : ''}
           ${state.instances.length > 1 ? `
             <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp">
-              ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
+              ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.displayLabel || i.label)}</option>`).join('')}
             </select>
           ` : ''}
           <button class="icon-btn theme-toggle-btn" id="themeToggleBtn" title="Alternar tema claro/escuro">
@@ -2497,7 +2497,7 @@
       <div class="state-screen">
         ${state.instances.length > 1 ? `
           <select class="instance-select" id="instanceSelect" title="Trocar instância de WhatsApp" style="max-width:220px">
-            ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.label)}</option>`).join('')}
+            ${state.instances.map((i) => `<option value="${escapeHtml(i.id)}" ${i.id === state.session ? 'selected' : ''}>${escapeHtml(i.displayLabel || i.label)}</option>`).join('')}
           </select>
         ` : ''}
         <h3>Conecte seu WhatsApp</h3>

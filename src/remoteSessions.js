@@ -27,6 +27,25 @@ const { refreshOwnNumber } = require('./ownNumbers');
 const CALL_TIMEOUT_MS = Number(process.env.WORKER_CALL_TIMEOUT_MS || 120000);
 const ENSURE_THROTTLE_MS = 3000;
 
+// Intervalo MÍNIMO entre dois logins de qualquer worker (ver _runLoginGate). É o mesmo
+// valor de sempre (5 s, protege contra ban por login em massa); não baixar.
+const LOGIN_GAP_MS = Number(process.env.PAIRING_MIN_GAP_MS ?? 5000);
+
+// Reciclagem de worker antes de estourar o heap (ver _checkRecycle). Em 48 h de produção
+// cada worker bateu no limite de 7 GB a cada ~20 h (SIGABRT), derrubando 1/4 das sessões
+// sem aviso. Reciclar com desligamento limpo, de madrugada, troca isso por uma queda
+// curta e planejada. WORKER_RECYCLE=off desliga.
+const RECYCLE_ON = process.env.WORKER_RECYCLE !== 'off';
+const RECYCLE_CONFIRM_SAMPLES = Number(process.env.WORKER_RECYCLE_CONFIRM || 3); // amostras seguidas acima do limite (1 por minuto)
+const RECYCLE_MIN_GAP_MS = Number(process.env.WORKER_RECYCLE_GAP_MS || 25 * 60 * 1000); // entre duas reciclagens (o religamento de um worker leva ~18 min)
+const RECYCLE_WINDOW_START = Number(process.env.WORKER_RECYCLE_HOUR_START ?? 2); // horário de Brasília, [início, fim)
+const RECYCLE_WINDOW_END = Number(process.env.WORKER_RECYCLE_HOUR_END ?? 5);
+const RECYCLE_KILL_AFTER_MS = 20000; // se o desligamento limpo não terminar, SIGKILL
+
+function brasiliaHour() {
+  return Number(new Date().toLocaleString('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hour12: false })) % 24;
+}
+
 class RemoteGateway extends EventEmitter {
   constructor(manager, sessionId) {
     super();
@@ -98,9 +117,80 @@ class RemoteSessionManager {
     this.bootAll = false;
     this.stopping = false; // true depois de shutdown(): workers que saem não são recriados
     this.workers = [];
-    for (let i = 0; i < this.count; i++) this.workers.push({ index: i, child: null, ready: false, pending: new Map(), restarts: 0, queue: [] });
+    for (let i = 0; i < this.count; i++) this.workers.push({ index: i, child: null, ready: false, pending: new Map(), restarts: 0, queue: [], mem: null, overCount: 0, recycling: false, recycleKill: null });
+    // Trava global de logins: um pedido por vez, na ordem de chegada, no mínimo LOGIN_GAP_MS
+    // entre dois logins de qualquer worker.
+    this.loginWaiters = [];
+    this.lastLoginGrantAt = 0;
+    this.loginGateTimer = null;
+    this.lastRecycleAt = 0;
+    this.recycleSoftMb = Number(process.env.WORKER_RECYCLE_SOFT_MB || Math.round(this.heapMb * 0.70));
+    this.recycleHardMb = Number(process.env.WORKER_RECYCLE_HARD_MB || Math.round(this.heapMb * 0.88));
     for (const w of this.workers) this._spawn(w);
     console.log(`[sessions] modo com ${this.count} worker(s) de sessão (heap ${this.heapMb} MB cada)`);
+    if (RECYCLE_ON) console.log(`[sessions] reciclagem de worker ligada: acima de ${this.recycleSoftMb} MB entre ${RECYCLE_WINDOW_START}h e ${RECYCLE_WINDOW_END}h (Brasília), ou acima de ${this.recycleHardMb} MB a qualquer hora`);
+  }
+
+  // Estado de memória de cada worker (última amostra), pra diagnóstico.
+  getWorkerStats() {
+    return this.workers.map((w) => ({ index: w.index, ready: w.ready, recycling: w.recycling, restarts: w.restarts, mem: w.mem }));
+  }
+
+  _runLoginGate() {
+    if (this.loginGateTimer || !this.loginWaiters.length) return;
+    const wait = Math.max(0, this.lastLoginGrantAt + LOGIN_GAP_MS - Date.now());
+    this.loginGateTimer = setTimeout(() => {
+      this.loginGateTimer = null;
+      // Pedido de worker que caiu nesse meio tempo não gasta a vaga.
+      let waiter = this.loginWaiters.shift();
+      while (waiter && !(waiter.w.child === waiter.child && waiter.w.ready)) waiter = this.loginWaiters.shift();
+      if (waiter) {
+        this.lastLoginGrantAt = Date.now();
+        waiter.child.send({ t: 'loginGrant', rid: waiter.rid });
+      }
+      this._runLoginGate();
+    }, wait);
+  }
+
+  // Chamado a cada amostra de memória (1/min) de um worker.
+  _checkRecycle(w) {
+    if (!RECYCLE_ON || this.stopping || w.recycling || !w.ready || !w.child || !w.mem) return;
+    const used = w.mem.heapUsedMb;
+    if (used < this.recycleSoftMb) {
+      w.overCount = 0;
+      return;
+    }
+    w.overCount++;
+    if (w.overCount < RECYCLE_CONFIRM_SAMPLES) return; // uma amostra alta sozinha pode ser lixo ainda não coletado
+    const hard = used >= this.recycleHardMb;
+    if (!hard) {
+      const hour = brasiliaHour();
+      if (hour < RECYCLE_WINDOW_START || hour >= RECYCLE_WINDOW_END) return; // espera a madrugada
+      if (this.workers.some((o) => o !== w && (o.recycling || !o.ready))) return; // um worker de cada vez
+      if (Date.now() - this.lastRecycleAt < RECYCLE_MIN_GAP_MS) return;
+    }
+    this._recycle(w, `heap ${used} MB${hard ? ' acima do limite duro' : ''}`);
+  }
+
+  // Desligamento limpo (fecha os sockets sem deslogar e grava as credenciais, o mesmo de um
+  // deploy) e o _onExit recria o worker; as sessões dele voltam pela trava de logins.
+  _recycle(w, why) {
+    const child = w.child;
+    w.recycling = true;
+    w.ready = false;
+    this.lastRecycleAt = Date.now();
+    console.log(`[sessions] reciclando worker ${w.index} (${why}) — desligamento limpo; as sessões dele voltam pela fila de logins`);
+    w.recycleKill = setTimeout(() => {
+      if (w.child === child) {
+        console.error(`[sessions] worker ${w.index} não saiu em ${RECYCLE_KILL_AFTER_MS} ms — SIGKILL`);
+        child.kill('SIGKILL');
+      }
+    }, RECYCLE_KILL_AFTER_MS);
+    try {
+      child.send({ t: 'shutdown' });
+    } catch {
+      child.kill('SIGTERM');
+    }
   }
 
   _spawn(w) {
@@ -129,7 +219,18 @@ class RemoteSessionManager {
     w.ready = false;
     if (this.stopping) return; // desligamento pedido: sem recriar nem marcar as sessões como caídas
     this.lastWorkerRestartAt = Date.now(); // o monitor de desconexões fica quieto um tempo depois disto (todas as sessões do worker caem juntas)
-    console.error(`[sessions] worker ${w.index} encerrou (code=${code} signal=${signal}) — recriando; só as sessões dele ficam offline`);
+    const planned = w.recycling;
+    clearTimeout(w.recycleKill);
+    w.recycling = false;
+    w.overCount = 0;
+    w.mem = null;
+    this.loginWaiters = this.loginWaiters.filter((x) => x.w !== w);
+    if (planned) {
+      console.log(`[sessions] worker ${w.index} reciclado (code=${code} signal=${signal}) — recriando; só as sessões dele ficam offline`);
+      w.restarts = 0; // saída planejada não conta pro backoff de quedas
+    } else {
+      console.error(`[sessions] worker ${w.index} encerrou (code=${code} signal=${signal}) — recriando; só as sessões dele ficam offline`);
+    }
     for (const { reject, timer } of w.pending.values()) {
       clearTimeout(timer);
       reject(new Error('worker de sessões reiniciando, tente de novo em instantes'));
@@ -177,6 +278,16 @@ class RemoteSessionManager {
         const gw = this.sessions.get(msg.id) || this._mirror(msg.id);
         gw.status = msg.status;
         this.cb.onStatus?.(msg.id, msg.status);
+        break;
+      }
+      case 'loginReq': {
+        this.loginWaiters.push({ w, child: w.child, rid: msg.rid });
+        this._runLoginGate();
+        break;
+      }
+      case 'mem': {
+        w.mem = { ...msg.m, at: Date.now() };
+        this._checkRecycle(w);
         break;
       }
       case 'message': this.cb.onMessage?.(msg.id, ...msg.args); break;

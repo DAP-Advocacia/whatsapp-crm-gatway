@@ -1585,7 +1585,7 @@
     }
     formSessionSelect.innerHTML = instances.map((i) => `
       <option value="${escapeHtml(i.id)}" ${i.id === selectedId ? 'selected' : ''}>
-        ${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
+        ${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
       </option>
     `).join('');
   }

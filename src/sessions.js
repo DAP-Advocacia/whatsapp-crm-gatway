@@ -18,7 +18,7 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter, loginGate }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
     this.onQr = onQr; // (sessionId) => void — só o worker usa (repassa o QR novo ao processo principal)
@@ -28,6 +28,11 @@ class SessionManager {
     // pra o ritmo TOTAL de logins no IP continuar o mesmo de um processo só.
     this.staggerMs = staggerMs;
     this.shardFilter = shardFilter;
+    // Trava global de logins (2026-11-09): () => Promise que resolve quando o
+    // processo principal libera UM login. O intervalo de 5 s passa a ser contado
+    // entre TODOS os workers juntos, e não mais por worker (N vezes mais lento).
+    // Sem ela (null), vale o espaçamento local de minPairingGapMs.
+    this.loginGate = loginGate || null;
     this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageChange = onMessageChange; // (sessionId, { phone, messageId, kind: 'edit'|'revoke', text? }) => void
@@ -81,10 +86,9 @@ class SessionManager {
 
   _runPairingQueue() {
     if (this.stopping || this.pairingTimer || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
-    const wait = Math.max(0, this.lastPairingStartAt + this.minPairingGapMs - Date.now());
-    this.pairingTimer = setTimeout(() => {
+    const startNext = () => {
       this.pairingTimer = null;
-      if (!this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
+      if (this.stopping || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
       const gateway = this.pairingQueue.shift();
       this.lastPairingStartAt = Date.now();
       this.activePairings++;
@@ -97,7 +101,16 @@ class SessionManager {
           this._runPairingQueue();
         });
       this._runPairingQueue(); // agenda o próximo (respeitando o espaçamento)
-    }, wait);
+    };
+    if (this.loginGate) {
+      // Quem dita o ritmo é o processo principal (um login por vez, no máximo a cada
+      // PAIRING_MIN_GAP_MS somando todos os workers). `true` só marca "pedido em andamento".
+      this.pairingTimer = true;
+      this.loginGate().then(startNext, startNext);
+      return;
+    }
+    const wait = Math.max(0, this.lastPairingStartAt + this.minPairingGapMs - Date.now());
+    this.pairingTimer = setTimeout(startNext, wait);
   }
 
   // Sessão que NUNCA foi pareada (sem creds.me) só gera um QR — não é um login de

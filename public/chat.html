@@ -3498,7 +3498,7 @@
     }
     const options = [];
     if (list.length > 1) options.push(`<option value="${list.map((i) => i.id).join(',')}">Todas as minhas instâncias</option>`);
-    options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}${i.delegated ? ' (compartilhada)' : ''}</option>`));
+    options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}${i.delegated && !i.ownerName ? ' (compartilhada)' : ''}</option>`));
     instanceSelect.innerHTML = options.join('');
     list.forEach((i) => { state.instanceStatus[i.id] = i.status; });
     renderInstanceShortcuts(list);
@@ -3527,7 +3527,7 @@
     if (list.length <= 1) { container.innerHTML = ''; return; }
     const currentSession = new URLSearchParams(location.search).get('session');
     container.innerHTML = list.map((i) => {
-      const label = i.label + (i.phone ? ' — ' + i.phone : '');
+      const label = (i.displayLabel || i.label) + (i.phone ? ' — ' + i.phone : '');
       const isActive = currentSession === i.id;
       return `
         <a href="/chat.html?session=${encodeURIComponent(i.id)}" class="nav-item nav-item-instance${isActive ? ' active' : ''}" title="${escapeHtml(label)}">

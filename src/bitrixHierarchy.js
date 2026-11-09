@@ -1,5 +1,5 @@
 const { pool } = require('./db');
-const { ownerIdFor } = require('./auth');
+const { ownerIdFor, bitrixUserIdFromOwnerId } = require('./auth');
 
 /**
  * Delegação AUTOMÁTICA de acesso via hierarquia do Bitrix: o gestor de um
@@ -540,7 +540,67 @@ async function listEmployeesInDepartment(departmentId, includeSubdepartments) {
   };
 }
 
+// Nome de exibição por ownerId, com cache de 1 h (2026-11-09). Serve ao rótulo
+// "Fulano — Principal" das instâncias compartilhadas, que vem em toda abertura do Chat:
+// antes cada GET /instances paginava o Bitrix inteiro (listEmployees) e, se qualquer página
+// falhava, o nome sumia em silêncio. Aqui a lista de ativos é carregada de vez e quem não
+// estiver nela (pessoa inativa no Bitrix) é buscado por ID. Falha vale só 5 min no cache.
+const OWNER_NAME_TTL_MS = 60 * 60 * 1000;
+const OWNER_NAME_RETRY_MS = 5 * 60 * 1000;
+const ownerNameCache = new Map(); // id numérico do Bitrix -> { name, at }
+let ownerNamesLoading = null;
+let ownerNamesLoadedAt = 0;
+
+function ownerNameFresh(uid) {
+  const e = ownerNameCache.get(uid);
+  return !!e && Date.now() - e.at < OWNER_NAME_TTL_MS;
+}
+
+async function loadOwnerNames() {
+  const employees = await listEmployees();
+  if (!employees) return;
+  const at = Date.now();
+  for (const e of employees) ownerNameCache.set(e.id, { name: e.name, at });
+}
+
+// Map ownerId -> nome (só entram os que têm nome). Nunca lança: sem Bitrix, devolve vazio.
+async function getOwnerNames(ownerIds) {
+  const wanted = [];
+  for (const ownerId of new Set(ownerIds)) {
+    const uid = bitrixUserIdFromOwnerId(ownerId);
+    if (uid) wanted.push([ownerId, uid]);
+  }
+  try {
+    if (wanted.some(([, uid]) => !ownerNameFresh(uid))) {
+      if (!ownerNamesLoading && Date.now() - ownerNamesLoadedAt > OWNER_NAME_RETRY_MS) {
+        ownerNamesLoading = loadOwnerNames()
+          .catch((err) => console.error('[bitrixHierarchy] falha ao carregar nomes:', err.message))
+          .finally(() => {
+            ownerNamesLoadedAt = Date.now();
+            ownerNamesLoading = null;
+          });
+      }
+      if (ownerNamesLoading) await ownerNamesLoading;
+      await Promise.all(wanted.filter(([, uid]) => !ownerNameFresh(uid)).map(async ([, uid]) => {
+        const info = await getEmployeeInfo(uid).catch(() => null);
+        // sem nome (falha ou usuário inexistente): tenta de novo em 5 min, não em 1 h
+        const at = info?.name ? Date.now() : Date.now() - OWNER_NAME_TTL_MS + OWNER_NAME_RETRY_MS;
+        ownerNameCache.set(uid, { name: info?.name || null, at });
+      }));
+    }
+  } catch (err) {
+    console.error('[bitrixHierarchy] getOwnerNames:', err.message);
+  }
+  const result = new Map();
+  for (const [ownerId, uid] of wanted) {
+    const name = ownerNameCache.get(uid)?.name;
+    if (name) result.set(ownerId, name);
+  }
+  return result;
+}
+
 module.exports = {
+  getOwnerNames,
   listDepartments,
   listEmployeesInDepartment,
   listEmployeesForAudit,

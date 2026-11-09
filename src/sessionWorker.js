@@ -84,13 +84,38 @@ function pushState(id) {
   });
 }
 
-// Todos os workers dividem o mesmo IP: o ritmo de logins por worker é N vezes
-// mais lento, pra o ritmo TOTAL ficar igual ao de um processo só.
+// Todos os workers dividem o mesmo IP. Com a trava global (padrão), cada login pede
+// vaga ao processo principal, que libera um por vez com no mínimo PAIRING_MIN_GAP_MS
+// entre dois logins de QUALQUER worker: o ritmo total é o de sempre, mas um worker
+// religando sozinho (queda ou reciclagem) usa o ritmo inteiro em vez de 1/N dele.
+// LOGIN_GATE=off volta ao jeito antigo: intervalo N vezes maior em cada worker.
+const LOGIN_GATE = process.env.LOGIN_GATE !== 'off';
+const GATE_TIMEOUT_MS = Number(process.env.LOGIN_GATE_TIMEOUT_MS || 180000);
+let nextGateRid = 1;
+const gateWaiting = new Map(); // rid -> { resolve, timer }
+
+function requestLoginSlot() {
+  return new Promise((resolve) => {
+    const rid = nextGateRid++;
+    // Sem resposta do principal (não deveria acontecer): depois de GATE_TIMEOUT_MS de
+    // espera segue sozinho, o que nunca é mais rápido que o ritmo normal.
+    const timer = setTimeout(() => {
+      gateWaiting.delete(rid);
+      console.warn(`[worker ${INDEX}] trava de logins sem resposta em ${GATE_TIMEOUT_MS} ms — seguindo`);
+      resolve();
+    }, GATE_TIMEOUT_MS);
+    gateWaiting.set(rid, { resolve, timer });
+    send({ t: 'loginReq', rid });
+  });
+}
+
 const manager = new SessionManager({
   baseFolder: process.env.AUTH_FOLDER || './auth_session',
   isCardGroup: store.isCardGroupId,
-  staggerMs: Number(process.env.SESSION_STAGGER_MS || 15000) * COUNT,
-  pairingGapMs: Number(process.env.PAIRING_MIN_GAP_MS ?? 5000) * COUNT,
+  loginGate: LOGIN_GATE ? requestLoginSlot : null,
+  // Com a trava o espaçamento já vem do principal; o boot só precisa enfileirar.
+  staggerMs: LOGIN_GATE ? Number(process.env.SESSION_STAGGER_GATED_MS || 500) : Number(process.env.SESSION_STAGGER_MS || 15000) * COUNT,
+  pairingGapMs: LOGIN_GATE ? 0 : Number(process.env.PAIRING_MIN_GAP_MS ?? 5000) * COUNT,
   shardFilter: (id) => shardOf(id, COUNT) === INDEX,
   onStatus: (id, status) => {
     send({ t: 'status', id, status });
@@ -115,6 +140,64 @@ setInterval(() => {
   }
   if (states.length) send({ t: 'states', list: states });
 }, 15000).unref();
+
+// Telemetria de memória (2026-11-09). Em 48 h de produção os 4 workers estouraram o
+// heap de 7 GB 11 vezes (SIGABRT, ~20 h de uso cada), derrubando 1/4 das sessões por
+// vez. Esta amostra serve a duas coisas: o processo principal recicla o worker ANTES
+// do limite (ver _checkRecycle em remoteSessions.js) e o log mostra o que cresce, já
+// que não dá pra tirar heap snapshot de 7 GB em produção.
+const v8 = require('v8');
+const MEM_SAMPLE_MS = Number(process.env.WORKER_MEM_SAMPLE_MS || 60000);
+const MEM_LOG_EVERY = Number(process.env.WORKER_MEM_LOG_EVERY || 5); // 1 linha de log a cada N amostras
+const mb = (n) => Math.round(n / 1048576);
+let memSamples = 0;
+
+function sizeOf(x) {
+  return x && typeof x.size === 'number' ? x.size : 0;
+}
+
+function memSample() {
+  const hs = v8.getHeapStatistics();
+  const mu = process.memoryUsage();
+  let sessions = 0;
+  let online = 0;
+  let contacts = 0;
+  let groupMeta = 0;
+  let groupHistory = 0;
+  let groupsCached = 0;
+  let sentCache = 0;
+  for (const { sessionId } of manager.listActive()) {
+    const gw = manager.getActiveGateway(sessionId);
+    if (!gw) continue;
+    sessions++;
+    if (gw.getStatus() === 'online') online++;
+    contacts += sizeOf(gw.contactIds);
+    groupMeta += sizeOf(gw.groupMetaTried);
+    groupHistory += sizeOf(gw.groupHistoryCount);
+    groupsCached += sizeOf(gw.groupsCache?.map);
+    sentCache += sizeOf(gw.sentCache);
+  }
+  const m = {
+    heapUsedMb: mb(hs.used_heap_size),
+    heapLimitMb: mb(hs.heap_size_limit),
+    rssMb: mb(mu.rss),
+    externalMb: mb(mu.external),
+    arrayBuffersMb: mb(mu.arrayBuffers),
+    sessions,
+    online,
+  };
+  send({ t: 'mem', m });
+  memSamples++;
+  if (memSamples === 1 || memSamples % MEM_LOG_EVERY === 0) {
+    const spaces = v8.getHeapSpaceStatistics()
+      .filter((s) => ['old_space', 'large_object_space', 'new_space', 'code_space'].includes(s.space_name))
+      .map((s) => `${s.space_name}=${mb(s.space_used_size)}`)
+      .join(' ');
+    console.log(`[worker ${INDEX}] memória: heap ${m.heapUsedMb}/${m.heapLimitMb} MB, rss ${m.rssMb}, external ${m.externalMb}, arrayBuffers ${m.arrayBuffersMb} (${spaces}) | sessões ${sessions} (${online} online), contatos ${contacts}, grupos em cache ${groupsCached}, groupMeta ${groupMeta}, histórico de grupo ${groupHistory}, enviadas em cache ${sentCache}`);
+  }
+}
+setInterval(memSample, MEM_SAMPLE_MS).unref();
+setTimeout(memSample, 5000).unref();
 
 // Métodos do WhatsAppGateway que o processo principal pode chamar.
 const METHODS = new Set([
@@ -149,6 +232,13 @@ process.on('message', (msg) => {
     gracefulExit('pedido do processo principal');
   } else if (msg.t === 'call') {
     handleCall(msg);
+  } else if (msg.t === 'loginGrant') {
+    const g = gateWaiting.get(msg.rid);
+    if (g) {
+      gateWaiting.delete(msg.rid);
+      clearTimeout(g.timer);
+      g.resolve();
+    }
   } else if (msg.t === 'ensure') {
     const id = sanitize(msg.id);
     if (!id) return;

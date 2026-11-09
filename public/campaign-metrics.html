@@ -1146,7 +1146,7 @@
 
       const options = [];
       if (list.length > 1) options.push(`<option value="${myInstanceIds.join(',')}">Todas as minhas instâncias</option>`);
-      options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`));
+      options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`));
       instanceFilter.innerHTML = options.join('');
       load();
     } catch (err) {
