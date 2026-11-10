@@ -31,14 +31,60 @@ const MAX_CONSECUTIVE_FAILURES = Number(process.env.MAX_RECONNECT_ATTEMPTS || 20
 // start() — inclusive cada tentativa de reconexão de sessão caída — fazia uma
 // chamada de rede ao GitHub (fetchLatestBaileysVersion). Medido em produção:
 // ~4.800 inícios de socket em ~1h40, ou seja, milhares de chamadas à toa.
+//
+// 2026-11-10: só guarda em cache a versão que veio DE FATO do GitHub. Quando a
+// consulta falha, fetchLatestBaileysVersion não lança erro: devolve a versão velha
+// embutida no pacote (isLatest:false), e o cache antigo a guardava por 6 h. O
+// WhatsApp recusa versão velha com 405: o worker que subiu na hora em que o DNS
+// falhou (09:05 UTC) ficou 6 h sem conseguir logar nenhuma das ~265 sessões, e 142
+// delas esgotaram as tentativas. Agora a falha não é cacheada (nova consulta em
+// 30 s), usa a última versão boa (memória, ou arquivo, que sobrevive a reinício de
+// worker) e um 405 invalida o cache.
 const VERSION_TTL_MS = 6 * 60 * 60 * 1000;
-let versionCache = null; // { version, at }
+const VERSION_RETRY_MS = 30 * 1000;
+const VERSION_FILE = path.join(process.env.AUTH_FOLDER || './auth_session', '.wa-version.json');
+let versionCache = null; // { version, at } — só de consulta que deu certo
+let versionFailedAt = 0;
+let versionFallback = null; // versão embutida no pacote, último recurso
+function readSavedVersion() {
+  try {
+    const v = JSON.parse(fs.readFileSync(VERSION_FILE, 'utf8')).version;
+    return Array.isArray(v) && v.length === 3 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function invalidateBaileysVersion() {
+  if (versionCache && Date.now() - versionCache.at < 60 * 1000) return; // acabou de consultar: não adianta de novo
+  versionCache = null;
+  versionFailedAt = 0;
+}
 async function getBaileysVersion() {
   if (versionCache && Date.now() - versionCache.at < VERSION_TTL_MS) return versionCache.version;
-  const { version } = await fetchLatestBaileysVersion();
-  versionCache = { version, at: Date.now() };
-  return version;
+  if (Date.now() - versionFailedAt >= VERSION_RETRY_MS) {
+    const r = await fetchLatestBaileysVersion().catch((error) => ({ isLatest: false, error }));
+    if (r.isLatest && Array.isArray(r.version)) {
+      versionCache = { version: r.version, at: Date.now() };
+      try { fs.writeFileSync(VERSION_FILE, JSON.stringify({ version: r.version, at: Date.now() })); } catch { /* só perde a cópia em disco */ }
+      return r.version;
+    }
+    versionFailedAt = Date.now();
+    if (r.version) versionFallback = r.version;
+    console.warn(`[whatsapp] não consegui a versão atual do WhatsApp Web (${r.error?.message || 'sem detalhe'}) — usando a última boa`);
+  }
+  return versionCache?.version || readSavedVersion() || versionFallback;
 }
+
+// 2026-11-10: depois que a sessão JÁ sincronizou histórico uma vez, o histórico RECENT
+// que o WhatsApp manda de novo a cada reconexão não é baixado nem processado. Medido em
+// produção: 449 mil das 461 mil mensagens de histórico em 40 h eram RECENT repetido (lotes
+// de 5 mil por sessão). Com centenas de sessões religando juntas, o Baileys decodifica tudo
+// isso em memória ANTES do nosso handler: o heap do worker ia de 350 MB a 4,7 GB em 20 min,
+// travava o event loop (408 em todas as sessões) e morria por falta de memória. Mensagem
+// recebida com a sessão fora do ar continua chegando pela entrega normal ao reconectar; o
+// botão "Sincronizar conversa" (ON_DEMAND) segue funcionando. HISTORY_SKIP_RECENT=off volta
+// ao comportamento antigo.
+const HISTORY_SKIP_RECENT = process.env.HISTORY_SKIP_RECENT !== 'off';
 
 // Sincronização de histórico (messaging-history.set) processada UMA POR VEZ no
 // processo inteiro. Medido em produção (2026-11-03): 14 sessões recém-pareadas
@@ -100,9 +146,14 @@ const FORWARDED_CONTEXT = { isForwarded: true, forwardingScore: 1 };
  * Não é a API oficial da Meta. Veja o aviso de risco de banimento já dado na conversa.
  */
 class WhatsAppGateway extends EventEmitter {
-  constructor({ authFolder, sessionId, isCardGroup }) {
+  constructor({ authFolder, sessionId, isCardGroup, scheduleStart }) {
     super();
     this.authFolder = authFolder;
+    // Reconexão automática entra na MESMA fila de logins do boot (SessionManager._enqueuePairing:
+    // trava global de 5 s entre logins e no máximo 4 simultâneos). Antes o backoff chamava start()
+    // direto: com 300 sessões caindo juntas (408) eram 30 logins em 40 s no mesmo IP, o padrão que
+    // o WhatsApp pune (bans de 31/07 e 03/08). Sem isto (null), reconecta direto como antes.
+    this.scheduleStart = scheduleStart || null;
     // Usado só pra prefixar arquivos de mídia salvos (ver saveMedia) — evita
     // colisão de nome quando duas instâncias diferentes geram o mesmo
     // key.id do WhatsApp (o espaço de ids não é coordenado entre contas).
@@ -346,9 +397,12 @@ class WhatsAppGateway extends EventEmitter {
     const { state, saveCreds } = authState;
     const version = await getBaileysVersion();
     if (this.destroyed) return; // removida enquanto carregava
+    // Lido UMA vez, antes de o socket abrir: durante a conexão o Baileys vai acrescentando
+    // processedHistoryMessages e os pedaços seguintes do MESMO sync não podem ser descartados.
+    const skipRecentHistory = HISTORY_SKIP_RECENT && (state.creds.processedHistoryMessages?.length || 0) > 0;
 
     const sock = makeWASocket({
-      version,
+      ...(version ? { version } : {}),
       // Chaves de criptografia com cache em memória (recomendado pelo Baileys):
       // sem isto TODA leitura/escrita de chave ia ao disco — a pasta de sessões
       // chegou a 3,5 milhões de arquivos, e o kernel passava metade do tempo
@@ -392,7 +446,11 @@ class WhatsAppGateway extends EventEmitter {
       // de chegar automaticamente no pareamento. Dedupe por
       // (conversation_id, wa_message_id) em store.addMessage continua
       // cobrindo qualquer mensagem que chegue mais de uma vez.
-      shouldSyncHistoryMessage: (msg) => msg.syncType !== proto.HistorySync.HistorySyncType.FULL,
+      shouldSyncHistoryMessage: (msg) => {
+        if (msg.syncType === proto.HistorySync.HistorySyncType.FULL) return false;
+        if (skipRecentHistory && msg.syncType === proto.HistorySync.HistorySyncType.RECENT) return false;
+        return true;
+      },
     });
     this.sock = sock;
 
@@ -458,6 +516,12 @@ class WhatsAppGateway extends EventEmitter {
         const isPermanent = PERMANENT_CODES.has(statusCode);
         const sessionLabel = path.basename(this.authFolder);
         const reason = DisconnectReason[statusCode] || 'desconhecido';
+        // 405 = o WhatsApp recusou a versão do cliente (ver getBaileysVersion). Esquece a versão
+        // em cache pra próxima tentativa buscar a atual, e desiste em 5 tentativas (não 20): insistir
+        // com versão recusada só soma logins rejeitados no mesmo IP.
+        const clientOutdated = statusCode === 405;
+        if (clientOutdated) invalidateBaileysVersion();
+        const reconnectCap = clientOutdated ? 5 : MAX_CONSECUTIVE_FAILURES;
 
         console.warn(
           `[whatsapp:${sessionLabel}] conexão encerrada. statusCode=${statusCode} (${reason}) loggedOut=${loggedOut} isPermanent=${isPermanent}`
@@ -493,7 +557,7 @@ class WhatsAppGateway extends EventEmitter {
           // pareamento (515), então usá-lo aqui quebraria pareamento novo.
           this.idleUnpaired = true;
           console.log(`[whatsapp:${sessionLabel}] QR expirou sem pareamento — aguardando alguém pedir um novo`);
-        } else if (this.consecutiveFailures + 1 >= MAX_CONSECUTIVE_FAILURES) {
+        } else if (this.consecutiveFailures + 1 >= reconnectCap) {
           // Teto de tentativas totais (não só de intervalo entre elas) —
           // achado 2026-09-30: sessões já pareadas um dia mas mortas/
           // inacessíveis (número trocado de aparelho, instância de teste
@@ -509,9 +573,9 @@ class WhatsAppGateway extends EventEmitter {
           // (decisão destrutiva demais pra automatizar; usuário decide
           // reconectar manualmente ou remover a instância).
           this.needsAttention = true;
-          this.lastDisconnectReason = 'timeout persistente';
+          this.lastDisconnectReason = clientOutdated ? 'versão do WhatsApp recusada (405)' : 'timeout persistente';
           console.error(
-            `[whatsapp:${sessionLabel}] ${MAX_CONSECUTIVE_FAILURES} tentativas seguidas sem sucesso — parando de reconectar sozinho, precisa de ação manual.`
+            `[whatsapp:${sessionLabel}] ${reconnectCap} tentativas seguidas sem sucesso — parando de reconectar sozinho, precisa de ação manual.`
           );
         } else {
           // queda de conexão temporária (rede, timeout, etc) -> tenta
@@ -532,6 +596,11 @@ class WhatsAppGateway extends EventEmitter {
           if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
           this.reconnectTimer = setTimeout(() => {
             this.reconnectTimer = null;
+            if (this.scheduleStart) {
+              // Na fila de logins; se alguém reiniciou a sessão no meio (this.sock mudou) não enfileira.
+              if (!this.destroyed && this.sock === sock) this.scheduleStart(this);
+              return;
+            }
             this.start().catch((err) => console.error(`[whatsapp:${sessionLabel}] falha ao reconectar:`, err.message));
           }, jitteredMs);
         }

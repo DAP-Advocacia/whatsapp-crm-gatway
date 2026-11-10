@@ -18,6 +18,20 @@ process.env.DB_POOL_MAX = process.env.WORKER_DB_POOL_MAX || '4';
 const { SessionManager, sanitize } = require('./sessions');
 const store = require('./store');
 const { shardOf } = require('./shard');
+const { monitorEventLoopDelay } = require('perf_hooks');
+
+// Atraso do event loop (2026-11-10): o que derruba as sessões de um worker é uma travada de
+// 35 s ou mais (keep-alive do Baileys), e até hoje não havia como saber o que a causou. Aqui:
+// p99/máximo de cada janela na linha de memória e uma linha avisando de cada travada > 3 s.
+const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+loopDelay.enable();
+let lastLoopTick = Date.now();
+setInterval(() => {
+  const now = Date.now();
+  const lag = now - lastLoopTick - 1000;
+  lastLoopTick = now;
+  if (lag > 3000) console.warn(`[worker ${process.env.SESSION_WORKER_INDEX}] event loop travou ${lag} ms`);
+}, 1000).unref();
 
 const INDEX = Number(process.env.SESSION_WORKER_INDEX);
 const COUNT = Number(process.env.SESSION_WORKER_COUNT);
@@ -193,7 +207,10 @@ function memSample() {
       .filter((s) => ['old_space', 'large_object_space', 'new_space', 'code_space'].includes(s.space_name))
       .map((s) => `${s.space_name}=${mb(s.space_used_size)}`)
       .join(' ');
-    console.log(`[worker ${INDEX}] memória: heap ${m.heapUsedMb}/${m.heapLimitMb} MB, rss ${m.rssMb}, external ${m.externalMb}, arrayBuffers ${m.arrayBuffersMb} (${spaces}) | sessões ${sessions} (${online} online), contatos ${contacts}, grupos em cache ${groupsCached}, groupMeta ${groupMeta}, histórico de grupo ${groupHistory}, enviadas em cache ${sentCache}`);
+    const loopP99 = Math.round(loopDelay.percentile(99) / 1e6);
+    const loopMax = Math.round(loopDelay.max / 1e6);
+    loopDelay.reset();
+    console.log(`[worker ${INDEX}] memória: heap ${m.heapUsedMb}/${m.heapLimitMb} MB, loop p99 ${loopP99} ms max ${loopMax} ms, rss ${m.rssMb}, external ${m.externalMb}, arrayBuffers ${m.arrayBuffersMb} (${spaces}) | sessões ${sessions} (${online} online), contatos ${contacts}, grupos em cache ${groupsCached}, groupMeta ${groupMeta}, histórico de grupo ${groupHistory}, enviadas em cache ${sentCache}`);
   }
 }
 setInterval(memSample, MEM_SAMPLE_MS).unref();

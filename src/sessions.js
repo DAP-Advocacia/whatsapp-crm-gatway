@@ -90,6 +90,12 @@ class SessionManager {
       this.pairingTimer = null;
       if (this.stopping || !this.pairingQueue.length || this.activePairings >= this.maxConcurrentPairings) return;
       const gateway = this.pairingQueue.shift();
+      // Removida, ou já iniciada por outro caminho (QR, "tentar reconectar") enquanto esperava na fila:
+      // iniciar de novo abriria um 2º socket da mesma sessão.
+      if (gateway.destroyed || gateway.status !== 'queued') {
+        this._runPairingQueue();
+        return;
+      }
       this.lastPairingStartAt = Date.now();
       this.activePairings++;
       gateway.status = 'connecting'; // sai de 'queued' assim que o start() real começa
@@ -183,6 +189,7 @@ class SessionManager {
       authFolder: path.join(this.baseFolder, id),
       sessionId: id,
       isCardGroup: this.isCardGroup,
+      scheduleStart: (gw) => this._enqueuePairing(gw), // reconexão automática passa pela fila/trava de logins
     });
     gateway.on('status', (status) => this.onStatus(id, status));
     gateway.on('message', ({ phone, message, pushName, isHistory, senderPhone, senderName }) =>

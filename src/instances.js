@@ -186,11 +186,11 @@ async function listAll() {
     `select id, owner_id as "ownerId", label, created_at as "createdAt", false as "isOrphan"
      from instances
      union all
-     select distinct c.session_id as id, null as "ownerId", '(instância removida)' as label,
-            min(m.created_at) over (partition by c.session_id) as "createdAt", true as "isOrphan"
-     from messages m
-     join conversations c on c.id = m.conversation_id
+     select c.session_id as id, null as "ownerId", '(instância removida)' as label,
+            min(c.created_at) as "createdAt", true as "isOrphan"
+     from conversations c
      where not exists (select 1 from instances i where i.id = c.session_id)
+     group by c.session_id
      order by "ownerId", "createdAt" asc`
   );
   return rows;

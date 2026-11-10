@@ -27,4 +27,6 @@ ENV NODE_ENV=production
 ENV PORT=3333
 EXPOSE 3333
 
-CMD ["node", "src/server.js"]
+# ulimit -c 0 (2026-11-10): cada worker que morre por falta de memória gravava um core dump de ~8 GB
+# no disco, e o stdout dos outros workers travava durante a gravação (cascata de 408).
+CMD ["sh", "-c", "ulimit -c 0 && exec node src/server.js"]
