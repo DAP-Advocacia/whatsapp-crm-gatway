@@ -410,6 +410,10 @@ function createWhatsappRouter({ sessions, broadcast }) {
           // sendo gerado quando a pessoa de fato abre a tela de pareamento
           // (GET /qr, POST /instances), que chamam sessions.get direto.
           gateway = sessions.getActiveGateway(i.id) || (ownNumbers[i.id] ? sessions.get(i.id) : null);
+          // Boot "all": o espelho da sessão já existe, então o get() acima não roda e abrir o app não
+          // dava prioridade a quem estava na fila de reconexão (~75 min). get() em sessão "queued" pede
+          // ao worker que a passe à frente das do boot (2026-11-09).
+          if (gateway && ownNumbers[i.id] && gateway.getStatus() === 'queued') sessions.get(i.id);
           if (gateway) status = gateway.getStatus();
         } catch {
           // sessão ainda não foi iniciada nesse processo — status fica offline
