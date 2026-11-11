@@ -195,6 +195,8 @@ class RemoteSessionManager {
 
   _spawn(w) {
     if (this.stopping) return;
+    const reportDir = process.env.WORKER_REPORT_DIR || "/tmp/node-reports";
+    try { fs.mkdirSync(reportDir, { recursive: true }); } catch { /* sem pasta, o relatório só não é gravado */ }
     const child = fork(path.join(__dirname, 'sessionWorker.js'), [], {
       env: {
         ...process.env,
@@ -202,7 +204,9 @@ class RemoteSessionManager {
         SESSION_WORKER_COUNT: String(this.count),
         AUTH_FOLDER: this.baseFolder,
       },
-      execArgv: [`--max-old-space-size=${this.heapMb}`],
+      // --report-on-fatalerror: quando o worker morre por falta de memória o Node grava um relatório
+      // (pilha de JavaScript no momento do estouro) em /tmp/node-reports, para achar o que enche o heap.
+      execArgv: [`--max-old-space-size=${this.heapMb}`, `--report-on-fatalerror`, `--report-directory=${reportDir}`],
       serialization: 'advanced', // Buffers (mídia) e Maps passam direto
       stdio: 'inherit',
     });

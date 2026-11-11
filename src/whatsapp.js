@@ -412,7 +412,8 @@ class WhatsAppGateway extends EventEmitter {
         keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' })),
       },
       getMessage: async (key) => this.sentCache.get(key.id),
-      logger: pino({ level: 'warn' }),
+      // child com a sessão: os erros do Baileys (descriptografia, stream) passam a dizer de qual sessão vêm
+      logger: pino({ level: 'warn' }).child({ session: path.basename(this.authFolder) }),
       // QR só é necessário até o primeiro pareamento; depois disso a sessão fica
       // salva em `authFolder` e o login persiste entre reinícios do processo.
       printQRInTerminal: false,
