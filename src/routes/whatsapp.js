@@ -13,7 +13,7 @@ const instanceHealthStore = require('../instanceHealthStore');
 const instanceBanStore = require('../instanceBanStore');
 const { summarizeConversation, generateDashboardInsights, generateTeamInsights } = require('../openai');
 const { getStageDistribution } = require('../bitrixCrm');
-const { requireSession, requireResourceSession, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
+const { requireSession, requireResourceSession, requireSessionOrAdmin, requireResourceSessionOrAdmin, requireOwnerMatch, requireResourceOwner, assertOwnsSession } = require('../authz');
 const { getSubordinates, getOwnerNames, listEmployees, listEmployeesWithDepartment, listDepartments, listEmployeesInDepartment } = require('../bitrixHierarchy');
 const { resolvePublicUrl, fetchHtmlSnippet, extractOpenGraph } = require('../linkPreview');
 const presence = require('../presence');
@@ -46,7 +46,7 @@ const SENDS_DONE_MAX = 5000;
 // Rejeita se `promise` não resolver em `ms` (a promise original segue rodando).
 // "Maria da Silva Souza" -> "Maria Souza": primeiro e último nome, pra caber nos seletores.
 function shortPersonName(name) {
-  const parts = String(name || '').trim().split(/s+/).filter(Boolean);
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
   return parts.length > 2 ? `${parts[0]} ${parts[parts.length - 1]}` : parts.join(' ');
 }
 
@@ -79,7 +79,46 @@ const teamInsightsCache = new Map();
 // abaixo); sem esses campos, cai neste padrão de sempre.
 const CAMPAIGN_MIN_DELAY_MS = 4000;
 const CAMPAIGN_MAX_DELAY_MS = 9000;
-const CAMPAIGN_MAX_RECIPIENTS = 100;
+// Limite por lista — 100 é a precaução de sempre contra ban; quem decide
+// subir (CAMPAIGN_MAX_RECIPIENTS no ambiente) assume o risco.
+const CAMPAIGN_MAX_RECIPIENTS = Number(process.env.CAMPAIGN_MAX_RECIPIENTS) || 100;
+// Por enquanto só o super admin cria/agenda lista de transmissão (a tela
+// também some do menu pra os demais). CAMPAIGN_ADMIN_ONLY=0 libera de novo
+// pra todo mundo, sem mexer em código. Só vale pra CRIAR — o que já estava
+// agendado e o retry automático seguem normais.
+const CAMPAIGN_ADMIN_ONLY = !['0', 'false', 'no'].includes(String(process.env.CAMPAIGN_ADMIN_ONLY ?? '1').trim().toLowerCase());
+function campaignCreateAllowed(ownerId) {
+  return !CAMPAIGN_ADMIN_ONLY || isSuperAdmin(ownerId);
+}
+function requireCampaignCreator(req, res, next) {
+  if (!campaignCreateAllowed(req.ownerId)) {
+    return res.status(403).json({ error: 'a lista de transmissão está liberada só para administradores por enquanto' });
+  }
+  next();
+}
+// Versões diferentes do mesmo texto (lista de transmissão).
+const CAMPAIGN_MAX_VARIANTS = 10;
+const CAMPAIGN_MAX_TEXT_LENGTH = 4000;
+
+// Junta `text` (formato antigo, 1 mensagem) e `texts` (lista de versões) numa
+// lista só: sem vazios e sem repetidas (a mesma versão duas vezes não
+// ajudaria em nada). Devolve [] se não sobrou nenhuma; lança erro com
+// mensagem pronta pra resposta 400 se passar do limite.
+function normalizeTexts(text, texts) {
+  const source = Array.isArray(texts) && texts.length ? texts : [text];
+  const list = [];
+  for (const t of source) {
+    const clean = typeof t === 'string' ? t.trim() : '';
+    if (clean && !list.includes(clean)) list.push(clean);
+  }
+  if (list.length > CAMPAIGN_MAX_VARIANTS) {
+    throw new Error(`máximo de ${CAMPAIGN_MAX_VARIANTS} versões da mensagem por lista`);
+  }
+  if (list.some((t) => t.length > CAMPAIGN_MAX_TEXT_LENGTH)) {
+    throw new Error(`cada versão da mensagem pode ter no máximo ${CAMPAIGN_MAX_TEXT_LENGTH} caracteres`);
+  }
+  return list;
+}
 
 // Limites aceitáveis pro override de intervalo (minDelayMs/maxDelayMs vindo
 // do client) — 1s no mínimo (abaixo disso é praticamente o disparo robótico
@@ -1168,7 +1207,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // (nunca trocou mensagem em nenhuma direção) não aparece no resultado —
   // o frontend trata ausência como hasReplied:false.
   // ---------------------------------------------------------------
-  router.post('/campaign/classify-recipients', requireSession((req) => req.body?.session), async (req, res) => {
+  router.post('/campaign/classify-recipients', requireSessionOrAdmin((req) => req.body?.session), async (req, res) => {
     const { session, phones } = req.body || {};
     if (!Array.isArray(phones) || !phones.length) {
       return res.status(400).json({ error: 'phones (lista de telefones) é obrigatório' });
@@ -1192,8 +1231,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // compatibilidade. Devolve um campaignId pra acompanhar o progresso em
   // GET /campaign/:id.
   // ---------------------------------------------------------------
-  router.post('/campaign', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, name, recipients, phones, text, media, minDelayMs, maxDelayMs } = req.body || {};
+  router.post('/campaign', requireCampaignCreator, requireSessionOrAdmin((req) => req.body?.session), async (req, res) => {
+    const { session, name, recipients, phones, text, texts, media, minDelayMs, maxDelayMs } = req.body || {};
 
     const rawRecipients = Array.isArray(recipients) && recipients.length
       ? recipients
@@ -1204,7 +1243,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
     if (!rawRecipients.length) {
       return res.status(400).json({ error: 'recipients (lista de destinatários) é obrigatório' });
     }
-    if (!text || !text.trim()) {
+    let variants;
+    try {
+      variants = normalizeTexts(text, texts);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (!variants.length) {
       return res.status(400).json({ error: 'text é obrigatório' });
     }
     if (rawRecipients.length > CAMPAIGN_MAX_RECIPIENTS) {
@@ -1258,14 +1303,67 @@ function createWhatsappRouter({ sessions, broadcast }) {
       gateway,
       sessionId: session,
       recipients: uniqueRecipients,
-      template: text.trim(),
+      template: variants[0],
+      templates: variants,
       media: mediaPayload,
       minDelayMs: delayOverride.minDelayMs,
       maxDelayMs: delayOverride.maxDelayMs,
     }).catch((err) => console.error('[campaign] falha inesperada:', err.message));
 
-    actionLog.logAction(req.ownerId, 'campaign_created', name || `${uniqueRecipients.length} destinatário(s)`);
+    actionLog.logAction(req.ownerId, 'campaign_created', (name || `${uniqueRecipients.length} destinatário(s)`) + (req.crossSession ? ` — pela instância ${session} (de outra pessoa)` : ''));
     res.json({ ok: true, campaignId, total: uniqueRecipients.length });
+  });
+
+  // ---------------------------------------------------------------
+  // GET /campaign/limits
+  // Limites que a tela de Lista de transmissão mostra e valida no client —
+  // vêm do servidor porque o teto de destinatários é configurável por
+  // ambiente (CAMPAIGN_MAX_RECIPIENTS). Precisa vir ANTES de /campaign/:id,
+  // senão o Express trata "limits" como um id de campanha.
+  // ---------------------------------------------------------------
+  router.get('/campaign/limits', (req, res) => {
+    res.json({
+      maxRecipients: CAMPAIGN_MAX_RECIPIENTS,
+      maxVariants: CAMPAIGN_MAX_VARIANTS,
+      // a tela usa isso pra se bloquear (não é a proteção — a de verdade é
+      // requireCampaignCreator nas rotas de criação) e pra mostrar, só ao
+      // admin, as instâncias de outras pessoas
+      allowed: campaignCreateAllowed(req.ownerId),
+      isAdmin: isSuperAdmin(req.ownerId),
+    });
+  });
+
+  // ---------------------------------------------------------------
+  // GET /admin/campaign-instances
+  // Instâncias PAREADAS de outras pessoas, com o status ao vivo, pro admin
+  // escolher por qual número disparar a lista (ver requireSessionOrAdmin,
+  // src/authz.js). As do próprio admin vêm de GET /instances, como sempre.
+  // Status por getActiveGateway (não inicia sessão nenhuma — nunca
+  // sessions.get em lote, são ~900 sessões).
+  // ---------------------------------------------------------------
+  router.get('/admin/campaign-instances', requireSuperAdmin, async (req, res) => {
+    try {
+      const all = (await instancesStore.listAll()).filter((i) => !i.isOrphan && i.ownerId && i.ownerId !== req.ownerId);
+      const ownNumbers = getOwnNumbersBySession();
+      const paired = all.filter((i) => ownNumbers[i.id]);
+      const nameByOwnerId = await getOwnerNames(paired.map((i) => i.ownerId));
+      const list = paired.map((i) => {
+        let status = 'offline';
+        try {
+          const gateway = sessions.getActiveGateway(i.id);
+          if (gateway) status = gateway.getStatus();
+        } catch {
+          // sessão não carregada neste processo — fica offline
+        }
+        const ownerName = nameByOwnerId.get(i.ownerId) || null;
+        return { id: i.id, ownerId: i.ownerId, ownerName, label: i.label, phone: ownNumbers[i.id], status };
+      });
+      list.sort((a, b) => String(a.ownerName || a.ownerId).localeCompare(String(b.ownerName || b.ownerId), 'pt-BR') || String(a.label).localeCompare(String(b.label), 'pt-BR'));
+      res.json({ instances: list.map((i) => ({ ...i, displayLabel: i.ownerName ? `${shortPersonName(i.ownerName)} — ${i.label}` : i.label })) });
+    } catch (err) {
+      console.error('[admin] falha ao listar instâncias pro disparo:', err.message);
+      res.status(502).json({ error: err.message });
+    }
   });
 
   // ---------------------------------------------------------------
@@ -1273,7 +1371,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // Progresso de uma campanha em andamento/concluída — só o dono dela pode
   // consultar.
   // ---------------------------------------------------------------
-  router.get('/campaign/:id', requireResourceSession((req) => getCampaign(req.params.id)?.sessionId), (req, res) => {
+  router.get('/campaign/:id', requireResourceSessionOrAdmin((req) => getCampaign(req.params.id)?.sessionId), (req, res) => {
     const campaign = getCampaign(req.params.id);
     res.json(campaign);
   });
@@ -1285,8 +1383,8 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // ou manualmente, arrastando o card pra "Enviar agora" no Kanban
   // (public/campaign-schedule.html).
   // ---------------------------------------------------------------
-  router.post('/campaign/schedule', requireSession((req) => req.body?.session), async (req, res) => {
-    const { session, name, recipients, phones, text, media, scheduledAt, minDelayMs, maxDelayMs } = req.body || {};
+  router.post('/campaign/schedule', requireCampaignCreator, requireSessionOrAdmin((req) => req.body?.session), async (req, res) => {
+    const { session, name, recipients, phones, text, texts, media, scheduledAt, minDelayMs, maxDelayMs } = req.body || {};
 
     if (!scheduledAt) return res.status(400).json({ error: 'scheduledAt é obrigatório' });
 
@@ -1314,7 +1412,13 @@ function createWhatsappRouter({ sessions, broadcast }) {
     if (!rawRecipients.length) {
       return res.status(400).json({ error: 'recipients (lista de destinatários) é obrigatório' });
     }
-    if (!text || !text.trim()) {
+    let variants;
+    try {
+      variants = normalizeTexts(text, texts);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+    if (!variants.length) {
       return res.status(400).json({ error: 'text é obrigatório' });
     }
     if (rawRecipients.length > CAMPAIGN_MAX_RECIPIENTS) {
@@ -1371,13 +1475,14 @@ function createWhatsappRouter({ sessions, broadcast }) {
         sessionId: session,
         name,
         recipients: uniqueRecipients,
-        template: text.trim(),
+        template: variants[0],
+        templates: variants,
         media: mediaPayload,
         scheduledAt: scheduledDate.toISOString(),
         minDelayMs: delayOverride.minDelayMs,
         maxDelayMs: delayOverride.maxDelayMs,
       });
-      actionLog.logAction(req.ownerId, 'campaign_created', name || `${uniqueRecipients.length} destinatário(s), agendada`);
+      actionLog.logAction(req.ownerId, 'campaign_created', (name || `${uniqueRecipients.length} destinatário(s), agendada`) + (req.crossSession ? ` — pela instância ${session} (de outra pessoa)` : ''));
       res.json({ ok: true, id, scheduledAt: scheduledDate.toISOString() });
     } catch (err) {
       console.error('[campaign:schedule] erro:', err.message);
@@ -1390,7 +1495,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // Lista os agendamentos da sessão do usuário, pro Kanban/Calendário —
   // cada usuário só vê os próprios agendamentos.
   // ---------------------------------------------------------------
-  router.get('/scheduled-campaigns', requireSession((req) => req.query.session), async (req, res) => {
+  router.get('/scheduled-campaigns', requireSessionOrAdmin((req) => req.query.session), async (req, res) => {
     try {
       res.json({ campaigns: await scheduledStore.listAll(req.sessionIds) });
     } catch (err) {
@@ -1404,7 +1509,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // Dispara um agendamento imediatamente, ignorando a data marcada — usado
   // quando o card é arrastado pra coluna "Enviar agora" no Kanban.
   // ---------------------------------------------------------------
-  router.post('/scheduled-campaigns/:id/send-now', requireResourceSession(scheduledCampaignOwner), async (req, res) => {
+  router.post('/scheduled-campaigns/:id/send-now', requireResourceSessionOrAdmin(scheduledCampaignOwner), async (req, res) => {
     try {
       const result = await scheduler.sendScheduled(req.params.id, sessions);
       if (!result.ok) return res.status(409).json({ error: result.error });
@@ -1419,7 +1524,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // PUT /scheduled-campaigns/:id  { scheduledAt }
   // Reagenda pra outra data/hora (só funciona enquanto ainda está 'scheduled').
   // ---------------------------------------------------------------
-  router.put('/scheduled-campaigns/:id', requireResourceSession(scheduledCampaignOwner), async (req, res) => {
+  router.put('/scheduled-campaigns/:id', requireResourceSessionOrAdmin(scheduledCampaignOwner), async (req, res) => {
     const { scheduledAt } = req.body || {};
     if (!scheduledAt) return res.status(400).json({ error: 'scheduledAt é obrigatório' });
     const scheduledDate = new Date(scheduledAt);
@@ -1439,7 +1544,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // DELETE /scheduled-campaigns/:id
   // Cancela um agendamento (só funciona enquanto ainda está 'scheduled').
   // ---------------------------------------------------------------
-  router.delete('/scheduled-campaigns/:id', requireResourceSession(scheduledCampaignOwner), async (req, res) => {
+  router.delete('/scheduled-campaigns/:id', requireResourceSessionOrAdmin(scheduledCampaignOwner), async (req, res) => {
     try {
       await scheduledStore.cancel(req.params.id);
       res.json({ ok: true });
@@ -1455,7 +1560,7 @@ function createWhatsappRouter({ sessions, broadcast }) {
   // dashboard de métricas de campanha (campaign-metrics.html) — cada usuário
   // só vê as próprias campanhas.
   // ---------------------------------------------------------------
-  router.get('/campaigns/metrics', requireSession((req) => req.query.session), async (req, res) => {
+  router.get('/campaigns/metrics', requireSessionOrAdmin((req) => req.query.session), async (req, res) => {
     try {
       res.json(await computeCampaignMetrics(req.sessionIds));
     } catch (err) {

@@ -22,7 +22,7 @@ const scheduledStore = require('./scheduledCampaigns');
 
 const campaigns = new Map();
 
-// wa_message_id -> { campaignId, phone, sessionId, template, retryAttempt,
+// wa_message_id -> { campaignId, phone, sessionId, templates, retryAttempt,
 // media } — só enquanto a campanha ainda pode receber uma correção
 // retroativa de status (ver onCampaignMessageStatus abaixo). Os demais
 // campos são o que precisamos pra reconstruir um agendamento de retry sem
@@ -93,13 +93,20 @@ function renderTemplate(template, recipient) {
 // 1 = ela mesma É o retry automático de outra) propaga pra
 // onCampaignMessageStatus nunca agendar um SEGUNDO retry se este também
 // falhar — decisão confirmada: só 1 tentativa.
-async function runCampaign(id, { gateway, sessionId, recipients, template, media, minDelayMs, maxDelayMs, retryAttempt = 0 }) {
+async function runCampaign(id, { gateway, sessionId, recipients, template, templates, media, minDelayMs, maxDelayMs, retryAttempt = 0 }) {
   const campaign = campaigns.get(id);
+  // Lista de transmissão: várias versões do mesmo texto, alternadas na ordem
+  // (1, 2, 3, 1, 2, 3…) — o índice anda por DESTINATÁRIO (não só por envio
+  // bem-sucedido), então a distribuição fica uniforme mesmo com falhas.
+  // `template` sozinho (campanha comum, agendamento antigo) = 1 versão só.
+  const variants = Array.isArray(templates) && templates.length ? templates : [template];
 
-  for (const recipient of recipients) {
+  for (let i = 0; i < recipients.length; i++) {
+    const recipient = recipients[i];
     const phone = recipient.phone;
+    const variantTemplate = variants[i % variants.length];
     try {
-      const text = renderTemplate(template, recipient);
+      const text = renderTemplate(variantTemplate, recipient);
       let message;
 
       if (media) {
@@ -136,17 +143,17 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, media
       // silenciosamente um retry só de texto.
       if (message.id) {
         messageIdToCampaign.set(message.id, {
-          campaignId: id, phone, sessionId, template, retryAttempt,
+          campaignId: id, phone, sessionId, templates: variants, retryAttempt,
           media: media ? { type: media.type, mimetype: message.mimetype, url: message.mediaUrl } : null,
         });
       }
 
       campaign.sent++;
-      campaign.results.push({ phone, ok: true });
+      campaign.results.push({ phone, ok: true, variant: i % variants.length });
       campaignStore.recordResult(id, phone, true).catch((err) => console.error('[campaign] falha ao gravar envio:', err.message));
     } catch (err) {
       campaign.failed++;
-      campaign.results.push({ phone, ok: false, error: err.message });
+      campaign.results.push({ phone, ok: false, error: err.message, variant: i % variants.length });
       campaignStore.recordResult(id, phone, false, err.message).catch((e) => console.error('[campaign] falha ao gravar envio:', e.message));
     }
 
@@ -167,10 +174,10 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, media
 // timer (RETRY_DEBOUNCE_MS sem nenhuma falha nova antes de agendar de
 // verdade) — evita criar um scheduled_campaigns por telefone, agrupa todos
 // os falhos daquela campanha num retry só.
-function bufferForRetry(campaignId, phone, sessionId, template, media) {
+function bufferForRetry(campaignId, phone, sessionId, templates, media) {
   let buf = pendingRetryBuffers.get(campaignId);
   if (!buf) {
-    buf = { phones: new Set(), sessionId, template, media, timer: null };
+    buf = { phones: new Set(), sessionId, templates, media, timer: null };
     pendingRetryBuffers.set(campaignId, buf);
   }
   buf.phones.add(phone);
@@ -188,7 +195,7 @@ function bufferForRetry(campaignId, phone, sessionId, template, media) {
 // hora marcada, sendScheduled trata isto como qualquer outro agendamento,
 // só que com retryAttempt=1 propagado (ver src/scheduler.js), que impede um
 // segundo retry se este também falhar.
-async function scheduleCampaignRetry(campaignId, { phones, sessionId, template, media }) {
+async function scheduleCampaignRetry(campaignId, { phones, sessionId, templates, media }) {
   const id = 'retry_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const recipients = [...phones].map((phone) => ({ phone, name: null }));
   // media.url já é o caminho relativo salvo no Storage (mesmo formato que
@@ -200,7 +207,11 @@ async function scheduleCampaignRetry(campaignId, { phones, sessionId, template, 
     sessionId,
     name: 'Retry automático (erro 463)',
     recipients,
-    template,
+    // o retry volta a alternar TODAS as versões da campanha original (não
+    // só a que cada telefone recebeu) — mantém o objetivo de não repetir o
+    // mesmo texto em sequência.
+    template: templates[0],
+    templates: templates.length > 1 ? templates : null,
     media: media?.url ? { type: media.type, mimetype: media.mimetype, url: media.url } : null,
     scheduledAt: new Date(Date.now() + RETRY_DELAY_MS).toISOString(),
     retryOfCampaignId: campaignId,
@@ -223,7 +234,7 @@ async function onCampaignMessageStatus(messageId, status) {
   if (!entry) return;
   messageIdToCampaign.delete(messageId); // consumido — não corrige duas vezes
 
-  const { campaignId, phone, sessionId, template, retryAttempt, media } = entry;
+  const { campaignId, phone, sessionId, templates, retryAttempt, media } = entry;
   try {
     const corrected = await campaignStore.markResultFailedAsync(campaignId, phone, 'rejeitado pelo WhatsApp após o envio (conta restrita/sem token de privacidade com este contato)');
     if (!corrected) return;
@@ -234,7 +245,7 @@ async function onCampaignMessageStatus(messageId, status) {
       campaign.sent = Math.max(campaign.sent - 1, 0);
       campaign.failed++;
     }
-    if (retryAttempt === 0) bufferForRetry(campaignId, phone, sessionId, template, media);
+    if (retryAttempt === 0) bufferForRetry(campaignId, phone, sessionId, templates, media);
   } catch (err) {
     console.error('[campaign] falha ao corrigir resultado após rejeição assíncrona:', err.message);
   }

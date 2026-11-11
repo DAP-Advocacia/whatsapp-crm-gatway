@@ -63,11 +63,11 @@ html.sidebar-collapsed .nav-section-label{ display:none; }
    display:none/hidden. */
 #navSectionAdmin{ max-height:0; overflow:hidden; transition:max-height .25s ease; }
 #navSectionAdmin.revealed{ max-height:300px; }
-#navAdminItem, #navConversationAnalysisItem{
+#navAdminItem, #navConversationAnalysisItem, #navBroadcastItem{
   max-height:0; overflow:hidden; padding-top:0; padding-bottom:0;
   transition: max-height .2s ease, padding .2s ease;
 }
-#navAdminItem.revealed, #navConversationAnalysisItem.revealed{
+#navAdminItem.revealed, #navConversationAnalysisItem.revealed, #navBroadcastItem.revealed{
   max-height:44px; padding-top:10px; padding-bottom:10px;
 }
 .nav-item{

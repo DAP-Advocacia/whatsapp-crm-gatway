@@ -115,6 +115,24 @@ function createCrmRouter() {
     }
   });
 
+  // Só LÊ o CSV (mesmo parser de import-csv) e devolve os contatos, sem gravar
+  // nada na agenda — usado pela Lista de transmissão pra importar uma
+  // planilha só pra aquele disparo.
+  router.post('/contacts/parse-csv', async (req, res) => {
+    const { csvText } = req.body || {};
+    if (!csvText || !csvText.trim()) return res.status(400).json({ error: 'csvText é obrigatório' });
+    try {
+      const { contacts: rows, totalRows, skipped } = parseContactsCsv(csvText);
+      if (totalRows > MAX_CSV_ROWS) {
+        return res.status(400).json({ error: `máximo de ${MAX_CSV_ROWS} linhas por arquivo` });
+      }
+      res.json({ ok: true, contacts: rows, totalRows, skipped });
+    } catch (err) {
+      console.error('[contacts:parse-csv] erro:', err.message);
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   // ---------------- Listas de contatos ----------------
 
   router.get('/contact-lists', async (req, res) => {

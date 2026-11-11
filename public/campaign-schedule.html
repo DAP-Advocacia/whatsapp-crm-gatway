@@ -1000,7 +1000,7 @@
   }
 
   function revealAdminNavItemIfSuperAdmin() {
-    apiFetch(`${API_BASE}/whatsapp/admin/whoami`)
+    apiFetch(`${API_BASE}/admin/whoami`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         const item = document.getElementById('navAdminItem');
@@ -1069,6 +1069,21 @@
       const options = [];
       if (list.length > 1) options.push(`<option value="${myInstanceIds.join(',')}">Todas as minhas instâncias</option>`);
       options.push(...list.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`));
+      // Admin: também as instâncias de outras pessoas (listas disparadas/agendadas pelo número delas)
+      try {
+        const who = await apiFetch(`${API_BASE}/admin/whoami`, { headers: FETCH_HEADERS });
+        if (who.ok && (await who.json()).isSuperAdmin) {
+          const r2 = await apiFetch(`${API_BASE}/admin/campaign-instances`, { headers: FETCH_HEADERS });
+          const foreign = r2.ok ? ((await r2.json()).instances || []) : [];
+          if (foreign.length) {
+            options.push(`<optgroup label="Instâncias de outras pessoas (${foreign.length})">` +
+              foreign.map((i) => `<option value="${escapeHtml(i.id)}">${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''}</option>`).join('') +
+              '</optgroup>');
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao carregar instâncias de outras pessoas:', err);
+      }
       instanceFilter.innerHTML = options.join('');
       load();
     } catch (err) {

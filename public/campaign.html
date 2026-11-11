@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Campanha · WhatsApp Gateway</title>
+<title>Lista de transmissão · WhatsApp Gateway</title>
 <!-- Fase 0 do redesign (ver plano em curso) — arquivos compartilhados
      linkados ANTES do <style> inline, de propósito: enquanto o bloco
      inline abaixo existir, ele vence a cascata e nada muda visualmente
@@ -442,6 +442,27 @@
   .template-row{ display:flex; gap: 8px; margin-bottom: 10px; }
   .template-row select{ flex: 1; }
 
+  /* Lista de transmissão: versões da mensagem, agenda e CSV */
+  .page-links{ display:flex; gap: 14px; margin: -6px 0 16px; font-size: 12.5px; }
+  .page-links a{ color: var(--gold); text-decoration: none; }
+  .page-links a:hover{ text-decoration: underline; }
+  .variant{ margin-top: 12px; }
+  .variant-head{ display:flex; justify-content: space-between; align-items:center; margin-bottom: 6px; }
+  .variant-head label.field-label{ margin-bottom: 0; }
+  .variant-remove{ background:none; border:none; color: var(--text-faint); cursor:pointer; font-size: 12px; padding: 2px 6px; }
+  .variant-remove:hover{ color: var(--red); }
+  .variant-add{ margin-top: 12px; }
+  .variant-tabs{ display:flex; gap: 4px; justify-content:center; flex-wrap: wrap; margin-bottom: 10px; }
+  .variant-tabs button{
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-muted);
+    border-radius: 100px; font-size: 11.5px; padding: 3px 10px; cursor: pointer;
+  }
+  .variant-tabs button.active{ color: var(--gold); border-color: var(--gold-dim); }
+  .recipients-block{ margin-top: 14px; }
+  .recipients-list.compact{ max-height: 180px; }
+  .recipient-row .grow{ flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .over-limit{ color: var(--red); }
+
   .attach-row{ display:flex; align-items:center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
   .attach-chip{
     display:flex; align-items:center; gap: 8px; background: var(--surface-2);
@@ -589,10 +610,18 @@
 <div class="toast-stack" id="toastStack"></div>
 
 <div id="app">
-  <h1>Campanha</h1>
-  <p class="subtitle">Envia a mesma mensagem (personalizada por contato) pra vários destinatários, um de cada vez.</p>
+  <h1>Lista de transmissão</h1>
+  <p class="subtitle">Envia pra vários contatos, um de cada vez, com intervalo aleatório entre os envios — e pode alternar várias versões da mesma mensagem.</p>
+  <div class="page-links">
+    <a href="/campaign-schedule.html">Agenda de envios</a>
+    <a href="/campaign-metrics.html">Métricas</a>
+  </div>
 
-  <div class="warning-banner">
+  <div class="warning-banner" id="blockedBox" style="display:none">
+    🔒 A Lista de transmissão está liberada só para administradores por enquanto.
+  </div>
+
+  <div class="warning-banner" id="banWarning">
     ⚠️ <b>Risco de banimento.</b> Este gateway usa o protocolo não-oficial do
     WhatsApp Web. Enviar mensagens em volume pra muitos contatos de uma vez é
     exatamente o padrão que os sistemas antispam do WhatsApp mais penalizam —
@@ -604,16 +633,18 @@
   <div class="layout">
     <div class="form-col">
       <div class="panel">
-        <h2>1. Detalhes da campanha</h2>
+        <h2>1. Detalhes da transmissão</h2>
         <div class="field-row">
           <div>
-            <label class="field-label" for="campaignName">Nome da campanha (opcional, só pra identificar no progresso)</label>
+            <label class="field-label" for="campaignName">Nome da transmissão (opcional, só pra identificar no progresso)</label>
             <input type="text" id="campaignName" placeholder="Ex: Black Friday — Clientes VIP">
           </div>
           <div>
             <label class="field-label" for="instanceSelect">Enviando pelo WhatsApp de</label>
             <select id="instanceSelect"><option value="">Carregando instâncias…</option></select>
-            <p class="hint">Só suas próprias instâncias — <a href="/instances.html" style="color:var(--gold)">gerencie ou conecte outra em Conexões do WhatsApp</a>.</p>
+            <input type="text" id="instanceFilter" placeholder="Filtrar instâncias de outras pessoas por nome ou número…" autocomplete="off" style="display:none; margin-top:6px">
+            <p class="hint" id="instanceHint">Só suas próprias instâncias — <a href="/instances.html" style="color:var(--gold)">gerencie ou conecte outra em Conexões do WhatsApp</a>.</p>
+            <p class="hint" id="foreignHint" style="display:none; color:var(--red)"></p>
           </div>
         </div>
       </div>
@@ -624,7 +655,29 @@
         <select id="contactListSelect"><option value="">Nenhuma — usar conversas/manual abaixo</option></select>
         <p class="hint" id="listContactsHint" style="margin-bottom:12px"></p>
 
-        <div class="recipients-toolbar">
+        <div class="recipients-block">
+          <label class="field-label">Importar uma lista (planilha CSV com nome e telefone)</label>
+          <div class="attach-row" style="margin-top:0">
+            <label class="attach-label" for="csvInput">📄 Escolher arquivo CSV</label>
+            <input type="file" id="csvInput" accept=".csv,text/csv,text/plain">
+            <span id="csvChipWrap"></span>
+          </div>
+          <p class="hint">Só pra esta transmissão — não grava na sua agenda. Colunas aceitas: <code>nome</code> e <code>telefone</code> (ou celular/whatsapp), com DDI. Telefones repetidos são unidos.</p>
+        </div>
+
+        <div class="recipients-block">
+          <label class="field-label" for="agendaSearch">Escolher contatos da agenda</label>
+          <input type="text" id="agendaSearch" placeholder="Buscar por nome ou telefone…" autocomplete="off">
+          <div class="recipients-toolbar" style="margin-top:8px">
+            <span id="agendaCount">Carregando agenda…</span>
+            <button type="button" id="agendaToggleBtn">Marcar todos os filtrados</button>
+          </div>
+          <div class="recipients-list compact" id="agendaList">
+            <p class="empty" style="padding:10px">Carregando agenda…</p>
+          </div>
+        </div>
+
+        <div class="recipients-toolbar" style="margin-top:14px">
           <span id="recipientsCount">0 selecionados no total</span>
           <button type="button" id="toggleAllBtn">Marcar todas as conversas</button>
         </div>
@@ -637,13 +690,17 @@
       </div>
 
       <div class="panel">
-        <h2>3. Mensagem</h2>
+        <h2>3. Mensagens</h2>
         <div class="template-row">
           <select id="templateSelect"><option value="">Escrever mensagem manualmente</option></select>
           <button class="btn secondary" id="saveTemplateBtn" type="button">Salvar como modelo</button>
         </div>
+        <div class="variant-head"><label class="field-label" for="messageText">Versão 1</label></div>
         <textarea id="messageText" placeholder="Olá {{nome}}, tudo bem? Temos uma novidade pra você…" style="min-height:100px"></textarea>
-        <p class="hint">Use <code>{{nome}}</code> e <code>{{telefone}}</code> — são substituídos automaticamente pra cada destinatário (contatos sem nome cadastrado recebem o telefone no lugar de {{nome}}).</p>
+        <div id="extraVariants"></div>
+        <button type="button" class="btn secondary variant-add" id="addVariantBtn">+ Adicionar outra versão da mensagem</button>
+        <p class="hint" id="variantsHint">Escreva a mesma mensagem de jeitos diferentes: o envio alterna as versões na ordem (1, 2, 3, 1, 2, 3…) entre os destinatários, o que reduz a chance de bloqueio.</p>
+        <p class="hint">Use <code>{{nome}}</code> e <code>{{telefone}}</code> — são substituídos automaticamente pra cada destinatário (contatos sem nome cadastrado recebem o telefone no lugar de {{nome}}). O anexo e o link do YouTube valem pra todas as versões.</p>
 
         <div class="attach-row">
           <label class="attach-label" for="mediaInput">📎 Anexar imagem, áudio ou vídeo (até 15MB)</label>
@@ -698,9 +755,9 @@
         <p class="hint" style="margin-bottom:12px">
           Intervalos maiores reduzem (não eliminam) o risco de bloqueio pelo
           WhatsApp — sem preencher nada, usa o padrão "Rápido" de sempre.
-          Máximo de 100 destinatários por campanha.
+          Máximo de <span id="maxRecipientsText">100</span> destinatários por lista.
         </p>
-        <button class="send-btn" id="sendCampaignBtn">Enviar campanha</button>
+        <button class="send-btn" id="sendCampaignBtn">Iniciar transmissão</button>
 
         <div id="scheduleSuccessBox" class="warning-banner" style="display:none; margin-top:16px; background: rgba(var(--green-rgb),.1); border-color: rgba(var(--green-rgb),.3); color: var(--green);"></div>
 
@@ -738,6 +795,7 @@
             </div>
           </div>
         </div>
+        <div class="variant-tabs" id="previewTabs" style="display:none; margin: 10px 0 0"></div>
         <p class="preview-hint">Mostra o 1º destinatário selecionado</p>
       </div>
     </div>
@@ -1289,10 +1347,36 @@
   const statFailed = document.getElementById('statFailed');
   const statTotal = document.getElementById('statTotal');
   const statStatus = document.getElementById('statStatus');
+  const csvInput = document.getElementById('csvInput');
+  const csvChipWrap = document.getElementById('csvChipWrap');
+  const agendaSearch = document.getElementById('agendaSearch');
+  const agendaList = document.getElementById('agendaList');
+  const agendaCount = document.getElementById('agendaCount');
+  const agendaToggleBtn = document.getElementById('agendaToggleBtn');
+  const extraVariants = document.getElementById('extraVariants');
+  const addVariantBtn = document.getElementById('addVariantBtn');
+  const variantsHint = document.getElementById('variantsHint');
+  const previewTabs = document.getElementById('previewTabs');
+  const maxRecipientsText = document.getElementById('maxRecipientsText');
+  const instanceFilter = document.getElementById('instanceFilter');
+  const instanceHint = document.getElementById('instanceHint');
+  const foreignHint = document.getElementById('foreignHint');
+  const blockedBox = document.getElementById('blockedBox');
+  const banWarning = document.getElementById('banWarning');
+  const layoutEl = document.querySelector('.layout');
 
+  let ownInstances = []; // instâncias do próprio usuário (GET /instances)
+  let foreignInstances = []; // só admin: instâncias de outras pessoas (GET /admin/campaign-instances)
+  const foreignById = new Map();
   let conversations = [];
   let templates = [];
   let selectedListContacts = []; // [{id, name, phone}] da lista escolhida
+  let agendaContacts = []; // [{id, name, phone}] — agenda inteira do dono
+  const agendaSelected = new Map(); // phone -> {phone, name} marcados na agenda
+  let csvContacts = []; // [{name, phone}] importados do CSV (só desta transmissão)
+  let csvFileName = '';
+  let previewVariant = 0; // índice da versão mostrada no preview
+  const limits = { maxRecipients: 100, maxVariants: 10, allowed: true, isAdmin: false }; // atualizado por loadLimits()
   let attachedMedia = null; // { type, mimetype, dataBase64, fileName }
   let sendMode = 'now'; // 'now' | 'schedule'
   let myOwnerId = null;
@@ -1303,7 +1387,7 @@
       sendMode = btn.dataset.mode;
       sendModeSwitch.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
       scheduleFields.style.display = sendMode === 'schedule' ? 'block' : 'none';
-      sendBtn.textContent = sendMode === 'schedule' ? 'Agendar campanha' : 'Enviar campanha';
+      sendBtn.textContent = sendMode === 'schedule' ? 'Agendar transmissão' : 'Iniciar transmissão';
       scheduleSuccessBox.style.display = 'none';
     });
   });
@@ -1321,10 +1405,6 @@
     });
   });
 
-  function currentSession() {
-    return mySessionId;
-  }
-
   function getManualPhones() {
     return manualPhones.value
       .split(/[\n,]/)
@@ -1332,53 +1412,107 @@
       .filter(Boolean);
   }
 
-  // Junta lista de contatos + checkboxes de conversas + números manuais,
-  // sem duplicar por telefone (mantém o nome, quando disponível).
+  // Junta lista de contatos + agenda + CSV + checkboxes de conversas + números
+  // manuais, sem duplicar por telefone. Se o mesmo telefone aparece em mais
+  // de uma fonte, fica com o primeiro nome não-vazio.
   function getSelectedRecipients() {
     const map = new Map();
+    const add = (phone, name) => {
+      if (!phone) return;
+      const existing = map.get(phone);
+      if (!existing) map.set(phone, { phone, name: name || null });
+      else if (!existing.name && name) existing.name = name;
+    };
 
-    for (const c of selectedListContacts) {
-      if (c.phone) map.set(c.phone, { phone: c.phone, name: c.name || null });
-    }
-    recipientsList.querySelectorAll('input[type="checkbox"]:checked').forEach((el) => {
-      const phone = el.dataset.phone;
-      if (phone && !map.has(phone)) map.set(phone, { phone, name: null });
-    });
-    getManualPhones().forEach((phone) => {
-      if (!map.has(phone)) map.set(phone, { phone, name: null });
-    });
+    for (const c of selectedListContacts) add(c.phone, c.name);
+    for (const c of agendaSelected.values()) add(c.phone, c.name);
+    for (const c of csvContacts) add(c.phone, c.name);
+    recipientsList.querySelectorAll('input[type="checkbox"]:checked').forEach((el) => add(el.dataset.phone, null));
+    getManualPhones().forEach((phone) => add(phone, null));
 
     return [...map.values()];
   }
 
   function refreshSelectionUi() {
     const total = getSelectedRecipients().length;
-    recipientsCount.textContent = `${total} selecionado${total === 1 ? '' : 's'} no total`;
+    const over = total > limits.maxRecipients;
+    recipientsCount.textContent = `${total} selecionado${total === 1 ? '' : 's'} no total` +
+      (over ? ` — passa do limite de ${limits.maxRecipients}` : '');
+    recipientsCount.classList.toggle('over-limit', over);
+    renderVariantsHint();
     renderPreview();
   }
 
   // ---------------- Instâncias ----------------
+
+  function instanceOptionHtml(i) {
+    return `<option value="${escapeHtml(i.id)}">${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})</option>`;
+  }
+
+  // Próprias primeiro (sempre visíveis); as de outras pessoas (só admin) num
+  // grupo à parte, filtráveis — são centenas. A instância selecionada no
+  // momento nunca some da lista por causa do filtro.
+  function renderInstanceSelect() {
+    const keep = instanceSelect.value;
+    const raw = instanceFilter.value.trim();
+    const q = normalizeSearch(raw);
+    const qDigits = raw.replace(/\D/g, '');
+    const match = (i) => !q
+      || i.id === keep
+      || normalizeSearch((i.displayLabel || i.label) + ' ' + (i.ownerName || '')).includes(q)
+      || (qDigits && String(i.phone || '').includes(qDigits));
+    const foreign = foreignInstances.filter(match);
+    let html = ownInstances.map(instanceOptionHtml).join('');
+    if (foreign.length) {
+      html += `<optgroup label="Instâncias de outras pessoas (${foreign.length})">${foreign.map(instanceOptionHtml).join('')}</optgroup>`;
+    }
+    instanceSelect.innerHTML = html || '<option value="">Nenhuma instância encontrada</option>';
+    if (keep && [...instanceSelect.options].some((o) => o.value === keep)) instanceSelect.value = keep;
+    if (instanceSelect.value !== mySessionId) {
+      mySessionId = instanceSelect.value;
+      onSessionChange();
+    }
+  }
+
+  function showBlocked() {
+    blockedBox.style.display = 'block';
+    banWarning.style.display = 'none';
+    layoutEl.style.display = 'none';
+  }
 
   async function initInstances() {
     try {
       myOwnerId = await resolveOwner();
       startPresenceHeartbeat();
       revealAdminNavItemIfSuperAdmin();
+      await loadLimits();
+      // por enquanto só admin cria lista (o servidor também recusa — ver
+      // CAMPAIGN_ADMIN_ONLY em src/routes/whatsapp.js)
+      if (!limits.allowed) { showBlocked(); return; }
+      loadAgenda();
       const res = await apiFetch(`${API_BASE}/whatsapp/instances?owner=${encodeURIComponent(myOwnerId)}`, { headers: FETCH_HEADERS });
       const data = await res.json();
-      const list = data.instances || [];
-      if (!list.length) {
+      ownInstances = data.instances || [];
+
+      if (limits.isAdmin) {
+        try {
+          const r2 = await apiFetch(`${API_BASE}/whatsapp/admin/campaign-instances`, { headers: FETCH_HEADERS });
+          if (r2.ok) foreignInstances = (await r2.json()).instances || [];
+        } catch (err) {
+          console.error('Erro ao carregar instâncias de outras pessoas:', err);
+        }
+        foreignById.clear();
+        foreignInstances.forEach((i) => foreignById.set(i.id, i));
+        instanceFilter.style.display = '';
+        instanceHint.textContent = 'Como administrador, você também pode disparar pelo número de outras pessoas (grupo no fim da lista). As suas ficam no topo.';
+      }
+
+      if (!ownInstances.length && !foreignInstances.length) {
         instanceSelect.innerHTML = '<option value="">Nenhuma instância — conecte uma em Conexões do WhatsApp</option>';
         sendBtn.disabled = true;
         return;
       }
-      instanceSelect.innerHTML = list.map((i) => `
-        <option value="${escapeHtml(i.id)}">
-          ${escapeHtml(i.displayLabel || i.label)}${i.phone ? ' — ' + escapeHtml(i.phone) : ''} (${i.status === 'online' ? 'online' : 'offline'})
-        </option>
-      `).join('');
-      mySessionId = instanceSelect.value;
-      onSessionChange();
+      renderInstanceSelect();
     } catch (err) {
       instanceSelect.innerHTML = '<option value="">Falha ao carregar instâncias</option>';
       sendBtn.disabled = true;
@@ -1391,7 +1525,24 @@
     onSessionChange();
   });
 
+  instanceFilter.addEventListener('input', renderInstanceSelect);
+
+  // Modelos de mensagem são por instância e aparecem pro DONO dela — numa
+  // instância alheia o admin usa os da própria primeira instância, pra não
+  // deixar modelo dele na conta de outra pessoa.
+  function templateSession() {
+    return foreignById.has(mySessionId) ? (ownInstances[0]?.id || null) : mySessionId;
+  }
+
+  function updateForeignHint() {
+    const f = foreignById.get(mySessionId);
+    if (!f) { foreignHint.style.display = 'none'; return; }
+    foreignHint.textContent = `Atenção: o envio sai pelo WhatsApp de ${f.ownerName || 'outra pessoa'}${f.phone ? ' (' + f.phone + ')' : ''}. As mensagens aparecem na conversa dela e, se o número for bloqueado, o bloqueio é do número dela.`;
+    foreignHint.style.display = 'block';
+  }
+
   function onSessionChange() {
+    updateForeignHint();
     loadTemplates();
     loadContactLists();
   }
@@ -1434,6 +1585,254 @@
 
   manualPhones.addEventListener('input', refreshSelectionUi);
 
+  // ---------------- Limites (vêm do servidor) ----------------
+
+  async function loadLimits() {
+    try {
+      const res = await apiFetch(`${API_BASE}/whatsapp/campaign/limits`, { headers: FETCH_HEADERS });
+      if (!res.ok) return; // mantém o padrão (100 destinatários / 10 versões)
+      const data = await res.json();
+      if (Number(data.maxRecipients) > 0) limits.maxRecipients = Number(data.maxRecipients);
+      if (Number(data.maxVariants) > 0) limits.maxVariants = Number(data.maxVariants);
+      limits.allowed = data.allowed !== false;
+      limits.isAdmin = !!data.isAdmin;
+      maxRecipientsText.textContent = String(limits.maxRecipients);
+      refreshSelectionUi();
+    } catch (err) {
+      console.error('Erro ao carregar limites:', err);
+    }
+  }
+
+  // ---------------- Agenda (contatos já salvos) ----------------
+
+  const AGENDA_RENDER_LIMIT = 200; // linhas desenhadas por vez — agenda grande trava a tela se desenhar tudo
+  let agendaByPhone = new Map();
+
+  function normalizeSearch(str) {
+    return String(str || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  function filteredAgenda() {
+    const raw = agendaSearch.value.trim();
+    if (!raw) return agendaContacts;
+    const q = normalizeSearch(raw);
+    const qDigits = raw.replace(/\D/g, '');
+    return agendaContacts.filter((c) =>
+      normalizeSearch(c.name).includes(q) || (qDigits && String(c.phone).includes(qDigits))
+    );
+  }
+
+  // Só o texto do contador e do botão — chamado a cada clique numa caixinha,
+  // sem redesenhar a lista (redesenhar zeraria a rolagem).
+  function renderAgendaStatus() {
+    if (!agendaContacts.length) { agendaCount.textContent = 'Agenda vazia'; agendaToggleBtn.style.display = 'none'; return; }
+    const filtered = filteredAgenda();
+    const searching = !!agendaSearch.value.trim();
+    agendaCount.textContent = `${filtered.length} contato${filtered.length === 1 ? '' : 's'}${searching ? ' na busca' : ' na agenda'} · ${agendaSelected.size} marcado${agendaSelected.size === 1 ? '' : 's'}`;
+    const allMarked = filtered.length > 0 && filtered.every((c) => agendaSelected.has(c.phone));
+    agendaToggleBtn.style.display = filtered.length ? '' : 'none';
+    agendaToggleBtn.textContent = allMarked ? 'Desmarcar todos os filtrados' : 'Marcar todos os filtrados';
+  }
+
+  function renderAgenda() {
+    if (!agendaContacts.length) {
+      agendaList.innerHTML = '<p class="empty" style="padding:10px">Sua agenda está vazia. Cadastre contatos em Contatos ou importe um CSV acima.</p>';
+      renderAgendaStatus();
+      return;
+    }
+    const filtered = filteredAgenda();
+    if (!filtered.length) {
+      agendaList.innerHTML = '<p class="empty" style="padding:10px">Nenhum contato encontrado.</p>';
+      renderAgendaStatus();
+      return;
+    }
+    const shown = filtered.slice(0, AGENDA_RENDER_LIMIT);
+    agendaList.innerHTML = shown.map((c) => `
+      <label class="recipient-row">
+        <input type="checkbox" data-phone="${escapeHtml(c.phone)}"${agendaSelected.has(c.phone) ? ' checked' : ''}>
+        <span class="grow">${escapeHtml(c.name || c.phone)}</span>
+        <span class="meta">${c.name ? escapeHtml(c.phone) : ''}</span>
+      </label>
+    `).join('') + (filtered.length > shown.length
+      ? `<p class="empty" style="padding:8px 10px">Mostrando ${shown.length} de ${filtered.length} — refine a busca pra ver os outros.</p>`
+      : '');
+    renderAgendaStatus();
+  }
+
+  async function loadAgenda() {
+    try {
+      const res = await apiFetch(`${API_BASE}/contacts`, { headers: FETCH_HEADERS });
+      if (!res.ok) throw new Error((await res.json()).error || 'falha ao carregar a agenda');
+      const data = await res.json();
+      agendaContacts = (data.contacts || []).filter((c) => c.phone);
+      agendaByPhone = new Map(agendaContacts.map((c) => [c.phone, c]));
+      renderAgenda();
+    } catch (err) {
+      agendaList.innerHTML = '<p class="empty" style="padding:10px">Falha ao carregar a agenda.</p>';
+      agendaCount.textContent = '';
+      console.error('Erro ao carregar agenda:', err);
+    }
+  }
+
+  agendaSearch.addEventListener('input', renderAgenda);
+
+  agendaList.addEventListener('change', (e) => {
+    const el = e.target;
+    if (!el.matches('input[type="checkbox"]')) return;
+    const contact = agendaByPhone.get(el.dataset.phone);
+    if (!contact) return;
+    if (el.checked) agendaSelected.set(contact.phone, { phone: contact.phone, name: contact.name || null });
+    else agendaSelected.delete(contact.phone);
+    renderAgendaStatus();
+    refreshSelectionUi();
+  });
+
+  agendaToggleBtn.addEventListener('click', () => {
+    const filtered = filteredAgenda();
+    const allMarked = filtered.length > 0 && filtered.every((c) => agendaSelected.has(c.phone));
+    for (const c of filtered) {
+      if (allMarked) agendaSelected.delete(c.phone);
+      else agendaSelected.set(c.phone, { phone: c.phone, name: c.name || null });
+    }
+    renderAgenda();
+    refreshSelectionUi();
+  });
+
+  // ---------------- Importar CSV (só pra esta transmissão) ----------------
+
+  const MAX_CSV_BYTES = 2 * 1024 * 1024;
+
+  function renderCsvChip() {
+    if (!csvContacts.length) { csvChipWrap.innerHTML = ''; return; }
+    csvChipWrap.innerHTML = `
+      <span class="attach-chip">
+        ${escapeHtml(csvFileName)} (${csvContacts.length} contato${csvContacts.length === 1 ? '' : 's'})
+        <button type="button" id="removeCsvBtn">✕</button>
+      </span>
+    `;
+    document.getElementById('removeCsvBtn').addEventListener('click', () => {
+      csvContacts = [];
+      csvFileName = '';
+      csvInput.value = '';
+      renderCsvChip();
+      refreshSelectionUi();
+    });
+  }
+
+  csvInput.addEventListener('change', () => {
+    const file = csvInput.files[0];
+    if (!file) return;
+    if (file.size > MAX_CSV_BYTES) {
+      if (window.showToast) window.showToast('Arquivo muito grande (máximo 2MB).', 'error');
+      csvInput.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const res = await apiFetch(`${API_BASE}/contacts/parse-csv`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csvText: String(reader.result || '') }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'falha ao ler o CSV');
+        if (!data.contacts.length) throw new Error('nenhum telefone válido encontrado no arquivo');
+        csvContacts = data.contacts;
+        csvFileName = file.name;
+        renderCsvChip();
+        refreshSelectionUi();
+        if (window.showToast) {
+          window.showToast(`${data.contacts.length} contato(s) importado(s)` + (data.skipped ? `, ${data.skipped} linha(s) sem telefone válido ignorada(s).` : '.'), 'success');
+        }
+      } catch (err) {
+        csvInput.value = '';
+        if (window.showToast) window.showToast(err.message, 'error');
+      }
+    };
+    reader.onerror = () => {
+      csvInput.value = '';
+      if (window.showToast) window.showToast('Não consegui ler o arquivo.', 'error');
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------------- Versões da mensagem ----------------
+
+  const DEFAULT_VARIANTS_HINT = variantsHint.textContent;
+
+  function variantInputs() {
+    return [messageText, ...extraVariants.querySelectorAll('textarea')];
+  }
+
+  // Textos prontos pra enviar: sem vazios e sem repetidos (o servidor faz o
+  // mesmo), cada um com o link do YouTube no fim. Se TODAS as versões estão
+  // vazias, vale só o link (comportamento de sempre pra campanha só-link).
+  function getVariantTexts() {
+    const filled = variantInputs().map((el) => el.value.trim()).filter(Boolean);
+    const list = [];
+    for (const t of (filled.length ? filled : [''])) {
+      const full = withYoutubeUrl(t);
+      if (full && !list.includes(full)) list.push(full);
+    }
+    return list;
+  }
+
+  function renderVariantsHint(total) {
+    const n = getVariantTexts().length;
+    const count = total == null ? getSelectedRecipients().length : total;
+    if (n <= 1) {
+      variantsHint.textContent = DEFAULT_VARIANTS_HINT;
+    } else {
+      variantsHint.textContent = `${n} versões, alternadas na ordem (1, 2, 3…)` +
+        (count ? ` — com ${count} destinatário${count === 1 ? '' : 's'}, cerca de ${Math.ceil(count / n)} recebem cada versão.` : '.');
+    }
+    addVariantBtn.disabled = variantInputs().length >= limits.maxVariants;
+  }
+
+  function renumberVariants() {
+    extraVariants.querySelectorAll('.variant').forEach((wrap, i) => {
+      wrap.querySelector('label').textContent = `Versão ${i + 2}`;
+    });
+  }
+
+  function addVariant() {
+    if (variantInputs().length >= limits.maxVariants) {
+      if (window.showToast) window.showToast(`Máximo de ${limits.maxVariants} versões.`, 'error');
+      return;
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'variant';
+    wrap.innerHTML = `
+      <div class="variant-head">
+        <label class="field-label"></label>
+        <button type="button" class="variant-remove">Remover</button>
+      </div>
+      <textarea placeholder="Outro jeito de escrever a mesma mensagem — {{nome}} também funciona aqui" style="min-height:100px"></textarea>
+    `;
+    extraVariants.appendChild(wrap);
+    renumberVariants();
+    const ta = wrap.querySelector('textarea');
+    ta.addEventListener('input', () => { renderVariantsHint(); renderPreview(); });
+    wrap.querySelector('.variant-remove').addEventListener('click', () => {
+      wrap.remove();
+      renumberVariants();
+      refreshSelectionUi();
+    });
+    previewVariant = variantInputs().length - 1; // já mostra a versão nova no preview
+    refreshSelectionUi();
+    ta.focus();
+  }
+
+  addVariantBtn.addEventListener('click', addVariant);
+
+  previewTabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-variant]');
+    if (!btn) return;
+    previewVariant = Number(btn.dataset.variant);
+    renderPreview();
+  });
+
   // ---------------- Listas de contatos ----------------
 
   async function loadContactLists() {
@@ -1474,8 +1873,14 @@
   // ---------------- Modelos de mensagem ----------------
 
   async function loadTemplates() {
+    const tplSession = templateSession();
+    if (!tplSession) {
+      templates = [];
+      templateSelect.innerHTML = '<option value="">Escrever mensagem manualmente</option>';
+      return;
+    }
     try {
-      const res = await apiFetch(`${API_BASE}/templates?session=${encodeURIComponent(currentSession())}`, { headers: FETCH_HEADERS });
+      const res = await apiFetch(`${API_BASE}/templates?session=${encodeURIComponent(tplSession)}`, { headers: FETCH_HEADERS });
       const data = await res.json();
       templates = data.templates || [];
       templateSelect.innerHTML = '<option value="">Escrever mensagem manualmente</option>' +
@@ -1495,6 +1900,8 @@
   saveTemplateBtn.addEventListener('click', async () => {
     const body = messageText.value.trim();
     if (!body) { if (window.showToast) window.showToast('Escreva a mensagem antes de salvar como modelo.', 'error'); return; }
+    const tplSession = templateSession();
+    if (!tplSession) { if (window.showToast) window.showToast('Você precisa ter uma instância sua pra salvar modelos.', 'error'); return; }
     const name = prompt('Nome do modelo:');
     if (!name || !name.trim()) return;
 
@@ -1502,7 +1909,7 @@
       const res = await apiFetch(`${API_BASE}/templates`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: currentSession(), name: name.trim(), body }),
+        body: JSON.stringify({ session: tplSession, name: name.trim(), body }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       await loadTemplates();
@@ -1512,8 +1919,8 @@
     }
   });
 
-  messageText.addEventListener('input', renderPreview);
-  youtubeUrlInput.addEventListener('input', renderPreview);
+  messageText.addEventListener('input', () => { renderVariantsHint(); renderPreview(); });
+  youtubeUrlInput.addEventListener('input', () => { renderVariantsHint(); renderPreview(); });
 
   // ---------------- Anexo ----------------
 
@@ -1601,7 +2008,16 @@
   function renderPreview() {
     const recipients = getSelectedRecipients();
     const sample = recipients[0] || { phone: '5599999999999', name: 'Cliente Exemplo' };
-    const rendered = withYoutubeUrl(renderTemplateClient(messageText.value || '', sample));
+
+    // abas "Versão N" só aparecem com mais de uma versão escrita
+    const inputs = variantInputs();
+    if (previewVariant >= inputs.length) previewVariant = inputs.length - 1;
+    previewTabs.style.display = inputs.length > 1 ? 'flex' : 'none';
+    previewTabs.innerHTML = inputs.length > 1
+      ? inputs.map((_, i) => `<button type="button" data-variant="${i}"${i === previewVariant ? ' class="active"' : ''}>Versão ${i + 1}</button>`).join('')
+      : '';
+
+    const rendered = withYoutubeUrl(renderTemplateClient(inputs[previewVariant].value || '', sample));
 
     const displayName = sample.name || sample.phone;
     previewContactName.textContent = displayName;
@@ -1666,12 +2082,15 @@
       if (window.showToast) window.showToast('O link precisa ser do YouTube (youtube.com ou youtu.be).', 'error');
       return;
     }
-    const text = withYoutubeUrl(messageText.value.trim());
+    // todas as versões escritas (sem vazias/repetidas); o servidor alterna
+    // entre elas na ordem. `text` = 1ª versão, mantido por compatibilidade.
+    const texts = getVariantTexts();
+    const text = texts[0] || '';
 
     if (!session) { if (window.showToast) window.showToast('Não foi possível identificar sua sessão do WhatsApp.', 'error'); return; }
     if (!recipients.length) { if (window.showToast) window.showToast('Selecione ao menos um destinatário.', 'error'); return; }
     if (!text && !attachedMedia) { if (window.showToast) window.showToast('Escreva a mensagem, cole um link do YouTube ou anexe uma mídia.', 'error'); return; }
-    if (recipients.length > 100) { if (window.showToast) window.showToast('Máximo de 100 destinatários por campanha.', 'error'); return; }
+    if (recipients.length > limits.maxRecipients) { if (window.showToast) window.showToast(`Máximo de ${limits.maxRecipients} destinatários por lista.`, 'error'); return; }
 
     const mediaPayload = attachedMedia
       ? { type: attachedMedia.type, mimetype: attachedMedia.mimetype, dataBase64: attachedMedia.dataBase64 }
@@ -1688,6 +2107,18 @@
     const delayPayload = hasValidDelay
       ? { minDelayMs: Math.round(delayMinSec * 1000), maxDelayMs: Math.round(delayMaxSec * 1000) }
       : {};
+
+    // Disparo pelo número de outra pessoa (só admin): confirma ANTES de tudo,
+    // valendo pra "enviar agora" e pra "agendar".
+    const foreignInst = foreignById.get(session);
+    if (foreignInst) {
+      const okForeign = await window.confirmDialog(
+        `Esta lista vai sair pelo WhatsApp de ${foreignInst.ownerName || 'outra pessoa'}` +
+        `${foreignInst.phone ? ' (' + foreignInst.phone + ')' : ''}, não pelo seu. ` +
+        `As mensagens vão aparecer na conversa dela. Confirma?`
+      );
+      if (!okForeign) return;
+    }
 
     // Aviso de risco (erro 463 do WhatsApp — "account restricted or missing
     // tctoken", exige token de privacidade antes de deixar iniciar conversa
@@ -1739,6 +2170,7 @@
             name: campaignName.value.trim() || undefined,
             recipients,
             text,
+            texts,
             media: mediaPayload,
             scheduledAt: scheduledDate.toISOString(),
             ...delayPayload,
@@ -1758,8 +2190,9 @@
     }
 
     const confirmed = await window.confirmDialog(
-      `Isso vai mandar essa mensagem pra ${recipients.length} contato(s), um de cada vez, ` +
-      `com alguns segundos de intervalo entre cada envio (pode demorar alguns minutos). ` +
+      `Isso vai mandar ${texts.length > 1 ? `${texts.length} versões da mensagem, alternadas,` : 'essa mensagem'} pra ${recipients.length} contato(s), um de cada vez, ` +
+      `com intervalo entre cada envio. O envio continua mesmo se você fechar esta página, ` +
+      `mas é interrompido se o sistema for reiniciado. ` +
       `Tem certeza que quer continuar?`
     );
     if (!confirmed) return;
@@ -1782,6 +2215,7 @@
           name: campaignName.value.trim() || undefined,
           recipients,
           text,
+          texts,
           media: mediaPayload,
           ...delayPayload,
         }),

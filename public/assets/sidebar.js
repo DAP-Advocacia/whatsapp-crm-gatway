@@ -25,6 +25,7 @@
   var ICONS = {
     chat: '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
     contacts: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    broadcast: '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
     phone: '<rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>',
     admin: '<path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z"/>',
     help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
@@ -103,6 +104,8 @@
       '<div class="nav-section' + rev + '" id="navSectionAdmin">' +
         '<div class="nav-section-label">Admin</div>' +
         item('/admin.html', 'admin', 'Admin', { id: 'navAdminItem', cls: startRevealed ? 'revealed' : '' }) +
+        // Lista de transmissão: por enquanto só admin (11/11) — revela junto com o item Admin.
+        item('/campaign.html', 'broadcast', 'Lista de transmissão', { id: 'navBroadcastItem', cls: startRevealed ? 'revealed' : '' }) +
       '</div>' +
     '</nav>' +
     '<button type="button" id="themeToggleBtn" class="nav-item theme-toggle-item">' +
@@ -128,11 +131,13 @@
   // Quando a tela revela o item Admin (whoami), guarda no cache e abre a seção.
   var adminItem = document.getElementById('navAdminItem');
   var adminSection = document.getElementById('navSectionAdmin');
+  var broadcastItem = document.getElementById('navBroadcastItem');
   if (adminItem && typeof MutationObserver === 'function') {
     new MutationObserver(function () {
       if (adminItem.classList.contains('revealed')) {
         cacheAdmin();
         if (adminSection) adminSection.classList.add('revealed');
+        if (broadcastItem) broadcastItem.classList.add('revealed');
       }
     }).observe(adminItem, { attributes: true, attributeFilter: ['class'] });
   }

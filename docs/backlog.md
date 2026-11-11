@@ -37,3 +37,9 @@
 12. `stop_grace_period` de 10 s para 30–60 s.
 13. Aviso no Chat de sessão desconectada/desatualizada; levantar quantas pessoas estão assim.
 14. Rotacionar a senha do banco (apareceu em saída de terminal em 2026-11-03).
+
+## Lista de transmissão (/campaign.html, 11/11)
+23. **Fila persistente**: o envio roda em memória no processo principal (`src/campaigns.js`). Deploy ou reinício no meio interrompe a lista e o agendamento fica em `sending` para sempre. Fazer antes de subir `CAMPAIGN_MAX_RECIPIENTS` (padrão 100) ou de usar intervalos longos com listas grandes: destinatários e versões em tabela, retomada no boot.
+24. **SQL antes do deploy** (avulso, com `set lock_timeout='3s'`; sem ele só a lista com várias versões agendada falha): `alter table scheduled_campaigns add column if not exists templates jsonb;`
+25. Ideias: gerar versões da mensagem com IA (`src/openai.js`); contar envios por versão nas métricas (hoje só fica em memória, em `results[].variant`).
+26. **Acesso**: só o super admin cria/agenda lista de transmissão (`CAMPAIGN_ADMIN_ONLY`, padrão ligado; `=0` libera pra todos). O admin dispara, agenda e vê agenda/métricas pela instância de outra pessoa (`requireSessionOrAdmin`, `src/authz.js`; só nas rotas de campanha, o chat e as conversas seguem só do dono). Fica no `action_log` ("pela instância X"). O dono da instância não é avisado e vê as mensagens na conversa dele.

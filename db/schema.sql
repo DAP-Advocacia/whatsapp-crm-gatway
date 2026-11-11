@@ -733,6 +733,11 @@ alter table scheduled_campaigns add column if not exists retry_attempt int not n
 alter table scheduled_campaigns add column if not exists min_delay_ms int;
 alter table scheduled_campaigns add column if not exists max_delay_ms int;
 
+-- Lista de transmissão: várias versões do texto, alternadas na ordem durante
+-- o disparo (ver runCampaign, src/campaigns.js). Array jsonb de strings; nulo
+-- = só `template` (agendamento comum, ou criado antes desta coluna).
+alter table scheduled_campaigns add column if not exists templates jsonb;
+
 -- Gestão de usuários no Admin (ver HANDOFF, Parte CO) — trackeamento
 -- ponta a ponta de navegação, diferente de admin_presence (que é só o
 -- estado ATUAL, sobrescrito a cada heartbeat). Uma linha por VISITA a uma

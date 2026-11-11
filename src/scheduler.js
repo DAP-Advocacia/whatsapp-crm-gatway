@@ -54,6 +54,9 @@ async function sendScheduled(id, sessions) {
     sessionId: row.session_id,
     recipients,
     template: row.template,
+    // várias versões do texto (lista de transmissão) — nulo/ausente = só
+    // `template`. jsonb já vem parseado pelo driver.
+    templates: Array.isArray(row.templates) ? row.templates : null,
     media,
     // min_delay_ms/max_delay_ms nulos = agendamento antigo (criado antes
     // desta feature) ou sem escolha explícita — cai no padrão de sempre.

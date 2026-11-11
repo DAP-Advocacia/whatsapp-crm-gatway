@@ -1,5 +1,6 @@
 const instancesStore = require('./instances');
 const { getSubordinates } = require('./bitrixHierarchy');
+const { isSuperAdmin } = require('./adminAuth');
 
 /**
  * Checagem de posse/acesso: confirma que a(s) instância(s) de WhatsApp que a
@@ -73,6 +74,43 @@ function requireSession(extractor) {
   };
 }
 
+// Lista de transmissão: o super admin pode disparar/agendar/acompanhar por
+// QUALQUER instância real (linha em `instances`), mesmo sem ser dono nem
+// delegado. Só é usada nas rotas de campanha (ver *OrAdmin abaixo) — de
+// propósito NÃO foi colocada dentro de assertOwnsSession, que protege
+// chat/conversas/contatos de todo mundo (mesmo motivo de a hierarquia do
+// Bitrix estar desligada ali). Dapinho de outro dono nunca passa.
+async function adminCanUseSession(sessionIdOrCsv, ownerId) {
+  if (!isSuperAdmin(ownerId)) return false;
+  const ids = normalizeSessionIds(sessionIdOrCsv);
+  if (!ids.length) return false;
+  for (const id of ids) {
+    if (id === ownerId) continue;
+    if (isDapinhoSession(id)) return false;
+    if (!(await instancesStore.get(id))) return false;
+  }
+  return true;
+}
+
+// Igual a requireSession, mas deixa o super admin usar instância de outra
+// pessoa. `req.crossSession` fica true quando isso aconteceu (a rota usa
+// pra registrar no histórico de ações).
+function requireSessionOrAdmin(extractor) {
+  return async (req, res, next) => {
+    const raw = extractor(req);
+    if (!raw) return res.status(400).json({ error: 'session é obrigatório' });
+    if (await assertOwnsSession(raw, req.ownerId)) {
+      req.crossSession = false;
+    } else if (await adminCanUseSession(raw, req.ownerId)) {
+      req.crossSession = true;
+    } else {
+      return res.status(403).json({ error: 'sessão não pertence a este usuário' });
+    }
+    req.sessionIds = normalizeSessionIds(raw);
+    next();
+  };
+}
+
 // Middleware factory para rotas que operam por :id de um recurso (campanha,
 // agendamento, contato, lista, template) cujo dono não vem de um param que o
 // client manda, mas do próprio registro no banco. `lookupSessionId(req)`
@@ -88,6 +126,31 @@ function requireResourceSession(lookupSessionId) {
       return res.status(502).json({ error: err.message });
     }
     if (!sessionId || !(await assertOwnsSession(sessionId, req.ownerId))) {
+      return res.status(404).json({ error: 'não encontrado' });
+    }
+    req.resourceSessionId = sessionId;
+    next();
+  };
+}
+
+// Variante de requireResourceSession com a mesma exceção do super admin
+// (ver adminCanUseSession) — pra acompanhar/gerenciar campanhas e
+// agendamentos de uma instância alheia.
+function requireResourceSessionOrAdmin(lookupSessionId) {
+  return async (req, res, next) => {
+    let sessionId;
+    try {
+      sessionId = await lookupSessionId(req);
+    } catch (err) {
+      console.error('[authz] falha ao resolver dono do recurso:', err.message);
+      return res.status(502).json({ error: err.message });
+    }
+    if (!sessionId) return res.status(404).json({ error: 'não encontrado' });
+    if (await assertOwnsSession(sessionId, req.ownerId)) {
+      req.crossSession = false;
+    } else if (await adminCanUseSession(sessionId, req.ownerId)) {
+      req.crossSession = true;
+    } else {
       return res.status(404).json({ error: 'não encontrado' });
     }
     req.resourceSessionId = sessionId;
@@ -135,6 +198,8 @@ module.exports = {
   assertOwnsSession,
   requireSession,
   requireResourceSession,
+  requireSessionOrAdmin,
+  requireResourceSessionOrAdmin,
   requireOwnerMatch,
   requireResourceOwner,
   normalizeSessionIds,

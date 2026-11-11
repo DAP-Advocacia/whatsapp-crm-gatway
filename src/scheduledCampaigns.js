@@ -16,27 +16,38 @@ const { pool } = require('./db');
 // é um retry AUTOMÁTICO criado por src/campaigns.js (ver
 // scheduleCampaignRetry) após erro 463 — nulo/0 pra agendamento normal
 // criado pelo usuário.
-async function create({ id, sessionId, name, recipients, template, media, scheduledAt, minDelayMs, maxDelayMs, retryOfCampaignId, retryAttempt }) {
+// `templates` (lista de transmissão): array com as VERSÕES do texto, que o
+// envio alterna na ordem (ver runCampaign, src/campaigns.js). `template`
+// continua sendo a 1ª versão (e a única, no agendamento comum). A coluna
+// `templates` só entra no insert quando há mais de uma versão — assim um
+// agendamento de mensagem única segue funcionando mesmo se o ALTER TABLE
+// de db/schema.sql ainda não tiver sido aplicado no banco.
+async function create({ id, sessionId, name, recipients, template, templates, media, scheduledAt, minDelayMs, maxDelayMs, retryOfCampaignId, retryAttempt }) {
+  const columns = ['id', 'session_id', 'name', 'recipients', 'template', 'media_type', 'media_mimetype', 'media_base64', 'media_url', 'scheduled_at', 'min_delay_ms', 'max_delay_ms', 'retry_of_campaign_id', 'retry_attempt'];
+  const values = [
+    id,
+    sessionId,
+    name || null,
+    JSON.stringify(recipients),
+    template,
+    media?.type || null,
+    media?.mimetype || null,
+    media?.dataBase64 || null,
+    media?.url || null,
+    scheduledAt,
+    minDelayMs ?? null,
+    maxDelayMs ?? null,
+    retryOfCampaignId || null,
+    retryAttempt || 0,
+  ];
+  if (Array.isArray(templates) && templates.length > 1) {
+    columns.push('templates');
+    values.push(JSON.stringify(templates));
+  }
   await pool.query(
-    `insert into scheduled_campaigns
-       (id, session_id, name, recipients, template, media_type, media_mimetype, media_base64, media_url, scheduled_at, min_delay_ms, max_delay_ms, retry_of_campaign_id, retry_attempt)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-    [
-      id,
-      sessionId,
-      name || null,
-      JSON.stringify(recipients),
-      template,
-      media?.type || null,
-      media?.mimetype || null,
-      media?.dataBase64 || null,
-      media?.url || null,
-      scheduledAt,
-      minDelayMs ?? null,
-      maxDelayMs ?? null,
-      retryOfCampaignId || null,
-      retryAttempt || 0,
-    ]
+    `insert into scheduled_campaigns (${columns.join(', ')})
+     values (${columns.map((_, i) => `$${i + 1}`).join(', ')})`,
+    values
   );
 }
 
