@@ -105,7 +105,7 @@
         '<div class="nav-section-label">Admin</div>' +
         item('/admin.html', 'admin', 'Admin', { id: 'navAdminItem', cls: startRevealed ? 'revealed' : '' }) +
         // Lista de transmissão: por enquanto só admin (11/11) — revela junto com o item Admin.
-        item('/campaign.html', 'broadcast', 'Lista de transmissão', { id: 'navBroadcastItem', cls: startRevealed ? 'revealed' : '' }) +
+        item('/broadcast.html', 'broadcast', 'Lista de transmissão', { id: 'navBroadcastItem', cls: startRevealed ? 'revealed' : '' }) +
       '</div>' +
     '</nav>' +
     '<button type="button" id="themeToggleBtn" class="nav-item theme-toggle-item">' +

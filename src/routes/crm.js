@@ -9,7 +9,7 @@ const MAX_CSV_ROWS = 5000;
 
 /**
  * Rotas de "CRM próprio" do gateway: contatos, listas de contatos e modelos
- * de mensagem — tudo o que dá suporte à página de Campanha (public/campaign.html)
+ * de mensagem — tudo o que dá suporte à Lista de transmissão (public/broadcast.html)
  * e à página de Contatos (public/contacts.html). Montado em /api, atrás do
  * middleware requireAuth (ver server.js) — req.ownerId já é a identidade
  * real do usuário Bitrix.
