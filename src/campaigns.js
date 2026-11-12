@@ -59,7 +59,10 @@ async function createCampaign(total, meta = {}) {
     total,
     sent: 0,
     failed: 0,
-    status: 'running', // 'running' | 'done'
+    status: 'running', // 'running' | 'done' (o histórico no banco só conhece estes dois; pausa é só em memória)
+    paused: false, // instância offline, esperando voltar (a tela mostra "pausada")
+    pausedAt: null,
+    abortReason: null, // preenchido se desistiu por instância offline por tempo demais
     results: [], // { phone, ok, error? }
   });
 
@@ -88,6 +91,34 @@ function renderTemplate(template, recipient) {
     .replace(/\{\{\s*telefone\s*\}\}/gi, recipient.phone);
 }
 
+// Instância caiu no meio da lista (queda 503, deploy, reconexão do boot): em vez de marcar
+// todo mundo que falta como falhado, o envio PAUSA e retoma sozinho quando ela volta. Passou
+// de OFFLINE_MAX_WAIT_MS fora do ar, desiste e marca o resto como "não enviado" (não houve
+// tentativa de envio nenhuma pra eles). 30 min cobre quedas curtas; o boot completo leva ~75 min.
+const OFFLINE_POLL_MS = Number(process.env.CAMPAIGN_OFFLINE_POLL_MS) || 5000;
+const OFFLINE_MAX_WAIT_MS = Number(process.env.CAMPAIGN_OFFLINE_MAX_WAIT_MS) || 30 * 60 * 1000;
+const NOT_CONNECTED_MSG = 'WhatsApp não está conectado no momento'; // src/whatsapp.js, lançado ANTES de qualquer envio
+const MAX_NOT_CONNECTED_RETRIES = 3; // status dizia "online" mas o envio recusou: corrida entre a queda e o espelho de status
+
+// true = online (retomou, se estava pausada); false = desistiu depois de OFFLINE_MAX_WAIT_MS.
+async function waitForOnline(gateway, campaign, campaignId) {
+  if (gateway.getStatus() === 'online') return true;
+  campaign.paused = true;
+  campaign.pausedAt = new Date().toISOString();
+  console.warn(`[campaign] ${campaignId} pausada: instância ${campaign.sessionId} offline (espera até ${Math.round(OFFLINE_MAX_WAIT_MS / 60000)} min)`);
+  const deadline = Date.now() + OFFLINE_MAX_WAIT_MS;
+  while (Date.now() < deadline) {
+    await sleep(OFFLINE_POLL_MS);
+    if (gateway.getStatus() === 'online') {
+      campaign.paused = false;
+      console.log(`[campaign] ${campaignId} retomada: instância ${campaign.sessionId} voltou`);
+      return true;
+    }
+  }
+  campaign.paused = false;
+  return false;
+}
+
 // Roda em segundo plano (não é `await`ado pelo caller) — o progresso é
 // consultado depois via getCampaign(id). retryAttempt (0 = campanha normal,
 // 1 = ela mesma É o retry automático de outra) propaga pra
@@ -101,7 +132,27 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, templ
   // `template` sozinho (campanha comum, agendamento antigo) = 1 versão só.
   const variants = Array.isArray(templates) && templates.length ? templates : [template];
 
+  let notConnectedRetries = 0;
   for (let i = 0; i < recipients.length; i++) {
+    // Instância offline: espera voltar; se não voltar a tempo, os que faltam não são enviados.
+    if (!(await waitForOnline(gateway, campaign, id))) {
+      const reason = `não enviado: o WhatsApp ficou offline por mais de ${Math.round(OFFLINE_MAX_WAIT_MS / 60000)} min`;
+      console.warn(`[campaign] ${id} interrompida: ${recipients.length - i} contato(s) não enviados (instância offline)`);
+      for (let j = i; j < recipients.length; j++) {
+        campaign.failed++;
+        campaign.results.push({ phone: recipients[j].phone, ok: false, error: reason, variant: j % variants.length, notSent: true });
+        campaignStore.recordResult(id, recipients[j].phone, false, reason).catch((e) => console.error('[campaign] falha ao gravar envio:', e.message));
+      }
+      campaign.abortReason = reason;
+      campaignStore.updateProgress(id, campaign.sent, campaign.failed).catch((err) => console.error('[campaign] falha ao atualizar progresso:', err.message));
+      break;
+    }
+    // Voltou depois de uma pausa: não manda na hora, espera um intervalo normal (a sessão acabou de reconectar).
+    if (campaign.pausedAt) {
+      campaign.pausedAt = null;
+      await sleep(minDelayMs + Math.random() * (maxDelayMs - minDelayMs));
+    }
+
     const recipient = recipients[i];
     const phone = recipient.phone;
     const variantTemplate = variants[i % variants.length];
@@ -152,11 +203,20 @@ async function runCampaign(id, { gateway, sessionId, recipients, template, templ
       campaign.results.push({ phone, ok: true, variant: i % variants.length });
       campaignStore.recordResult(id, phone, true).catch((err) => console.error('[campaign] falha ao gravar envio:', err.message));
     } catch (err) {
+      // Caiu entre a checagem de status e o envio: nada foi enviado (o erro é lançado antes),
+      // então tenta o MESMO contato de novo (volta ao topo, que espera a instância voltar).
+      if (err.message === NOT_CONNECTED_MSG && notConnectedRetries < MAX_NOT_CONNECTED_RETRIES) {
+        notConnectedRetries++;
+        i--;
+        await sleep(OFFLINE_POLL_MS);
+        continue;
+      }
       campaign.failed++;
       campaign.results.push({ phone, ok: false, error: err.message, variant: i % variants.length });
       campaignStore.recordResult(id, phone, false, err.message).catch((e) => console.error('[campaign] falha ao gravar envio:', e.message));
     }
 
+    notConnectedRetries = 0; // o contato foi resolvido (enviado ou falha definitiva)
     campaignStore.updateProgress(id, campaign.sent, campaign.failed).catch((err) => console.error('[campaign] falha ao atualizar progresso:', err.message));
 
     // intervalo com variação, pra não mandar tudo num ritmo robótico constante

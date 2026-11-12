@@ -374,6 +374,8 @@
   .result-ic{ width:64px; height:64px; margin:0 auto 14px; border-radius:50%; display:grid; place-items:center; background:rgba(var(--gold-rgb),.15); color:var(--gold); }
   .result-ic .ic{ width:30px; height:30px; }
   .result-ic.ok{ background:rgba(var(--green-rgb),.16); color:var(--green); }
+  .result-ic.warn{ background:rgba(var(--red-rgb),.1); color:var(--red); }
+  .result-ic.bad{ background:rgba(var(--red-rgb),.14); color:var(--red); }
   .result h2{ font-family:'Fraunces',serif; font-weight:600; font-size:25px; margin:0 0 6px; }
   .result p{ margin:0 auto; max-width:480px; color:var(--text-muted); font-size:13.5px; line-height:1.6; }
   .big-pct{ margin:20px 0 10px; font-family:'Fraunces',serif; font-size:58px; font-weight:600; line-height:1; color:var(--gold); }
@@ -2096,12 +2098,23 @@
   }
   function renderProgress(c, lost) {
     const finished = c.status === 'done';
+    const paused = !finished && !lost && c.paused === true;
+    const notSent = (c.results || []).filter((r) => r.notSent).length; // instância offline demais: nenhuma tentativa de envio
+    const failed = Math.max(0, c.failed - notSent);
+    const aborted = finished && !!c.abortReason;
     const pct = c.total ? Math.round(((c.sent + c.failed) / c.total) * 100) : 0;
-    $('resultBody').innerHTML = '<div class="result"><div class="result-ic' + (finished ? ' ok' : '') + '">' + icon(finished ? 'check' : 'send') + '</div>' +
-      '<h2>' + (lost ? 'Acompanhamento interrompido' : finished ? 'Transmissão concluída' : 'Enviando…') + '</h2>' +
-      '<p>' + (lost ? 'Perdi o acompanhamento (o sistema pode ter reiniciado). Veja o resultado final nas Métricas.' : finished ? 'Todos os contatos foram processados.' : 'Pode fechar esta página: o envio continua no servidor. Se o sistema for reiniciado, ele para.') + '</p>' +
+    const iconCls = aborted ? ' bad' : paused ? ' warn' : finished ? ' ok' : '';
+    const title = lost ? 'Acompanhamento interrompido' : aborted ? 'Transmissão interrompida' : paused ? 'Pausada: o WhatsApp está offline' : finished ? 'Transmissão concluída' : 'Enviando…';
+    const text = lost ? 'Perdi o acompanhamento (o sistema pode ter reiniciado). Veja o resultado final nas Métricas.'
+      : aborted ? 'O WhatsApp ficou offline por tempo demais. ' + plural(notSent, 'contato não foi enviado', 'contatos não foram enviados') + ': nenhuma mensagem saiu para eles, então dá para fazer uma nova transmissão só com esses números.'
+      : paused ? 'O envio retoma sozinho quando o número voltar. Se ficar mais de 30 minutos fora, os contatos que faltam não são enviados.'
+      : finished ? 'Todos os contatos foram processados.'
+      : 'Pode fechar esta página: o envio continua no servidor. Se o sistema for reiniciado, ele para.';
+    const third = finished ? { cls: notSent ? ' bad' : '', n: notSent, label: 'Não enviadas' } : { cls: '', n: Math.max(0, c.total - c.sent - c.failed), label: 'Restantes' };
+    $('resultBody').innerHTML = '<div class="result"><div class="result-ic' + iconCls + '">' + icon(aborted || paused ? 'alert' : finished ? 'check' : 'send') + '</div>' +
+      '<h2>' + title + '</h2><p>' + text + '</p>' +
       '<div class="big-pct">' + pct + '%</div><div class="prog"><i style="width:' + pct + '%"></i></div>' +
-      '<div class="tiles"><div class="tile ok"><b>' + c.sent + '</b><small>Enviadas</small></div><div class="tile bad"><b>' + c.failed + '</b><small>Falharam</small></div><div class="tile"><b>' + Math.max(0, c.total - c.sent - c.failed) + '</b><small>Restantes</small></div></div>' +
+      '<div class="tiles"><div class="tile ok"><b>' + c.sent + '</b><small>Enviadas</small></div><div class="tile' + (failed ? ' bad' : '') + '"><b>' + failed + '</b><small>Falharam</small></div><div class="tile' + third.cls + '"><b>' + third.n + '</b><small>' + third.label + '</small></div></div>' +
       '<div class="result-actions"><a class="bc-btn ghost" href="/campaign-metrics.html" style="text-decoration:none">' + icon('bars') + 'Ver métricas</a><button type="button" class="bc-btn primary" id="btnAgain">Nova transmissão</button></div></div>';
   }
   function pollCampaign(id) {
@@ -2110,11 +2123,12 @@
         const res = await apiFetch(API_BASE + '/whatsapp/campaign/' + id, { headers: FETCH_HEADERS });
         if (!res.ok) throw new Error('perdido');
         const c = await res.json();
+        state.lastProgress = c;
         renderProgress(c);
         if (c.status === 'done') toast('Transmissão concluída: ' + c.sent + ' enviadas, ' + c.failed + ' falharam.', c.failed ? 'error' : 'success');
         else setTimeout(tick, 2000);
       } catch (err) {
-        renderProgress({ sent: 0, failed: 0, total: state.result ? state.result.total : 0, status: 'running' }, true);
+        renderProgress(state.lastProgress || { sent: 0, failed: 0, total: state.result ? state.result.total : 0, status: 'running' }, true);
       }
     };
     setTimeout(tick, 1200);
