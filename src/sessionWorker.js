@@ -30,7 +30,11 @@ setInterval(() => {
   const now = Date.now();
   const lag = now - lastLoopTick - 1000;
   lastLoopTick = now;
-  if (lag > 3000) console.warn(`[worker ${process.env.SESSION_WORKER_INDEX}] event loop travou ${lag} ms`);
+  if (lag > 3000) {
+    const line = `[worker ${process.env.SESSION_WORKER_INDEX}] event loop travou ${lag} ms`;
+    console.warn(line);
+    diagAppend(line);
+  }
 }, 1000).unref();
 
 const INDEX = Number(process.env.SESSION_WORKER_INDEX);
@@ -210,8 +214,92 @@ function memSample() {
     const loopP99 = Math.round(loopDelay.percentile(99) / 1e6);
     const loopMax = Math.round(loopDelay.max / 1e6);
     loopDelay.reset();
-    console.log(`[worker ${INDEX}] memória: heap ${m.heapUsedMb}/${m.heapLimitMb} MB, loop p99 ${loopP99} ms max ${loopMax} ms, rss ${m.rssMb}, external ${m.externalMb}, arrayBuffers ${m.arrayBuffersMb} (${spaces}) | sessões ${sessions} (${online} online), contatos ${contacts}, grupos em cache ${groupsCached}, groupMeta ${groupMeta}, histórico de grupo ${groupHistory}, enviadas em cache ${sentCache}`);
+    const line = `[worker ${INDEX}] memória: heap ${m.heapUsedMb}/${m.heapLimitMb} MB, loop p99 ${loopP99} ms max ${loopMax} ms, rss ${m.rssMb}, external ${m.externalMb}, arrayBuffers ${m.arrayBuffersMb} (${spaces}) | sessões ${sessions} (${online} online), contatos ${contacts}, grupos em cache ${groupsCached}, groupMeta ${groupMeta}, histórico de grupo ${groupHistory}, enviadas em cache ${sentCache}`;
+    console.log(line);
+    diagAppend(line);
   }
+  checkHeapProfile(m.heapUsedMb);
+}
+
+// Diagnóstico do estouro de heap (2026-11-25). Os relatórios de --report-on-fatalerror saem
+// sem pilha e o docker logs gira em ~2 dias, então: (1) a linha de memória (e as travadas do
+// loop) vão também para um arquivo por worker em WORKER_DIAG_DIR; (2) o perfil de alocação por
+// amostragem do V8 roda o tempo todo (1 amostra a cada ~128 KB alocados, custo baixo) e, quando
+// o heap passa de WORKER_DIAG_HEAP_MB e depois a cada +WORKER_DIAG_STEP_MB, grava as funções
+// que seguram mais memória VIVA no heap. É isso que diz o que enche o old_space.
+const fs = require('fs');
+const path = require('path');
+const DIAG_DIR = process.env.WORKER_DIAG_DIR || process.env.WORKER_REPORT_DIR || '/tmp/node-reports';
+const DIAG_HEAP_MB = Number(process.env.WORKER_DIAG_HEAP_MB || 1500); // 0 desliga o perfil
+const DIAG_STEP_MB = Number(process.env.WORKER_DIAG_STEP_MB || 700);
+const DIAG_MIN_GAP_MS = 10 * 60 * 1000;
+try { fs.mkdirSync(DIAG_DIR, { recursive: true }); } catch { /* sem pasta, só não grava */ }
+
+function diagAppend(line) {
+  fs.appendFile(path.join(DIAG_DIR, `mem-w${INDEX}.log`), `${new Date().toISOString()} ${line}\n`, () => {});
+}
+
+let profiler = null;
+if (DIAG_HEAP_MB > 0) {
+  try {
+    const inspector = require('inspector');
+    profiler = new inspector.Session();
+    profiler.connect();
+    profiler.post('HeapProfiler.startSampling', { samplingInterval: 131072 }, (err) => {
+      if (err) {
+        console.warn(`[worker ${INDEX}] perfil de heap indisponível: ${err.message}`);
+        profiler = null;
+      }
+    });
+  } catch (err) {
+    console.warn(`[worker ${INDEX}] perfil de heap indisponível: ${err.message}`);
+    profiler = null;
+  }
+}
+
+let nextDiagMb = DIAG_HEAP_MB;
+let lastDiagAt = 0;
+function checkHeapProfile(heapMb) {
+  if (!profiler) return;
+  // Heap voltou ao normal (GC) e já faz um tempo do último: rearma no primeiro degrau.
+  if (heapMb < DIAG_HEAP_MB * 0.6 && Date.now() - lastDiagAt > DIAG_MIN_GAP_MS) nextDiagMb = DIAG_HEAP_MB;
+  if (heapMb < nextDiagMb) return;
+  nextDiagMb = heapMb + DIAG_STEP_MB;
+  lastDiagAt = Date.now();
+  dumpHeapProfile(heapMb);
+}
+
+function dumpHeapProfile(heapMb) {
+  const t0 = Date.now();
+  profiler.post('HeapProfiler.getSamplingProfile', (err, res) => {
+    if (err || !res?.profile) return console.warn(`[worker ${INDEX}] falha ao ler perfil de heap: ${err?.message}`);
+    const where = (cf) => `${cf.functionName || '(anônima)'} ${String(cf.url).replace(/^file:\/\/\/?app\//, '')}:${cf.lineNumber + 1}`;
+    const byFn = new Map(); // função que alocou -> bytes vivos
+    const byStack = new Map(); // função + 5 chamadores -> bytes vivos
+    let total = 0;
+    const walk = (node, stack) => {
+      const s = stack.concat(where(node.callFrame));
+      if (node.selfSize > 0) {
+        total += node.selfSize;
+        const fn = s[s.length - 1];
+        byFn.set(fn, (byFn.get(fn) || 0) + node.selfSize);
+        const key = s.slice(-6).reverse().join(' <- ');
+        byStack.set(key, (byStack.get(key) || 0) + node.selfSize);
+      }
+      for (const c of node.children || []) walk(c, s.length > 40 ? s.slice(-40) : s);
+    };
+    walk(res.profile.head, []);
+    const top = (map, n) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n)
+      .map(([k, v]) => `${String(mb(v)).padStart(6)} MB  ${k}`).join('\n');
+    const sessions = manager.listActive().length;
+    const text = `# worker ${INDEX} ${new Date().toISOString()} heap ${heapMb} MB, amostrado vivo ${mb(total)} MB, sessões ${sessions}, leitura ${Date.now() - t0} ms\n`
+      + `\n## por função\n${top(byFn, 30)}\n\n## por pilha (função <- chamadores)\n${top(byStack, 25)}\n`;
+    const file = path.join(DIAG_DIR, `heap-w${INDEX}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`);
+    fs.writeFile(file, text, (e) => {
+      if (e) console.warn(`[worker ${INDEX}] falha ao gravar perfil de heap: ${e.message}`);
+      else console.log(`[worker ${INDEX}] perfil de heap gravado (heap ${heapMb} MB): ${file}`);
+    });
+  });
 }
 setInterval(memSample, MEM_SAMPLE_MS).unref();
 setTimeout(memSample, 5000).unref();
