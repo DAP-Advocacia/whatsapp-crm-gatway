@@ -86,6 +86,8 @@ repositório errado não dá erro nenhum, só nunca chega ao ar.
 > com `pings` da API do GitHub, entrega `status: OK, 200`. `git push` agora
 > dispara o deploy sozinho, sem precisar clicar em nada no painel.
 >
+> ⚠️ **Desativado depois no EasyPanel:** `git push` não faz mais deploy. O deploy é manual, fora do horário comercial.
+>
 > Verificar `last-modified` confirma qual build está no ar:
 > ```bash
 > curl -sI https://whatsapp.bmdholding.com.br | grep -i last-modified
@@ -175,6 +177,10 @@ DapZap só para reconectar; o monitor de desconexões precisa das sessões ligad
   medido. Nos primeiros boots, acompanhe a memória dos workers e o load. Se passar de ~24 GB, reduza
   `WORKER_HEAP_MB` (não o intervalo entre logins).
 - **Deslogadas (401)** não voltam sozinhas: precisam de QR Code no DapZap.
+- **Cada deploy recomeça o boot completo** (~75 min com ~900 sessões; quem está na fila fica offline): faça fora do horário comercial.
+  Variáveis de produção desde 2026-11-25: `SESSION_WORKERS=8`, `WORKER_HEAP_MB=3072`, `WORKER_RECYCLE_SOFT_MB=2150`,
+  `WORKER_RECYCLE_HARD_MB=2400`, `WORKER_RECYCLE_CONFIRM=2`, `WORKER_MEM_SAMPLE_MS=15000`.
+  O deploy automático por push está desativado no EasyPanel: o deploy é manual (Gabriel, à noite). Não defina `HISTORY_SKIP_RECENT=off` (ver `docs/arquitetura-workers.md`).
 - **Rollback:** `SESSION_BOOT_MODE=lazy` (sem mudar código) e reiniciar.
 
 ```bash
