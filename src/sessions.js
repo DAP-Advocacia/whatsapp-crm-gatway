@@ -18,7 +18,7 @@ function sanitize(id) {
 }
 
 class SessionManager {
-  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter, loginGate }) {
+  constructor({ baseFolder, onStatus, onMessage, onReaction, onMessageChange, onMessageStatus, onPresence, onContact, onQr, onCall, isCardGroup, staggerMs, pairingGapMs, shardFilter, loginGate, loginPromote }) {
     this.baseFolder = baseFolder;
     this.onStatus = onStatus; // (sessionId, status) => void
     this.onQr = onQr; // (sessionId) => void — só o worker usa (repassa o QR novo ao processo principal)
@@ -33,6 +33,7 @@ class SessionManager {
     // entre TODOS os workers juntos, e não mais por worker (N vezes mais lento).
     // Sem ela (null), vale o espaçamento local de minPairingGapMs.
     this.loginGate = loginGate || null;
+    this.loginPromote = loginPromote || null; // () => void: o pedido em andamento passa à frente dos outros workers
     this.onMessage = onMessage; // (sessionId, phone, message, pushName, isHistory, senderPhone, senderName) => void
     this.onReaction = onReaction; // (sessionId, phone, targetId, emoji, direction) => void
     this.onMessageChange = onMessageChange; // (sessionId, { phone, messageId, kind: 'edit'|'revoke', text? }) => void
@@ -135,7 +136,9 @@ class SessionManager {
     }
   }
 
-  _enqueuePairing(gateway) {
+  // priority: reinício do pareamento logo após escanear o QR (ver whatsapp.js, 515) — o
+  // celular está esperando, então vai pra frente da fila (e da trava global de logins).
+  _enqueuePairing(gateway, { priority = false } = {}) {
     if (this.stopping) return;
     if (this._isUnpaired(gateway)) {
       gateway.status = 'connecting';
@@ -143,8 +146,17 @@ class SessionManager {
       return;
     }
     gateway.status = 'queued';
-    this.pairingQueue.push(gateway);
+    if (priority) {
+      const i = this.pairingQueue.indexOf(gateway);
+      if (i >= 0) this.pairingQueue.splice(i, 1);
+      this.pairingQueue.unshift(gateway);
+    } else {
+      this.pairingQueue.push(gateway);
+    }
     this._runPairingQueue();
+    // A vaga pedida ao processo principal é usada por quem estiver na frente da fila
+    // local; aqui só se pede que esse pedido passe à frente dos outros workers.
+    if (priority && this.pairingTimer === true) this.loginPromote?.();
   }
 
   /**
@@ -189,7 +201,7 @@ class SessionManager {
       authFolder: path.join(this.baseFolder, id),
       sessionId: id,
       isCardGroup: this.isCardGroup,
-      scheduleStart: (gw) => this._enqueuePairing(gw), // reconexão automática passa pela fila/trava de logins
+      scheduleStart: (gw, opts) => this._enqueuePairing(gw, opts), // reconexão automática passa pela fila/trava de logins
     });
     gateway.on('status', (status) => this.onStatus(id, status));
     gateway.on('message', ({ phone, message, pushName, isHistory, senderPhone, senderName }) =>

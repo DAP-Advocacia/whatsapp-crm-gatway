@@ -127,10 +127,17 @@ function requestLoginSlot() {
   });
 }
 
+// Reinício do pareamento logo após escanear o QR (ver sessions.js, priority): o pedido de
+// vaga deste worker passa à frente dos pedidos dos outros.
+function promoteLoginSlot() {
+  if (gateWaiting.size) send({ t: 'loginPromote' });
+}
+
 const manager = new SessionManager({
   baseFolder: process.env.AUTH_FOLDER || './auth_session',
   isCardGroup: store.isCardGroupId,
   loginGate: LOGIN_GATE ? requestLoginSlot : null,
+  loginPromote: LOGIN_GATE ? promoteLoginSlot : null,
   // Com a trava o espaçamento já vem do principal; o boot só precisa enfileirar.
   staggerMs: LOGIN_GATE ? Number(process.env.SESSION_STAGGER_GATED_MS || 500) : Number(process.env.SESSION_STAGGER_MS || 15000) * COUNT,
   pairingGapMs: LOGIN_GATE ? 0 : Number(process.env.PAIRING_MIN_GAP_MS ?? 5000) * COUNT,

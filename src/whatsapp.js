@@ -558,6 +558,19 @@ class WhatsAppGateway extends EventEmitter {
           // pareamento (515), então usá-lo aqui quebraria pareamento novo.
           this.idleUnpaired = true;
           console.log(`[whatsapp:${sessionLabel}] QR expirou sem pareamento — aguardando alguém pedir um novo`);
+        } else if (statusCode === DisconnectReason.restartRequired && this.lastQrDataUrl) {
+          // QR acabou de ser escaneado (2026-11-25): o WhatsApp sempre pede este reinício (515)
+          // pra concluir o pareamento, e o celular fica esperando na tela "conectando". Antes isto
+          // caía na reconexão comum e ia pro FIM da fila de logins (~75 min no boot): o celular
+          // desistia ("Não foi possível conectar") e a tela mostrava o QR velho em "Na fila".
+          // Agora vai pra FRENTE da fila, sem backoff; o espaçamento entre logins continua valendo.
+          this.lastQrDataUrl = null;
+          console.log(`[whatsapp:${sessionLabel}] QR escaneado — reinício do pareamento (515) com prioridade`);
+          if (this.scheduleStart) {
+            if (!this.destroyed && this.sock === sock) this.scheduleStart(this, { priority: true });
+          } else {
+            this.start().catch((err) => console.error(`[whatsapp:${sessionLabel}] falha ao concluir pareamento:`, err.message));
+          }
         } else if (this.consecutiveFailures + 1 >= reconnectCap) {
           // Teto de tentativas totais (não só de intervalo entre elas) —
           // achado 2026-09-30: sessões já pareadas um dia mas mortas/

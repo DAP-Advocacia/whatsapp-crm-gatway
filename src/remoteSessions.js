@@ -289,6 +289,12 @@ class RemoteSessionManager {
         this._runLoginGate();
         break;
       }
+      case 'loginPromote': {
+        // QR acabou de ser escaneado neste worker: o pedido dele vai pra frente (o celular está esperando).
+        const mine = this.loginWaiters.filter((x) => x.w === w);
+        this.loginWaiters = mine.concat(this.loginWaiters.filter((x) => x.w !== w));
+        break;
+      }
       case 'mem': {
         w.mem = { ...msg.m, at: Date.now() };
         this._checkRecycle(w);
