@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { LRUCache } = require('lru-cache');
 const {
   default: makeWASocket,
   makeCacheableSignalKeyStore,
@@ -26,6 +27,8 @@ const { convertToOggOpus } = require('./audioConvert');
 // bastante pra não deixar uma sessão morta (número trocado de aparelho,
 // instância de teste abandonada) reconectando pra sempre.
 const MAX_CONSECUTIVE_FAILURES = Number(process.env.MAX_RECONNECT_ATTEMPTS || 20);
+// Itens do cache de vínculos LID↔telefone por sessão (pn: e lid: contam separado). Fora dele vai ao disco.
+const LID_CACHE_MAX = Number(process.env.LID_CACHE_MAX || 4000);
 
 // Versão do WhatsApp Web usada no socket, em cache (2026-11-03). Antes, TODO
 // start() — inclusive cada tentativa de reconexão de sessão caída — fazia uma
@@ -454,6 +457,49 @@ class WhatsAppGateway extends EventEmitter {
       },
     });
     this.sock = sock;
+
+    // Vínculos LID↔telefone em lote (2026-11-26). O Baileys grava cada vínculo que chega na
+    // sincronização de contatos com uma gravação própria (lid-mapping.update -> storeLIDPNMappings),
+    // todas esperando a mesma trava: numa conta grande são milhares de promessas pendentes e o heap
+    // do worker ia de 1,7 GB a 3,1 GB em menos de 1 min (4 workers mortos em 26/11, ver
+    // /tmp/node-reports/heap-w*.txt). Aqui junta tudo por 1 s e grava em lotes de 200, um de cada vez.
+    // O cache de vínculos do Baileys também criava um timer por item (ttlAutopurge, 3 dias): vira um
+    // LRU de tamanho fixo, sem timers.
+    const lidMapping = sock.signalRepository?.lidMapping;
+    if (lidMapping) {
+      lidMapping.mappingCache = new LRUCache({ max: LID_CACHE_MAX });
+      sock.ev.removeAllListeners('lid-mapping.update');
+      const pendingLid = new Map(); // pn -> lid (repetido no mesmo segundo grava uma vez só)
+      let lidTimer = null;
+      let lidWriting = false;
+      const flushLid = async () => {
+        lidTimer = null;
+        if (lidWriting || this.sock !== sock) return;
+        lidWriting = true;
+        try {
+          while (pendingLid.size && this.sock === sock) {
+            const batch = [];
+            for (const [pn, lid] of pendingLid) {
+              batch.push({ lid, pn });
+              pendingLid.delete(pn);
+              if (batch.length >= 200) break;
+            }
+            await lidMapping.storeLIDPNMappings(batch).catch((err) =>
+              console.warn(`[whatsapp:${path.basename(this.authFolder)}] falha ao gravar ${batch.length} vínculos LID:`, err.message)
+            );
+          }
+        } finally {
+          lidWriting = false;
+          if (this.sock !== sock) pendingLid.clear();
+          else if (pendingLid.size && !lidTimer) lidTimer = setTimeout(flushLid, 1000);
+        }
+      };
+      sock.ev.on('lid-mapping.update', ({ lid, pn } = {}) => {
+        if (!lid || !pn) return;
+        pendingLid.set(pn, lid);
+        if (!lidTimer && !lidWriting) lidTimer = setTimeout(flushLid, 1000);
+      });
+    }
 
     // Guarda o proto de tudo que esta sessão envia (texto, mídia, reação...)
     // pra responder ao getMessage acima.

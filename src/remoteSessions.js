@@ -161,8 +161,10 @@ class RemoteSessionManager {
       return;
     }
     w.overCount++;
-    if (w.overCount < RECYCLE_CONFIRM_SAMPLES) return; // uma amostra alta sozinha pode ser lixo ainda não coletado
     const hard = used >= this.recycleHardMb;
+    // Acima do limite duro recicla já na 1ª amostra (2026-11-26): o heap chegou a subir de 1,7 GB
+    // a 3,1 GB em menos de 1 min e o worker morria antes da 2ª amostra (pegou só 1 de 5 casos).
+    if (!hard && w.overCount < RECYCLE_CONFIRM_SAMPLES) return; // uma amostra alta sozinha pode ser lixo ainda não coletado
     if (!hard) {
       const hour = brasiliaHour();
       if (hour < RECYCLE_WINDOW_START || hour >= RECYCLE_WINDOW_END) return; // espera a madrugada
