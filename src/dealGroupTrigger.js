@@ -5,6 +5,7 @@ const { getEmployeeInfo, getResponsibleChain, normalizeBrazilPhone } = require('
 const { logStatusToTimeline } = require('./bitrix');
 const alertDispatcher = require('./alertDispatcher');
 const { ownerIdFor } = require('./auth');
+const { getOwnNumbersBySession } = require('./ownNumbers');
 
 /**
  * Grupo de WhatsApp automático ao entrar numa etapa específica do Kanban
@@ -118,15 +119,21 @@ async function handleDealStageTrigger(dealId) {
 
   const assignedById = deal.ASSIGNED_BY_ID || null;
   const assignedOwnerId = assignedById ? ownerIdFor(assignedById) : null;
-  const sessionId = assignedOwnerId ? await resolveAssignedInstance(assignedOwnerId) : null;
+  if (!assignedOwnerId) throw new Error('negócio sem Responsável (ASSIGNED_BY_ID) — não é possível saber quem é o vendedor do grupo');
 
-  if (!sessionId) throw new Error('negócio sem Responsável (ASSIGNED_BY_ID) — não é possível saber qual instância usar para criar o grupo');
+  // Instância única que cria TODOS os grupos (DEAL_GROUP_CREATOR_SESSION_ID,
+  // pedido do usuário: um número fixo e estável cria o grupo, em vez de
+  // depender do WhatsApp do vendedor estar online). Sem a variável, mantém o
+  // comportamento antigo (instância do próprio Responsável).
+  const creatorSessionId = process.env.DEAL_GROUP_CREATOR_SESSION_ID || null;
+  const sessionId = creatorSessionId || (await resolveAssignedInstance(assignedOwnerId));
 
   // Idempotência: mesmo padrão de createCardGroupForNewLead — se já existe
   // grupo `source='card'` pra este negócio (em QUALQUER instância; o
   // responsável pode ter mudado entre a 1ª e a 2ª chamada do robô), não
   // cria de novo.
-  const allSessionIds = (await instancesStore.listByOwner(assignedOwnerId)).map((i) => i.id);
+  const assignedInstances = await instancesStore.listByOwner(assignedOwnerId);
+  const allSessionIds = assignedInstances.map((i) => i.id);
   if (!allSessionIds.includes(sessionId)) allSessionIds.push(sessionId);
   const existingGroup = await store.getCardGroupForDeal(allSessionIds, String(dealId));
   if (existingGroup) return { ok: true, alreadyExisted: true, group: existingGroup };
@@ -147,16 +154,32 @@ async function handleDealStageTrigger(dealId) {
   const officeOwner = resolveFixedParticipant('office_owner', 'Dr. Bruno', 'OFFICE_OWNER_PHONE');
   const verification = resolveFixedParticipant('verification', 'Verificação', 'VERIFICATION_SECTOR_PHONE');
 
+  const sessions = sessionsRef.current;
+  if (!sessions) throw new Error('dealGroupTrigger não configurado (chame configure({sessions, broadcast}) no boot)');
+
   const participants = [assigned, manager, director, client, officeOwner, verification];
-  const resolvedPhones = [...new Set(participants.filter((p) => p.resolved).map((p) => p.phone))];
+
+  // Com instância única criadora: também entram os números do vendedor
+  // conectados agora (todas as instâncias online dele). O número da própria
+  // instância criadora não entra (já é membro/admin por ter criado).
+  const creatorPhone = creatorSessionId ? getOwnNumbersBySession()[creatorSessionId] : null;
+  if (creatorSessionId) {
+    const ownNumbers = getOwnNumbersBySession();
+    for (const inst of assignedInstances) {
+      if (inst.id === creatorSessionId) continue;
+      const phone = ownNumbers[inst.id];
+      if (phone && sessions.getActiveGateway(inst.id)?.getStatus() === 'online') {
+        participants.push({ role: 'assigned_phone', name: null, phone, resolved: true });
+      }
+    }
+  }
+
+  const resolvedPhones = [...new Set(participants.filter((p) => p.resolved).map((p) => p.phone))].filter((ph) => ph !== creatorPhone);
   const missing = participants.filter((p) => !p.resolved);
 
   if (!resolvedPhones.length) {
     throw new Error('nenhum participante teve telefone resolvido — grupo não foi criado');
   }
-
-  const sessions = sessionsRef.current;
-  if (!sessions) throw new Error('dealGroupTrigger não configurado (chame configure({sessions, broadcast}) no boot)');
 
   const gateway = sessions.get(sessionId);
   if (gateway.getStatus() !== 'online') {
@@ -235,6 +258,7 @@ async function handleDealStageTrigger(dealId) {
 function roleLabel(role) {
   return {
     assigned: 'Responsável',
+    assigned_phone: 'WhatsApp do Responsável',
     manager: 'Gerente',
     director: 'Diretor',
     client: 'Cliente',
